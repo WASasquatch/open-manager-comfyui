@@ -11,17 +11,30 @@ an install would do to your environment before it runs. It warns; it never block
 
 ---
 
-## What you get
+## Why Open Manager?
+
+ComfyUI Manager is a great package manager for ComfyUI, but it has some limitations:
+
+- It isn't transparent about the status of packages (e.g., flagged, withheld).
+- It quietly substitutes an approved version when the one you asked for is flagged, without telling you it did.
+- It installs without showing you the dependency changes an install would make to your environment.
+- It doesn't show each pack's licence, so there is no at-a-glance read on whether one fits your project; e.g., a pack is AGPL and your project can't accept its source-disclosure terms.
+- It can install from a Git URL, but there is nowhere to keep those repositories: no list, no update path, and no inspection before it runs. A friend's repo, or a pack not yet on the registry, is a fresh paste every time.
+
+Open Manager addresses these limitations by:
 
 | | |
 | --- | --- |
 | Full registry | Every version with its status, including the flagged and withheld ones |
 | Warn, never block | Install is always available; risk changes the wording of the confirmation, not whether the button exists |
 | Before you install | The findings against a version and the dependency changes an install would make, shown first |
-| Missing nodes | The packs for the node types a workflow is missing, installable in place |
+| What's in the box | A GitHub install is read before it lands: compiled binaries, pickle-format data, bundled wheels and bytecode shipped without its source are named, with what each one means and the note that false positives are possible |
+| Missing nodes | The packs for the node types a workflow is missing, with an attempt to find the best match on GitHub |
 | From anywhere | The registry, or straight from a GitHub repository after inspection |
 | Your own list | A GitHub tab holding repositories you add, kept in `user/` so it outlives an uninstall |
-| Licences | Read from each pack and shown, most permissive first |
+| Licences | Read from each pack and shown, sortable by type, most permissive first |
+| Fast sync | The whole 5,500 Comfy Registry pack catalogue in about 3 seconds rather than 31+ seconds, with the concurrency yours to set |
+| Any ref | Read a pack's page at another branch or a recent commit, README and gallery together, and install that ref straight from GitHub to test a change |
 
 The only version that cannot be installed is one the registry has banned. Set
 `OPEN_MANAGER_ALLOW_BANNED=1` to lift that too.
@@ -66,14 +79,21 @@ and only these:
 | Host | When |
 |---|---|
 | `api.comfy.org` | browsing and installing |
-| `cdn.comfy.org` | downloading a version to install |
+| `cdn.comfy.org` | downloading a registry version to install |
+| `codeload.github.com` | downloading a GitHub repository to install |
 | `raw.githubusercontent.com` | reading a pack's licence; README images |
-| `api.github.com` | repository metadata, when README enrichment is on (off by default) |
+| `api.github.com` | naming a licence, when the GitHub licence lookup is on (off by default); a pack page's README, stats and gallery, when README enrichment is on (on by default); listing branches and commits, when you open the ref picker; starring a repository, when you press Star |
+| wherever a pack points | a gallery entry given as an absolute URL, when galleries are on. Turn galleries off to keep to the hosts above |
 
-Each request sends the URL only: no ComfyUI version, form factor, machine or usage data.
+**Settings.** Everything is off or at its default until you change it, under
+`Settings -> Open Manager`. Set `open_manager.registry.BASE_URL` to route the registry
+through a mirror or a private index.
 
-**Settings.** README enrichment is off by default. Set `open_manager.registry.BASE_URL` to
-route the registry through a mirror or a private index.
+Reading a pack page costs up to three GitHub API calls. Anonymously that is 60 an hour,
+so roughly twenty new pack pages; setting a token raises it to 5,000. Without one, pages
+still show their README, gallery and versions, because those are read from the raw content
+host, which is not rate limited in the same way.
+
 
 **Your GitHub list.** The GitHub tab holds repositories you add by URL or as `owner/repo`.
 Each one installs, updates and uninstalls like a registry pack, and the list is written to
@@ -99,10 +119,16 @@ funding = "https://ko-fi.com/you"               # funding URL
 release_note = "1.4.0 needs a restart."         # your note on the current release, 600 chars
 example_workflows = ["examples/interp.json"]    # list example workflows to load
 themes = ["themes/my-theme.json"]               # list themes to offer
+gallery = [                                     # images to show off the pack, up to 24, `png`,
+                                                # `jpg`, `jpeg`, `gif`, `webp` and `avif`
+  "docs/before.png",                            #   a path in your repository
+  "https://cdn.example.com/after.webp",         #   or an image hosted anywhere
+]
 ```
 
-These are read on the pack page when README enrichment is on. `release_note` is shown above
-the version list, so it is read before a version is chosen; the rest appear below the README.
+**Gallery.** are read on the pack page when README enrichment is on, which it is unless you turn
+it off. `release_note` is shown above the version list, so it is read before a version is chosen;
+the rest appear below the README.
 
 For an installed pack these are read from the copy on disk, so what you shipped is what its
 page shows, with the repository as the fallback.
