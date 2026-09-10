@@ -53,18 +53,29 @@ _COMMUNITY = ("community", "revenue", "commercial license required")
 
 #: Signature phrases that name a licence from its file text, each an all-must-match set.
 #: Ordered most specific first; the first match wins.
+#: Characters of the normalised text treated as the title block. A licence names itself at
+#: the top; what it says about other licences comes later.
+_TITLE_WINDOW = 400
+
+#: ``(name, needles, title_only)``. The GNU licences quote each other by name in their own
+#: bodies -- GPL-3 section 13 permits combining with the Affero licence, LGPL-3 incorporates
+#: GPL-3, and GPL-2 points readers at the Lesser licence -- so a plain substring search over
+#: the whole text reports the licence a file mentions rather than the one it is. Those are
+#: matched against the title alone. The rest have no such habit and are matched anywhere.
 _TEXT_SIGNS = (
-    ("MPL-2.0", ("mozilla public license",)),
-    ("Apache-2.0", ("apache license",)),
-    ("BSL-1.0", ("boost software license",)),
-    ("AGPL-3.0", ("gnu affero general public license",)),
-    ("LGPL-3.0", ("gnu lesser general public license",)),
-    ("GPL-3.0", ("gnu general public license", "version 3")),
-    ("GPL-2.0", ("gnu general public license", "version 2")),
-    ("GPL", ("gnu general public license",)),
-    ("Unlicense", ("this is free and unencumbered software",)),
-    ("ISC", ("permission to use, copy, modify, and/or distribute",)),
-    ("MIT", ("permission is hereby granted, free of charge",)),
+    ("AGPL-3.0", ("gnu affero general public license",), True),
+    ("LGPL-3.0", ("gnu lesser general public license", "version 3"), True),
+    ("LGPL-2.1", ("gnu lesser general public license", "version 2.1"), True),
+    ("LGPL", ("gnu lesser general public license",), True),
+    ("GPL-3.0", ("gnu general public license", "version 3"), True),
+    ("GPL-2.0", ("gnu general public license", "version 2"), True),
+    ("GPL", ("gnu general public license",), True),
+    ("MPL-2.0", ("mozilla public license",), False),
+    ("Apache-2.0", ("apache license",), False),
+    ("BSL-1.0", ("boost software license",), False),
+    ("Unlicense", ("this is free and unencumbered software",), False),
+    ("ISC", ("permission to use, copy, modify, and/or distribute",), False),
+    ("MIT", ("permission is hereby granted, free of charge",), False),
 )
 
 
@@ -92,8 +103,10 @@ def detect_text(text: str) -> str:
         if "attribution" in body:
             return "CC-BY"
 
-    for name, needles in _TEXT_SIGNS:
-        if all(needle in body for needle in needles):
+    title = body[:_TITLE_WINDOW]
+    for name, needles, title_only in _TEXT_SIGNS:
+        where = title if title_only else body
+        if all(needle in where for needle in needles):
             return name
 
     if "redistribution and use in source and binary forms" in body:
