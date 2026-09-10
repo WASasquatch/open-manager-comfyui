@@ -4,10 +4,7 @@ import { registerThemes, watchThemeExtras } from "./themes.js";
 
 const API = "/open_manager/v1/api";
 
-// Sidebar tab icons served beside this module. The light artwork reads on a dark theme, the
-// dark artwork on a light theme.
-const ICON_LIGHT = new URL("./open-manager-light.svg", import.meta.url).href;
-const ICON_DARK = new URL("./open-manager-dark.svg", import.meta.url).href;
+const ICON_TAB = new URL("./discovery.svg", import.meta.url).href;
 
 const STATUS_COLOUR = {
   active: "#3fb950",
@@ -36,6 +33,9 @@ style.textContent = `
   --om-text: var(--fg-color, #e6edf3);
   --om-text-2: var(--input-text, #adbac7);
   --om-muted: var(--descrip-text, #8b949e);
+  /* Scrollbar thumb. Follows the theme's muted text, which is chosen to read against the
+     panel background, so it stays visible in light palettes as well as dark ones. */
+  --om-scroll: var(--descrip-text, #8b949e);
 }
 .om-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);
@@ -148,6 +148,23 @@ style.textContent = `
   border: 1px solid var(--om-border); border-radius: 8px; margin-bottom: 8px; background: var(--om-surface);
 }
 .om-versions { border: 1px solid var(--om-border); border-radius: 8px; max-height: 42vh; overflow-y: auto; background: var(--om-bg); }
+/* A section that shows only its header bar when closed. */
+.om-panel { border: 1px solid var(--om-border); border-radius: 8px; background: var(--om-bg);
+  overflow: hidden; margin: 12px 0; }
+.om-panel-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--om-surface); cursor: pointer; user-select: none; list-style: none;
+  border-bottom: 1px solid transparent; }
+.om-panel-head::-webkit-details-marker { display: none; }
+.om-panel-head:hover { background: var(--om-hover); }
+.om-panel[open] .om-panel-head { border-bottom-color: var(--om-border); }
+.om-panel-title { font-weight: 600; flex: none; }
+.om-panel-note { flex: 1; min-width: 0; color: var(--om-muted); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-panel-chevron { flex: none; color: var(--om-muted); transition: transform .15s ease; }
+.om-panel[open] .om-panel-chevron { transform: rotate(180deg); }
+/* The panel already draws the border, so the list inside drops its own. */
+.om-panel .om-versions { border: none; border-radius: 0; background: transparent; }
+.om-versions .om-row { padding-right: 10px; }
 .om-versions .om-row { border: none; border-bottom: 1px solid var(--om-surface); border-radius: 0; margin: 0; background: transparent; }
 .om-versions .om-row:last-child { border-bottom: none; }
 .om-ver { font-weight: 600; font-family: ui-monospace, monospace; }
@@ -602,6 +619,26 @@ function openRowMenu(anchor, { packId, entry, control, rowsRoot, items }) {
 
 // --- install queue, driven by one progress toast ------------------------------------
 
+// The registry list builds and discards rows as it scrolls, so what a pack is doing belongs
+// to the pack rather than to the control that started it. Without this, scrolling past an
+// installing row and back would offer Install again while the install was still running.
+const installState = new Map();
+
+function rememberInstall(packId, state) {
+  if (!packId) return;
+  if (state) installState.set(packId, state);
+  else installState.delete(packId);
+}
+
+// Put a freshly built control into whatever state its pack is actually in.
+function restoreInstall(packId, control) {
+  const state = installState.get(packId);
+  if (state === "queued") control.setQueued();
+  else if (state === "installing") control.setInstalling();
+  else if (state === "installed") control.setInstalled();
+  else control.setInstall();
+}
+
 const installQueue = [];
 let queueTotal = 0;
 let queueRunning = false;
@@ -610,6 +647,7 @@ function enqueueInstall(job) {
   installQueue.push(job);
   queueTotal += 1;
   job.control?.setQueued();
+  rememberInstall(job.packId, "queued");
   if (!queueRunning) runInstallQueue();
 }
 
@@ -623,6 +661,7 @@ async function runInstallQueue() {
     done += 1;
     progress.set(`${done} of ${queueTotal}: installing ${job.name} ${job.entry.version}...`);
     job.control?.setInstalling();
+    rememberInstall(job.packId, "installing");
     let result;
     try {
       const answer = await api.fetchApi(`${API}/install`, {
@@ -646,11 +685,13 @@ async function runInstallQueue() {
         });
       }
       job.control?.setInstalled();
+      rememberInstall(job.packId, "installed");
       if (result.pip_ran && !result.pip_ok) {
         issues.push(`${job.name}: requirements did not install cleanly`);
       }
     } else {
       job.control?.setInstall();
+      rememberInstall(job.packId, null);
       issues.push(`${job.name} ${job.entry.version}: ${result.reason}`);
     }
   }
@@ -693,7 +734,8 @@ function confirmRepoInstall(pack) {
     dialog.style.maxHeight = "90vh";
 
     const head = el("div", "om-head");
-    head.appendChild(el("div", "om-title", `Install ${pack.title} from GitHub`));
+    head.appendChild(el("div", "om-title",
+      pack.ref ? `Install ${pack.title} at ${pack.ref} from GitHub` : `Install ${pack.title} from GitHub`));
     dialog.appendChild(head);
 
     const body = el("div", "om-body");
@@ -702,6 +744,10 @@ function confirmRepoInstall(pack) {
     warn.appendChild(el("div", null,
       "This source is not registry-scanned. A custom node runs with ComfyUI's privileges. "
       + "Review what it contains and changes below before installing."));
+    if (pack.overwrite) {
+      warn.appendChild(el("div", null,
+        "The copy already in custom_nodes is removed first and replaced by this one."));
+    }
     body.appendChild(warn);
     body.appendChild(el("div", "om-side-meta", pack.repo));
     body.appendChild(el("h4", null, "What this contains and would change"));
@@ -730,7 +776,7 @@ function confirmRepoInstall(pack) {
         const answer = await api.fetchApi(`${API}/inspect-repo`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repo: pack.repo }),
+          body: JSON.stringify({ repo: pack.repo, ref: pack.ref || "" }),
         });
         data = await answer.json();
       } catch (error) {
@@ -764,7 +810,9 @@ async function installFromRepo(pack, control) {
     const answer = await api.fetchApi(`${API}/install-repo`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo: pack.repo }),
+      body: JSON.stringify({
+        repo: pack.repo, ref: pack.ref || "", overwrite: !!pack.overwrite,
+      }),
     });
     result = await answer.json();
   } catch (error) {
@@ -782,7 +830,7 @@ async function installFromRepo(pack, control) {
   }
 }
 
-async function uninstall({ packId, entry, control, rowsRoot }) {
+async function uninstall({ packId, entry, control, rowsRoot, registryId }) {
   const name = entry.name || packId;
   const ok = await confirmAction(
     `Uninstall ${name}`,
@@ -804,6 +852,12 @@ async function uninstall({ packId, entry, control, rowsRoot }) {
   if (result.ok) {
     if (rowsRoot) rowsRoot._installedVersion = "";
     control?.setInstall();
+    // The registry list remembers what a pack is doing so its rows survive being rebuilt
+    // as it scrolls. That memory is keyed by registry id, which is not always the
+    // directory the pack was installed under, so both are cleared here; leaving either
+    // behind would show Installed for something that is no longer there.
+    rememberInstall(packId, null);
+    rememberInstall(registryId, null);
     progress.settle(`Uninstalled ${name}.`, "ok", 6000);
     remindRestart();
   } else {
@@ -873,7 +927,8 @@ async function openPack(packId) {
 
   let data;
   try {
-    const answer = await api.fetchApi(`${API}/pack/${encodeURIComponent(packId)}`);
+    const answer = await api.fetchApi(
+      `${API}/pack/${encodeURIComponent(packId)}?${new URLSearchParams(licenseOptions())}`);
     data = await answer.json();
     if (!answer.ok) throw new Error(data.detail || `HTTP ${answer.status}`);
   } catch (error) {
@@ -1028,7 +1083,15 @@ async function openPack(packId) {
     }
     versionsBox.appendChild(row);
   }
-  body.appendChild(versionsBox);
+  // What the header says when the section is closed: enough to know whether to open it.
+  const versionNote = [`${versions.length} published`];
+  if (pack.installed_version) versionNote.push(`installed ${pack.installed_version}`);
+  else if (resolution.newest) versionNote.push(`newest ${resolution.newest}`);
+  const versionsPanel = panel("Versions", versionNote.join(" · "), {
+    remember: "om-versions-open",
+  });
+  versionsPanel.body.appendChild(versionsBox);
+  body.appendChild(versionsPanel);
 
   // README, below the version list, only when enrichment is enabled.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
@@ -1073,7 +1136,7 @@ function openRepoPack(pack) {
     "Matched from GitHub. It installs straight from the repository after inspection."));
   info.appendChild(note);
 
-  const actions = el("div", "om-actions");
+  const actions = el("div", "om-actions om-hero-actions");
   const repoBtn = el("button", "om-btn", "View on GitHub");
   repoBtn.onclick = () => window.open(pack.repo, "_blank");
   actions.appendChild(repoBtn);
@@ -1106,7 +1169,8 @@ function openRepoPack(pack) {
     const readme = el("div", "om-readme");
     readme.appendChild(el("div", "om-readme-status", "Reading the repository..."));
     body.appendChild(readme);
-    renderMetaInto(readme, api.fetchApi(`${API}/repo-meta?repo=${encodeURIComponent(pack.repo)}`));
+    renderMetaInto(readme, api.fetchApi(
+      `${API}/repo-meta?repo=${encodeURIComponent(pack.repo)}&token=${encodeURIComponent(githubToken())}`));
   } else {
     body.appendChild(el("div", "om-readme-status",
       "Enable README enrichment in Open Manager settings to read the repository here."));
@@ -1123,7 +1187,8 @@ function repoName(url) {
 // Fetches and renders the pack README below the version list. The scrape is cached
 // server-side by version signature.
 async function appendReadme(packId, slot) {
-  return renderMetaInto(slot, api.fetchApi(`${API}/readme/${encodeURIComponent(packId)}`));
+  return renderMetaInto(slot, api.fetchApi(
+    `${API}/readme/${encodeURIComponent(packId)}?token=${encodeURIComponent(githubToken())}`));
 }
 
 // Renders repository facts and the README into a slot from a metadata fetch. Shared by the
@@ -1140,15 +1205,31 @@ async function renderMetaInto(slot, fetchPromise) {
   }
   slot.replaceChildren();
 
-  const facts = el("div", "om-chips");
+  // Issue counts, the last push and the rest are facts about the repository, so they join
+  // the header's chips rather than sitting under the version list. The metadata arrives
+  // after the header is drawn, which is why they are appended to it here.
+  const heroActions = slot.closest(".om-dialog")?.querySelector(".om-hero-actions");
+  let facts = heroActions?.querySelector(".om-chips");
+  if (heroActions && !facts) {
+    facts = el("div", "om-chips");
+    heroActions.appendChild(facts);
+  }
+  const inHeader = Boolean(facts);
+  if (!facts) facts = el("div", "om-chips");
+  // The registry already names some of these from its own record; a second chip saying the
+  // same thing under a different source would only be noise.
+  const already = new Set([...facts.querySelectorAll(".om-chip b")]
+    .map((b) => b.textContent.trim().toLowerCase()));
   const fact = (label, value) => {
-    if (!value) return;
+    if (!value || already.has(label)) return;
+    already.add(label);
     const node = el("span", "om-chip");
     node.appendChild(el("b", null, label));
     node.appendChild(document.createTextNode(" " + value));
     facts.appendChild(node);
   };
-  if (meta.license) {
+  if (meta.license && !already.has("license")) {
+    already.add("license");
     const node = el("span", "om-chip");
     node.appendChild(el("b", null, "license"));
     node.appendChild(document.createTextNode(" " + meta.license));
@@ -1165,30 +1246,172 @@ async function renderMetaInto(slot, fetchPromise) {
   fact("open issues", String(meta.open_issues));
   if (meta.open_prs) fact("open PRs", String(meta.open_prs));
   fact("last push", (meta.pushed_at || "").slice(0, 10));
-  if (facts.children.length) slot.appendChild(facts);
+  if (!inHeader && facts.children.length) slot.appendChild(facts);
   if (meta.topics?.length) {
     const tags = el("div", "om-tags");
     for (const t of meta.topics) tags.appendChild(el("span", "om-tag", t));
-    slot.appendChild(tags);
+    (heroActions || slot).appendChild(tags);
   }
 
-  appendDeveloperBlock(slot, meta);
+  // Everything the ref decides lives in one container, so switching branch or commit
+  // replaces it rather than redrawing the page.
+  const body = el("div", "om-at-ref");
+  // The picker belongs with the header's other controls rather than above the README, so it
+  // is placed there where a header exists and left in the body where one does not.
+  const picker = buildRefPicker(meta, body);
+  if (picker.firstChild) (heroActions || slot).appendChild(picker);
+  slot.appendChild(body);
+  await paintPackBody(body, meta, meta);
+}
 
-  if (!meta.readme) {
-    slot.appendChild(el("div", "om-readme-status", "No README in the repository."));
+// The declared table and the README as they stand at one ref. Called first with the pack's
+// own metadata, and again with whatever the picker reads.
+async function paintPackBody(host, meta, source) {
+  host.replaceChildren();
+  appendDeveloperBlock(host, { ...meta, developer: source.developer || {} });
+  if (!source.readme) {
+    host.appendChild(el("div", "om-readme-status",
+      source.ref ? `No README at ${source.ref}.` : "No README in the repository."));
     return;
   }
   const view = el("div", "om-readme-body");
   try {
-    const html = await app.extensionManager.renderMarkdownToHtml(meta.readme);
+    const html = await app.extensionManager.renderMarkdownToHtml(source.readme);
     view.innerHTML = typeof html === "string" ? html : "";
-    absolutiseLinks(view, meta.repository, meta.default_branch);
+    absolutiseLinks(view, meta.repository, source.ref || meta.default_branch);
   } catch {
     const pre = el("pre");
-    pre.textContent = meta.readme;
+    pre.textContent = source.readme;
     view.appendChild(pre);
   }
-  slot.appendChild(view);
+  host.appendChild(view);
+}
+
+// A branch or commit offered for install at the top of the version list. The registry has
+// no build for it, so it is fetched from GitHub, inspected like any other repository install
+// and marked as replacing whatever is already in place.
+function buildRefInstallRow(meta, ref, caption) {
+  const isSha = /^[0-9a-f]{7,40}$/i.test(ref);
+  const repoName = (meta.repository || "").replace(/\/+$/, "").split("/").pop() || ref;
+  const row = el("div", "om-row om-ref-row");
+  row.appendChild(el("div", "om-ver", isSha ? ref.slice(0, 7) : ref));
+  const kind = el("span", "om-badge", isSha ? "commit" : "branch");
+  kind.style.background = "#8957e5";
+  row.appendChild(kind);
+  row.appendChild(el("div", "om-why", isSha ? "from GitHub" : "branch head"));
+  row.appendChild(el("div", "om-why", caption || "not registry-scanned"));
+  const control = makeInstallControl({
+    packId: repoName,
+    entry: { name: repoName, version: ref },
+    withMenu: false,
+    onInstall: () => installFromRepo(
+      { repo: meta.repository, title: repoName, ref, overwrite: true }, control),
+  });
+  control.setInstall();
+  row.appendChild(control.el);
+  return row;
+}
+
+// Which branch or commit the page is read at. The list costs two GitHub API calls, so it is
+// fetched when the picker is first opened rather than on every pack page; reading at the
+// chosen ref afterwards only touches the raw content host and costs nothing against the
+// hourly limit.
+function buildRefPicker(meta, host) {
+  const bar = el("div", "om-refbar");
+  const repo = meta.repository || "";
+  if (!repo.toLowerCase().includes("github.com")) return bar;
+
+  const current = meta.default_branch || "main";
+  const select = el("select", "om-side-select om-ref-select");
+  const first = el("option", null, current);
+  first.value = current;
+  select.appendChild(first);
+  const status = el("span", "om-side-status", "");
+
+  // Sitting among the header chips, the control takes the width of what it is showing
+  // rather than of the longest branch name or commit message in the list.
+  const probe = el("span", "om-ref-probe");
+  const fitToSelection = () => {
+    const chosen = select.options[select.selectedIndex];
+    if (!chosen) return;
+    probe.style.font = getComputedStyle(select).font;
+    probe.textContent = chosen.textContent;
+    const text = Math.ceil(probe.getBoundingClientRect().width);
+    select.style.width = `${Math.min(280, Math.max(88, text + 36))}px`;
+    select.title = chosen.title || chosen.textContent;
+  };
+
+  let loaded = false;
+  const loadRefs = async () => {
+    if (loaded) return;
+    loaded = true;
+    status.textContent = "reading branches...";
+    try {
+      const query = new URLSearchParams({ repo, token: githubToken() });
+      const data = await (await api.fetchApi(`${API}/refs?${query}`)).json();
+      if (!data.ok) { status.textContent = data.reason || "refs unavailable"; return; }
+      status.textContent = "";
+      const seen = new Set([current]);
+      const group = (label, options) => {
+        if (!options.length) return;
+        const box = el("optgroup");
+        box.label = label;
+        for (const option of options) box.appendChild(option);
+        select.appendChild(box);
+      };
+      group("Branches", (data.branches || []).filter((b) => !seen.has(b.name) && seen.add(b.name))
+        .map((b) => { const o = el("option", null, b.name); o.value = b.name; return o; }));
+      group("Recent commits", (data.commits || []).map((c) => {
+        const subject = (c.message || "(no message)").slice(0, 44);
+        const o = el("option", null, `${c.short} · ${subject}`);
+        o.value = c.sha;
+        o.title = `${c.short} ${c.date ? c.date.slice(0, 10) : ""} ${c.message || ""}`.trim();
+        return o;
+      }));
+      fitToSelection();
+    } catch (error) {
+      status.textContent = "refs unavailable";
+    }
+  };
+  select.addEventListener("mousedown", loadRefs, { once: true });
+  select.addEventListener("focus", loadRefs, { once: true });
+
+  select.addEventListener("change", async () => {
+    const ref = select.value;
+    status.textContent = "reading...";
+    try {
+      const query = new URLSearchParams({ repo, ref });
+      const data = await (await api.fetchApi(`${API}/readme-at?${query}`)).json();
+      if (!data.ok) { status.textContent = data.reason || "could not read that ref"; return; }
+      // The control itself names the ref, so the status is kept for problems only.
+      status.textContent = "";
+      fitToSelection();
+      await paintPackBody(host, meta, data);
+      offerRef(ref, select.options[select.selectedIndex]?.textContent || "");
+    } catch (error) {
+      status.textContent = "could not read that ref";
+    }
+  });
+
+  // The registry publishes no build for a branch or a commit, so when one is chosen it is
+  // put at the top of the version list and installed from GitHub instead. Choosing the
+  // default branch again takes the row away.
+  const offerRef = (ref, caption) => {
+    const versions = host.closest(".om-dialog")?.querySelector(".om-versions");
+    if (!versions) return;
+    versions.querySelector(".om-ref-row")?.remove();
+    if (!ref || ref === current) return;
+    versions.prepend(buildRefInstallRow(meta, ref, caption));
+    // No use offering it inside a section that is closed.
+    versions.closest("details")?.setAttribute("open", "");
+  };
+
+  bar.appendChild(el("span", "om-ref-label", "ref"));
+  bar.appendChild(select);
+  bar.appendChild(status);
+  bar.appendChild(probe);
+  fitToSelection();
+  return bar;
 }
 
 // The pack's [tool.open_manager] declarations: matched incompatibilities, a source
@@ -1198,6 +1421,7 @@ function appendDeveloperBlock(slot, meta) {
   const matched = (meta.incompatible || []).filter((entry) => entry.matched);
   const workflows = dev.example_workflows || [];
   const themes = dev.themes || [];
+  const gallery = panelSetting("openManager.galleryShow", true) ? (dev.gallery || []) : [];
 
   // The author's note on the current release, placed above the version list.
   const releaseSlot = slot.closest(".om-dialog")?.querySelector(".om-release-slot");
@@ -1209,7 +1433,8 @@ function appendDeveloperBlock(slot, meta) {
     releaseSlot.appendChild(note);
   }
 
-  if (!matched.length && !dev.source && !dev.docs && !dev.funding && !workflows.length && !themes.length) return;
+  if (!matched.length && !dev.source && !dev.docs && !dev.funding
+    && !workflows.length && !themes.length && !gallery.length) return;
 
   const block = el("div", "om-dev");
 
@@ -1246,6 +1471,8 @@ function appendDeveloperBlock(slot, meta) {
     else block.appendChild(links);
   }
 
+  if (gallery.length) block.appendChild(buildGallery(meta, gallery));
+
   if (themes.length) {
     block.appendChild(collapsible("Themes", themes, (path) => {
       const item = el("button", "om-wf-item");
@@ -1271,17 +1498,178 @@ function appendDeveloperBlock(slot, meta) {
   slot.appendChild(block);
 }
 
-// A closed section holding a scrolling list of paths.
-function collapsible(title, paths, build) {
+// A section that collapses to its header bar and opens with a body beneath it. Heavier than
+// the small folds below, for a part of the page that carries weight: the header stays put
+// when closed and keeps naming what it holds, so nothing is lost by collapsing it.
+//
+// `note` is the line that has to earn the collapse, since it is all that remains visible.
+// `remember` keys the open state so a choice survives reopening the page.
+function panel(title, note, { open = true, remember = "" } = {}) {
+  const box = el("details", "om-panel");
+  const head = el("summary", "om-panel-head");
+  head.appendChild(el("span", "om-panel-title", title));
+  head.appendChild(el("span", "om-panel-note", note || ""));
+  head.appendChild(el("span", "om-panel-chevron", "▾"));
+  box.appendChild(head);
+  const body = el("div", "om-panel-body");
+  box.appendChild(body);
+  box.body = body;
+
+  let start = open;
+  if (remember) {
+    try {
+      const saved = localStorage.getItem(remember);
+      if (saved !== null) start = saved === "1";
+    } catch {}
+    box.addEventListener("toggle", () => {
+      try { localStorage.setItem(remember, box.open ? "1" : "0"); } catch {}
+    });
+  }
+  box.open = start;
+  return box;
+}
+
+// A section holding a list of paths, closed unless asked otherwise. `listClass` lets a
+// caller swap the single column for another layout, which the gallery uses for its grid.
+function collapsible(title, paths, build, { listClass = "om-wf-list", open = false } = {}) {
   const box = el("details", "om-fold");
+  box.open = open;
   const head = el("summary", "om-dev-head");
   head.appendChild(document.createTextNode(title));
   head.appendChild(el("span", "om-fold-count", String(paths.length)));
   box.appendChild(head);
-  const list = el("div", "om-wf-list");
+  const list = el("div", listClass);
   for (const path of paths) list.appendChild(build(path));
   box.appendChild(list);
   return box;
+}
+
+// The configured GitHub token, empty when none is set. Sent with the calls that read the
+// API so they draw on the 5,000 an hour a token allows rather than the 60 it does not.
+function githubToken() {
+  return String(panelSetting("openManager.githubToken", "") || "");
+}
+
+// A panel setting, with a fallback for when the settings store is not reachable.
+function panelSetting(key, fallback) {
+  try {
+    const value = app.extensionManager.setting.get(key);
+    return value === undefined || value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+// Where one gallery entry's image lives. An absolute URL is used as the pack gave it; a
+// repository path goes through the backend, which reads it from the installed copy or from
+// GitHub and refuses anything whose bytes are not an image.
+function galleryUrl(entry, meta) {
+  const lower = entry.toLowerCase();
+  if (lower.startsWith("http://") || lower.startsWith("https://")) return entry;
+  const query = new URLSearchParams({
+    repo: meta.repository || "",
+    branch: meta.default_branch || "",
+    path: entry,
+  });
+  return `${API}/gallery-image?${query}`;
+}
+
+// The pack's gallery: a grid of thumbnails that open a full view. The thumbnail edge is a
+// setting and the grid fills to whatever width it is given, so the same markup suits a
+// narrow dialog and a wide one.
+function buildGallery(meta, entries) {
+  const thumb = Math.max(80, Math.min(320, Math.round(Number(panelSetting("openManager.galleryThumb", 120)) || 120)));
+  const box = collapsible("Gallery", entries, (entry) => {
+    const cell = el("button", "om-gal-cell");
+    cell.type = "button";
+    cell.title = entry;
+    cell._url = galleryUrl(entry, meta);
+    cell._label = entry.split("/").pop() || entry;
+    const img = el("img", "om-gal-img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = cell._label;
+    img.src = cell._url;
+    // A tile that cannot load is taken out rather than left broken, and the count follows
+    // it down so the heading never promises more than is on screen. The full view is built
+    // from what is left, so its paging never lands on a missing image.
+    img.onerror = () => {
+      cell.classList.add("om-gal-dead");
+      const fold = cell.closest("details");
+      const shown = fold?.querySelectorAll(".om-gal-cell:not(.om-gal-dead)").length ?? 0;
+      const badge = fold?.querySelector(".om-fold-count");
+      if (badge) badge.textContent = String(shown);
+    };
+    cell.appendChild(img);
+    cell.onclick = () => {
+      const fold = cell.closest("details");
+      const live = [...fold.querySelectorAll(".om-gal-cell:not(.om-gal-dead)")];
+      openLightbox(live.map((c) => ({ url: c._url, label: c._label })), Math.max(0, live.indexOf(cell)));
+    };
+    return cell;
+  }, { listClass: "om-gal", open: panelSetting("openManager.galleryExpanded", false) === true });
+  box.querySelector(".om-gal").style.setProperty("--om-gal-thumb", `${thumb}px`);
+  return box;
+}
+
+// The full view over a gallery: one image at a time, with the keyboard, the arrows, or the
+// backdrop to leave. It sits above the pack dialog and restores focus on the way out.
+function openLightbox(items, index) {
+  if (!items.length) return;
+  let at = index;
+  const back = el("div", "om-lb");
+  const figure = el("figure", "om-lb-fig");
+  const img = el("img", "om-lb-img");
+  const caption = el("figcaption", "om-lb-cap");
+  figure.appendChild(img);
+  figure.appendChild(caption);
+  back.appendChild(figure);
+
+  const show = (to) => {
+    at = (to + items.length) % items.length;
+    img.src = items[at].url;
+    img.alt = items[at].label;
+    caption.textContent = items.length > 1
+      ? `${items[at].label} · ${at + 1} of ${items.length}`
+      : items[at].label;
+  };
+
+  const previous = document.activeElement;
+  const close = () => {
+    document.removeEventListener("keydown", onKey, true);
+    back.remove();
+    try { previous?.focus(); } catch {}
+  };
+  const onKey = (event) => {
+    if (event.key === "Escape") close();
+    else if (event.key === "ArrowRight" && items.length > 1) show(at + 1);
+    else if (event.key === "ArrowLeft" && items.length > 1) show(at - 1);
+    else return;
+    // The pack dialog listens for these too, so the full view keeps them.
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  document.addEventListener("keydown", onKey, true);
+
+  const button = (cls, text, fn) => {
+    const b = el("button", `om-lb-nav ${cls}`, text);
+    b.type = "button";
+    b.onclick = (event) => { event.stopPropagation(); fn(); };
+    back.appendChild(b);
+    return b;
+  };
+  if (items.length > 1) {
+    button("om-lb-prev", "‹", () => show(at - 1));
+    button("om-lb-next", "›", () => show(at + 1));
+  }
+  const closer = button("om-lb-close", "×", close);
+  closer.title = "Close (Esc)";
+
+  // Only the backdrop closes, so a click on the image itself does not.
+  back.onclick = (event) => { if (event.target === back || event.target === figure) close(); };
+  document.body.appendChild(back);
+  show(index);
+  closer.focus();
 }
 
 // Downloads a theme a pack ships and merges it into the palette store, leaving every other
@@ -1370,13 +1758,16 @@ function absolutiseLinks(view, repository, branch) {
 // the version list. Drives the row's control while it resolves.
 async function quickInstall(packId, control) {
   control.setInstalling();
+  rememberInstall(packId, "installing");
   let data;
   try {
-    const answer = await api.fetchApi(`${API}/pack/${encodeURIComponent(packId)}`);
+    const answer = await api.fetchApi(
+      `${API}/pack/${encodeURIComponent(packId)}?${new URLSearchParams(licenseOptions())}`);
     data = await answer.json();
     if (!answer.ok) throw new Error(data.detail || `HTTP ${answer.status}`);
   } catch (error) {
     control.setInstall();
+    rememberInstall(packId, null);
     notify(`Could not read ${packId}`, error.message);
     return;
   }
@@ -1384,6 +1775,7 @@ async function quickInstall(packId, control) {
   const entry = data.versions.find((item) => item.version === wanted);
   if (!entry) {
     control.setInstall();
+    rememberInstall(packId, null);
     notify(`Nothing to install for ${packId}`, "No installable version was found.");
     return;
   }
@@ -1395,6 +1787,11 @@ async function quickInstall(packId, control) {
 // licence file, batched across a render and cached on the server.
 const licJobs = new Map();
 let licTimer = 0;
+
+// Repositories one licence request may ask about. This mirrors LICENSE_BATCH on the server,
+// which trims anything longer: sending more would drop the overflow silently, and those rows
+// would be marked resolved without ever having been looked at.
+const LICENSE_BATCH = 200;
 
 function paintLicense(pill, entry) {
   pill.textContent = entry.license || "unlicensed";
@@ -1416,13 +1813,23 @@ async function flushLicenses() {
   licTimer = 0;
   const jobs = [...licJobs.values()];
   licJobs.clear();
+  for (let at = 0; at < jobs.length; at += LICENSE_BATCH) {
+    await resolveLicenceBatch(jobs.slice(at, at + LICENSE_BATCH));
+  }
+}
+
+// One request's worth. A batch that fails is left unresolved so it can be asked again.
+async function resolveLicenceBatch(jobs) {
   if (!jobs.length) return;
   let res;
   try {
     const answer = await api.fetchApi(`${API}/licenses`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: jobs.map((j) => ({ id: j.entry.id, repository: j.entry.repository })) }),
+      body: JSON.stringify({
+        items: jobs.map((j) => ({ id: j.entry.id, repository: j.entry.repository })),
+        ...licenseOptions(),
+      }),
     });
     // An error response leaves the rows unresolved.
     if (!answer.ok) return;
@@ -1485,13 +1892,18 @@ function buildResultRow(entry) {
   const text = el("div", "om-side-text");
   text.appendChild(el("div", "om-side-name", entry.name || entry.id));
   const meta = el("div", "om-side-meta");
-  meta.appendChild(document.createTextNode(
-    `${entry.advertised || "no version"} · ${entry.downloads.toLocaleString()} downloads`));
+  // In its own element so it is the part that gives way when the panel is narrow: the
+  // version and count truncate, and the star and licence badges beside them do not.
+  meta.appendChild(el("span", "om-meta-text",
+    `${entry.advertised || "no version"} · ${countText(entry.downloads)} ↓`));
   const stars = starCount(entry.stars);
   if (stars) meta.appendChild(stars);
   const lic = el("span", "om-lic");
   paintLicense(lic, entry);
-  queueLicense(entry, lic);
+  // The row is queued for a licence lookup by the list once scrolling settles, rather than
+  // the moment it is built: a fast scroll builds thousands of rows the reader never saw.
+  row._entry = entry;
+  row._licPill = lic;
   meta.appendChild(lic);
   text.appendChild(meta);
   text.onclick = () => openPack(entry.id);
@@ -1501,7 +1913,7 @@ function buildResultRow(entry) {
     withMenu: false,
     onInstall: () => quickInstall(entry.id, control),
   });
-  control.setInstall();
+  restoreInstall(entry.id, control);
   control.el.classList.add("om-side-ictl");
   row.appendChild(control.el);
   return row;
@@ -1515,7 +1927,10 @@ function buildResultCard(entry) {
   head.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-card-icon"));
   const title = el("div", "om-card-title");
   title.appendChild(el("div", "om-side-name", entry.name || entry.id));
-  if (entry.publisher) title.appendChild(el("div", "om-card-pub", entry.publisher));
+  // Always present, empty or not: the windowed grid scrolls on one row pitch, so a card
+  // that dropped a line would be shorter than its neighbours and put the scrollbar out of
+  // step with the cards it scrolls.
+  title.appendChild(el("div", "om-card-pub", entry.publisher || ""));
   head.appendChild(title);
   head.onclick = () => openPack(entry.id);
   card.appendChild(head);
@@ -1525,13 +1940,14 @@ function buildResultCard(entry) {
   card.appendChild(desc);
 
   const meta = el("div", "om-side-meta");
-  meta.appendChild(document.createTextNode(
+  meta.appendChild(el("span", "om-meta-text",
     `${entry.advertised || "no version"} · ${countText(entry.downloads)} ↓`));
   const stars = starCount(entry.stars);
   if (stars) meta.appendChild(stars);
   const lic = el("span", "om-lic");
   paintLicense(lic, entry);
-  queueLicense(entry, lic);
+  card._entry = entry;
+  card._licPill = lic;
   meta.appendChild(lic);
   card.appendChild(meta);
 
@@ -1540,7 +1956,7 @@ function buildResultCard(entry) {
     withMenu: false,
     onInstall: () => quickInstall(entry.id, control),
   });
-  control.setInstall();
+  restoreInstall(entry.id, control);
   control.el.classList.add("om-card-ictl");
   card.appendChild(control.el);
   return card;
@@ -1586,6 +2002,44 @@ function refreshMissingIfActive() {
 
 // The sidebar tab: a category nav over the registry browser, the installed list, and the
 // packs that would supply nodes missing from the current graph.
+// The sidebar tab belongs to the new interface. With the legacy menu it never appears, so
+// the same panel is offered as a window: identical content, reachable from the command
+// palette, a keybinding, or the button added to the legacy menu below.
+function openPanelWindow() {
+  const existing = document.querySelector(".om-backdrop .om-panel-window");
+  if (existing) return existing;
+  const backdrop = el("div", "om-backdrop");
+  const dialog = el("div", "om-dialog om-panel-window");
+  const close = el("button", "om-x", "×");
+  close.title = "Close";
+  close.onclick = () => backdrop.remove();
+  dialog.appendChild(close);
+  // renderSidebar names the element it is given, so it gets its own host inside the dialog.
+  const host = el("div");
+  dialog.appendChild(host);
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+  renderSidebar(host);
+  return dialog;
+}
+
+// A way in for the legacy menu, which has no sidebar to put a tab in. Absent on the new
+// interface, where the tab already exists.
+function addLegacyMenuButton() {
+  try {
+    const menu = app.ui?.menuContainer;
+    if (!menu || menu.querySelector(".om-legacy-btn")) return false;
+    const button = el("button", "om-legacy-btn", "Open Manager");
+    button.title = "Browse the registry";
+    button.onclick = openPanelWindow;
+    menu.appendChild(button);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function renderSidebar(root) {
   root.replaceChildren();
   root.className = "om-side";
@@ -1892,7 +2346,8 @@ function buildInstalledRow(pack) {
   if (pack.registry_id) {
     items.push({ label: "Reinstall", fn: () => install({ packId: pack.registry_id, entry: current, control, rowsRoot: row, overwrite: true }) });
   }
-  items.push({ label: "Uninstall", danger: true, fn: () => uninstall({ packId: pack.id, entry: { name: pack.id }, control, rowsRoot: row }) });
+  items.push({ label: "Uninstall", danger: true, fn: () => uninstall({
+    packId: pack.id, registryId: pack.registry_id, entry: { name: pack.id }, control, rowsRoot: row }) });
 
   const control = makeInstallControl({
     packId: pack.registry_id || pack.id,
@@ -2028,6 +2483,21 @@ function dropdown(storageKey, fallback, options) {
   return select;
 }
 
+// How a licence lookup should run, from the panel's settings. Every speed-up is off by
+// default, so the behaviour only changes for someone who asks for it.
+function licenseOptions() {
+  const get = (key, fallback) => {
+    try { return app.extensionManager.setting.get(key) ?? fallback; } catch { return fallback; }
+  };
+  return {
+    concurrency: Number(get("openManager.licenseConcurrency", 8)) || 8,
+    race: get("openManager.licenseRace", false) === true,
+    use_api: get("openManager.licenseUseApi", false) === true,
+    // Reuses the token already configured for starring; it only raises the API's rate limit.
+    token: githubToken(),
+  };
+}
+
 // How a sync should read the catalogue, from the panel's settings. The backend clamps the
 // count, so a mistyped preference cannot turn the sync into a flood.
 function syncOptions() {
@@ -2154,7 +2624,13 @@ function renderRegistry(container) {
     container.appendChild(controls);
 
     const count = el("div", "om-side-status", "");
-    const list = el("div", "om-side-list");
+    const list = el("div", "om-side-list om-virt-host");
+    // The sizer carries the height of every result at once so the scrollbar is true from
+    // the first paint; the window holds only the rows near the viewport.
+    const sizer = el("div", "om-virt");
+    const win = el("div", "om-virt-win");
+    sizer.appendChild(win);
+    list.appendChild(sizer);
     container.appendChild(count);
     container.appendChild(list);
 
@@ -2165,16 +2641,71 @@ function renderRegistry(container) {
       name: (a, b) => (a.name || a.id).localeCompare(b.name || b.id),
       license: (a, b) => (a.license_rank - b.license_rank) || (b.downloads - a.downloads),
     };
-    const CHUNK = 80;
-    let filtered = [];
-    let rendered = 0;
+    // The whole catalogue is already in memory, so nothing here waits on the network: the
+    // list is windowed rather than paged, and scrolling only decides which rows to build.
+    const OVERSCAN = 4;
+    const GAP = { list: 4, cards: 8 };
 
-    const more = () => {
-      const build = viewSel.value === "cards" ? buildResultCard : buildResultRow;
-      const slice = filtered.slice(rendered, rendered + CHUNK);
-      for (const entry of slice) list.appendChild(build(entry));
-      rendered += slice.length;
+    let filtered = [];
+    let pitch = 56;   // one row's height plus its gap, read back from what was drawn
+    let perRow = 1;   // entries per row: one in the list, the column count in the grid
+    let from = -1;
+    let to = -1;
+
+    const cardsOn = () => viewSel.value === "cards";
+    const gapNow = () => (cardsOn() ? GAP.cards : GAP.list);
+
+    // Geometry is measured from the DOM rather than assumed, so a theme, a thumbnail size
+    // or a wider panel is accounted for without being told.
+    const measure = () => {
+      const probe = win.firstElementChild;
+      if (!probe) return false;
+      const height = Math.round(probe.getBoundingClientRect().height);
+      const columns = cardsOn()
+        ? (getComputedStyle(win).gridTemplateColumns.split(" ").filter(Boolean).length || 1)
+        : 1;
+      if (height <= 0) return false;
+      const changed = height + gapNow() !== pitch || columns !== perRow;
+      pitch = height + gapNow();
+      perRow = columns;
+      return changed;
     };
+
+    const paint = (force = false) => {
+      const rows = Math.ceil(filtered.length / perRow);
+      sizer.style.height = `${Math.max(0, rows * pitch - (rows ? gapNow() : 0))}px`;
+      const firstRow = Math.max(0, Math.floor(list.scrollTop / pitch) - OVERSCAN);
+      const rowsShown = Math.ceil(list.clientHeight / pitch) + OVERSCAN * 2;
+      const start = firstRow * perRow;
+      const end = Math.min(filtered.length, (firstRow + rowsShown) * perRow);
+      if (!force && start === from && end === to) return;
+      from = start;
+      to = end;
+      win.style.transform = `translateY(${firstRow * pitch}px)`;
+      const build = cardsOn() ? buildResultCard : buildResultRow;
+      win.replaceChildren(...filtered.slice(start, end).map(build));
+    };
+
+    // The first paint after a change uses the previous geometry; whatever actually landed
+    // is measured on the next frame and drawn again where it differs.
+    const repaint = (force = true) => {
+      paint(force);
+      requestAnimationFrame(() => { if (measure()) paint(true); });
+    };
+
+    // Licences are read from the repository, so they are asked for only once the reader has
+    // stopped on something. Sweeping the whole catalogue would otherwise queue every pack
+    // it passed, which is thousands of reads for rows nobody looked at.
+    let settle = null;
+    const queueVisibleLicences = () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        for (const node of win.children) {
+          if (node._entry && node._licPill) queueLicense(node._entry, node._licPill);
+        }
+      }, 250);
+    };
+
     const apply = () => {
       const query = search.value.trim().toLowerCase();
       const tier = licSel.value;
@@ -2188,17 +2719,23 @@ function renderRegistry(container) {
           || (node.publisher || "").toLowerCase().includes(query);
       }).sort(comparators[sortSel.value] || comparators.downloads);
       count.textContent = `${filtered.length.toLocaleString()} shown`;
-      // The grid lays columns out to the sidebar's width; the list stays a single column.
-      list.classList.toggle("om-card-grid", viewSel.value === "cards");
-      list.replaceChildren();
-      rendered = 0;
-      more();
+      // The grid lays columns out to the panel's width; the list stays a single column.
+      win.className = `om-virt-win ${cardsOn() ? "om-card-grid" : "om-list-win"}`;
+      list.scrollTop = 0;
+      from = to = -1;
+      repaint();
+      queueVisibleLicences();
     };
 
-    list.addEventListener("scroll", () => {
-      if (rendered < filtered.length
-        && list.scrollHeight - (list.scrollTop + list.clientHeight) < list.clientHeight) more();
+    list.addEventListener("scroll", () => { paint(); queueVisibleLicences(); }, { passive: true });
+    // A resized panel changes the column count and the card height, so the window is
+    // remeasured rather than left describing the old layout. The observer lets go once the
+    // view it belongs to has been replaced, rather than repainting a detached list.
+    const shape = new ResizeObserver(() => {
+      if (!viewIsCurrent(generation)) { shape.disconnect(); return; }
+      repaint();
     });
+    shape.observe(list);
     let timer = null;
     search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(apply, 150); });
     viewSel.addEventListener("change", () => { localStorage.setItem("om-registry-view", viewSel.value); apply(); });
@@ -2223,6 +2760,10 @@ function renderRegistry(container) {
 }
 const sidebarStyle = document.createElement("style");
 sidebarStyle.textContent = `
+/* The panel as a window, for the legacy menu. The host fills the dialog so the panel keeps
+   the height it relies on. */
+.om-panel-window > div { flex: 1; min-height: 0; }
+.om-legacy-btn { width: 100%; }
 .om-side { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 8px;
   font: 13px/1.5 system-ui, sans-serif; color: var(--om-text); box-sizing: border-box; }
 .om-nav { display: flex; gap: 4px; flex: none; }
@@ -2240,19 +2781,62 @@ sidebarStyle.textContent = `
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); }
 .om-side-status { color: var(--om-muted); font-size: 11px; }
 .om-side-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex;
-  flex-direction: column; gap: 4px; }
-/* A thin, unobtrusive scrollbar for the scrolling areas. */
+  flex-direction: column; gap: 4px; padding-right: 8px; }
+/* Windowed list. The host is a plain block because the sizer inside it, not the host,
+   carries the full height of the results; the layout the rows sit in moves to the window.
+   Other tabs keep the flex column above, so only the registry list is windowed. */
+.om-side-list.om-virt-host { display: block; }
+.om-virt { position: relative; width: 100%; }
+.om-virt-win { position: absolute; top: 0; left: 0; right: 0; }
+.om-virt-win.om-list-win { display: flex; flex-direction: column; gap: 4px; }
+/* The window scrolls on one row pitch, so a row inside it may not change height with its
+   content: a row that wrapped would put the scrollbar out of step with the rows it scrolls,
+   and the error would accumulate over thousands of them. The metadata line therefore clips
+   instead of wrapping. Rows in the other tabs are not windowed and keep their own sizing. */
+.om-virt-win .om-side-row { height: 52px; box-sizing: border-box; }
+/* flex-wrap keeps the pills on one line, but the text inside them wraps on its own and
+   would add a second line for a long version and download count. Both are needed. */
+.om-virt-win .om-side-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+/* The version and count are the only part allowed to give way; the badges hold their size,
+   so a narrow panel truncates the text rather than dropping the licence off the end. */
+.om-virt-win .om-meta-text {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.om-virt-win .om-side-meta > .om-lic,
+.om-virt-win .om-side-meta > .om-stars { flex: none; }
+/* Cards in the window are the same height for the same reason rows are: the description
+   occupies its three lines whether or not it fills them, and the metadata line clips rather
+   than wrapping. Cards outside the window keep their natural height. */
+.om-virt-win .om-card-desc { height: calc(1.45em * 3); }
+.om-virt-win .om-card .om-side-meta {
+  flex-wrap: nowrap; white-space: nowrap; overflow: hidden; min-width: 0; }
+.om-virt-win .om-card-title { min-width: 0; }
+/* Scrollbars for the scrolling areas.
+
+   From Chrome 121, Firefox, and Safari 18.2 the standard 'scrollbar-width' and
+   'scrollbar-color' are honoured and '::-webkit-scrollbar' is ignored outright, so the
+   standard pair has to carry the design. 'thin' there is a hairline the thumb colour barely
+   shows through, which is why this reads well in older engines and disappears in current
+   ones. 'auto' gives the platform's full width, and the thumb follows the theme's muted
+   text so it is legible rather than a shade off the background.
+
+   The webkit block below is a fallback for engines that predate the standard properties.
+   Where both are understood the standard pair wins, and these are simply not consulted. */
 .om-side-list, .om-body, .om-readme-body, .om-versions {
-  scrollbar-width: thin; scrollbar-color: var(--om-border) transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--om-scroll) transparent;
 }
 .om-side-list::-webkit-scrollbar, .om-body::-webkit-scrollbar,
-.om-readme-body::-webkit-scrollbar, .om-versions::-webkit-scrollbar { width: 8px; height: 8px; }
+.om-readme-body::-webkit-scrollbar, .om-versions::-webkit-scrollbar { width: 14px; height: 14px; }
 .om-side-list::-webkit-scrollbar-track, .om-body::-webkit-scrollbar-track,
 .om-readme-body::-webkit-scrollbar-track, .om-versions::-webkit-scrollbar-track { background: transparent; }
+/* The border keeps the thumb clear of the content it sits beside without a track. */
 .om-side-list::-webkit-scrollbar-thumb, .om-body::-webkit-scrollbar-thumb,
-.om-readme-body::-webkit-scrollbar-thumb, .om-versions::-webkit-scrollbar-thumb { background: var(--om-border); border-radius: 4px; }
+.om-readme-body::-webkit-scrollbar-thumb, .om-versions::-webkit-scrollbar-thumb {
+  background: var(--om-scroll); border-radius: 7px;
+  border: 3px solid transparent; background-clip: content-box; }
 .om-side-list::-webkit-scrollbar-thumb:hover, .om-body::-webkit-scrollbar-thumb:hover,
-.om-readme-body::-webkit-scrollbar-thumb:hover, .om-versions::-webkit-scrollbar-thumb:hover { background: #484f58; }
+.om-readme-body::-webkit-scrollbar-thumb:hover, .om-versions::-webkit-scrollbar-thumb:hover {
+  background: var(--om-text-2); background-clip: content-box; }
 .om-page { display: flex; flex-direction: column; gap: 4px; }
 .om-spacer { flex: none; }
 .om-side-row { display: flex; gap: 9px; align-items: center; padding: 7px 8px;
@@ -2318,6 +2902,47 @@ sidebarStyle.textContent = `
 .om-wf-item:hover { border-color: #388bfd; background: #1c2230; }
 .om-wf-name { font-weight: 600; }
 .om-wf-path { color: var(--om-muted); font-size: 11px; }
+/* Gallery. Columns are laid to the width available rather than to a fixed count, so the
+   grid reflows with the dialog; the thumbnail edge is a setting. */
+.om-gal { display: grid; gap: 8px; padding: 2px 0;
+  grid-template-columns: repeat(auto-fill, minmax(var(--om-gal-thumb, 120px), 1fr)); }
+.om-gal-cell { padding: 0; overflow: hidden; cursor: zoom-in; aspect-ratio: 1 / 1;
+  background: var(--om-input); border: 1px solid var(--om-border); border-radius: 8px; }
+.om-gal-cell:hover { border-color: #388bfd; }
+.om-gal-cell:focus-visible { outline: 2px solid #388bfd; outline-offset: 2px; }
+.om-gal-cell.om-gal-dead { display: none; }
+.om-gal-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Full view, above the pack dialog's own backdrop. */
+.om-lb { position: fixed; inset: 0; z-index: 10010; background: rgba(0,0,0,.88);
+  display: flex; align-items: center; justify-content: center; }
+.om-lb-fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.om-lb-img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 6px; }
+.om-lb-cap { color: var(--om-text-2); font-size: 12px; text-align: center;
+  max-width: 92vw; overflow-wrap: anywhere; }
+.om-lb-nav { position: absolute; border: none; border-radius: 8px; cursor: pointer;
+  background: rgba(0,0,0,.5); color: #fff; font-size: 26px; line-height: 1; padding: 12px 17px; }
+.om-lb-nav:hover { background: rgba(0,0,0,.85); }
+.om-lb-nav:focus-visible { outline: 2px solid #388bfd; }
+.om-lb-prev, .om-lb-next { top: 50%; transform: translateY(-50%); }
+.om-lb-prev { left: 16px; }
+.om-lb-next { right: 16px; }
+.om-lb-close { top: 14px; right: 16px; font-size: 22px; padding: 8px 14px; }
+/* On a short or narrow viewport the arrows would sit over the picture, so they shrink and
+   the image is given the room back. */
+@media (max-width: 720px), (max-height: 560px) {
+  .om-lb-img { max-width: 96vw; max-height: 74vh; }
+  .om-lb-nav { font-size: 20px; padding: 8px 11px; }
+  .om-lb-prev { left: 6px; }
+  .om-lb-next { right: 6px; }
+}
+/* The ref picker sits inline among the header's buttons and chips. */
+.om-refbar { display: inline-flex; gap: 6px; align-items: center; position: relative; }
+.om-ref-label { color: var(--om-muted); font-size: 12px; }
+/* Scoped so it beats the generic .om-side-select sizing defined further down, which would
+   otherwise stretch the picker across the dialog. The width is set from the selected text. */
+.om-refbar .om-ref-select { flex: none; min-width: 88px; max-width: 280px; }
+/* Off-screen twin used only to measure the selected label. */
+.om-ref-probe { position: absolute; left: -9999px; top: 0; white-space: pre; visibility: hidden; }
 .om-side-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .om-side-select { flex: 1 1 130px; min-width: 120px; padding: 5px 8px; border-radius: 6px;
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); font-size: 12px; }
@@ -2325,13 +2950,12 @@ sidebarStyle.textContent = `
 `;
 document.head.appendChild(sidebarStyle);
 
-// The sidebar tab icon swaps with the theme: the light artwork by default, the dark artwork
-// whenever the frontend is not in a dark theme.
 const iconStyle = document.createElement("style");
 iconStyle.textContent = `
-.om-tab-icon { display: inline-block; width: 1.25em; height: 1.25em;
-  background: center / contain no-repeat url("${ICON_LIGHT}"); }
-html:not(.dark-theme) .om-tab-icon { background-image: url("${ICON_DARK}"); }
+.om-tab-icon { display: inline-block; width: 1.2rem; height: 1.2rem;
+  background-color: currentColor;
+  -webkit-mask: center / contain no-repeat url("${ICON_TAB}");
+  mask: center / contain no-repeat url("${ICON_TAB}"); }
 `;
 document.head.appendChild(iconStyle);
 
@@ -2342,8 +2966,8 @@ app.registerExtension({
       id: "openManager.enrichMetadata",
       name: "Open Manager: read pack README and repository metadata",
       type: "boolean",
-      defaultValue: false,
-      tooltip: "When on, a pack page reads its README from the repository. Cached until the pack's versions change.",
+      defaultValue: true,
+      tooltip: "A pack page reads its README, repository stats and gallery from the repository. Cached until the pack's versions change. Turn it off to keep a pack page to the registry alone and save the traffic.",
     },
     {
       id: "openManager.autoRenew",
@@ -2379,6 +3003,48 @@ app.registerExtension({
       tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16; higher is not always faster and risks the registry rate-limiting you.",
     },
     {
+      id: "openManager.galleryShow",
+      name: "Open Manager: show pack galleries",
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Show the images a pack lists in [tool.open_manager] gallery. Entries given as absolute URLs are fetched from wherever the pack points, so turning this off keeps the panel to the hosts it already uses.",
+    },
+    {
+      id: "openManager.galleryThumb",
+      name: "Open Manager: gallery thumbnail size",
+      type: "number",
+      defaultValue: 120,
+      tooltip: "Edge of a gallery thumbnail in pixels. Clamped to 80-320; the grid fits as many columns as the width allows.",
+    },
+    {
+      id: "openManager.galleryExpanded",
+      name: "Open Manager: open pack galleries by default",
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Start the gallery section expanded on a pack page rather than collapsed.",
+    },
+    {
+      id: "openManager.licenseUseApi",
+      name: "Open Manager: name licences through the GitHub API",
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Set the GitHub token below first: without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
+    },
+    {
+      id: "openManager.licenseRace",
+      name: "Open Manager: fetch licence filenames together",
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Try every candidate licence filename at once rather than one after another. Answers a repository in a single round trip instead of up to fourteen, at the cost of more requests.",
+    },
+    {
+      id: "openManager.licenseConcurrency",
+      name: "Open Manager: repositories read at once for licences",
+      type: "number",
+      defaultValue: 8,
+      tooltip: "How many repositories are read at once when resolving licences for a listing. Clamped to 1-32.",
+    },
+    {
       id: "openManager.githubToken",
       name: "Open Manager: GitHub token for one-click starring (optional)",
       type: "text",
@@ -2387,6 +3053,11 @@ app.registerExtension({
     },
   ],
   commands: [
+    {
+      id: "openmanager.panel",
+      label: "Open Manager: open the panel",
+      function: () => openPanelWindow(),
+    },
     {
       id: "openmanager.open",
       label: "Open Manager: browse a pack",
@@ -2407,11 +3078,14 @@ app.registerExtension({
     app.extensionManager.registerSidebarTab({
       id: "openmanager",
       icon: "om-tab-icon",
-      title: "Open Manager",
+      title: "Manager",
       tooltip: "Open Manager: browse the registry",
       type: "custom",
       render: renderSidebar,
     });
+    // The legacy menu has no sidebar, so it gets a button to the same panel.
+    addLegacyMenuButton();
+
     // Themes registered beside the built-ins, each carrying its grid background and its light
     // or dark UI mode.
     registerThemes().catch(() => {});
