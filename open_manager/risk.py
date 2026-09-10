@@ -257,6 +257,169 @@ def _acknowledgement(findings: tuple[Finding, ...]) -> str:
 #: Archive members that mean code runs at install or import time.
 _EXECUTES_ON_INSTALL = ("install.py", "prestartup_script.py")
 
+#: Extensions that hold pickled objects. Reading one runs whatever it was built to run,
+#: because unpickling calls back into the interpreter; this is a property of the format, not
+#: a claim about any particular file.
+_PICKLE_FORMATS = (".pkl", ".pickle", ".pt", ".pth", ".ckpt", ".joblib", ".dill")
+
+#: Extensions holding compiled native code. It executes with the interpreter's privileges
+#: and cannot be read before it does.
+_NATIVE_FORMATS = (".pyd", ".so", ".dylib", ".dll")
+
+#: The weights format that carries no code, named as the alternative when a pickle one turns
+#: up. Never itself reported.
+_SAFE_WEIGHTS = ".safetensors"
+
+#: A prebuilt Python package carried in the repository rather than fetched from an index.
+_WHEEL = ".whl"
+
+#: Compatibility tags named before the rest are summarised. A pack shipping a wheel per
+#: platform would otherwise fill the block it is meant to fit in.
+_TAG_CAP = 4
+
+def _detected(paths: list[str]) -> tuple[str, ...]:
+    """Evidence as a tally of what turned up rather than a list of where.
+
+    The reader is deciding whether the kind of thing is expected, not auditing paths, and a
+    long pack would otherwise print a directory listing into the dialog.
+
+    Args:
+        paths: Archive members that matched.
+
+    Returns:
+        A single evidence line naming each extension and how many of it there are.
+    """
+    counts: dict[str, int] = {}
+    for path in paths:
+        ext = posixpath.splitext(path)[1].lower()
+        counts[ext] = counts.get(ext, 0) + 1
+    kinds = ", ".join(
+        f"{ext} ({count})"
+        for ext, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    )
+    return (f"detected: {kinds}",)
+
+
+def _sourceless_bytecode(names: list[str]) -> list[str]:
+    """Compiled Python in the archive with no matching source beside it.
+
+    ``__pycache__`` beside its own sources is ordinary build residue. Bytecode whose source
+    is absent is not: it is Python that cannot be read.
+
+    Args:
+        names: Every member path in the archive.
+
+    Returns:
+        The paths of bytecode files with no corresponding ``.py``.
+    """
+    sources = {name for name in names if name.endswith(".py")}
+    orphans = []
+    for name in names:
+        if not name.endswith((".pyc", ".pyo")):
+            continue
+        stem = posixpath.basename(name).split(".")[0]
+        parent = posixpath.dirname(name)
+        # __pycache__/x.cpython-311.pyc belongs to ../x.py
+        if posixpath.basename(parent) == "__pycache__":
+            parent = posixpath.dirname(parent)
+        expected = posixpath.join(parent, f"{stem}.py") if parent else f"{stem}.py"
+        if expected not in sources:
+            orphans.append(name)
+    return orphans
+
+
+def _wheel_tags(paths: list[str]) -> tuple[str, ...]:
+    """The compatibility tags the bundled wheels are built for.
+
+    A wheel filename ends in ``python-abi-platform``, which is what decides whether it fits
+    the interpreter it is being installed into. Surfacing it lets the reader answer that
+    without unpacking anything.
+
+    Args:
+        paths: Archive members ending in ``.whl``.
+
+    Returns:
+        The distinct tag triples found, in the order first seen.
+    """
+    tags: list[str] = []
+    for path in paths:
+        stem = posixpath.basename(path)[: -len(_WHEEL)]
+        parts = stem.split("-")
+        tag = "-".join(parts[-3:]) if len(parts) >= 3 else stem
+        if tag not in tags:
+            tags.append(tag)
+    if len(tags) > _TAG_CAP:
+        return tuple(tags[:_TAG_CAP]) + (f"and {len(tags) - _TAG_CAP} more",)
+    return tuple(tags)
+
+
+def _uncommon_payloads(names: list[str]) -> list[Finding]:
+    """Findings for files a custom node does not usually carry.
+
+    A custom node is ordinarily Python and web assets. Compiled binaries, pickle-format data
+    and compiled Python without its source each run or conceal code that cannot be read
+    beforehand. None of this proves ill intent, and plenty of honest packs ship a model
+    file; it is reported so the decision is an informed one rather than a blind one.
+
+    Args:
+        names: Every member path in the archive.
+
+    Returns:
+        Findings, empty where the archive holds none of these.
+    """
+    findings: list[Finding] = []
+    lower = [(name, name.lower()) for name in names if not name.endswith("/")]
+
+    native = sorted(n for n, low in lower if low.endswith(_NATIVE_FORMATS))
+    if native:
+        findings.append(
+            Finding(
+                severity="caution",
+                title="Ships compiled binaries",
+                detail="Native code, which runs unreviewed with ComfyUI's privileges. "
+                       "Uncommon in a custom node. False positives possible.",
+                evidence=_detected(native),
+            )
+        )
+
+    pickles = sorted(n for n, low in lower if low.endswith(_PICKLE_FORMATS))
+    if pickles:
+        findings.append(
+            Finding(
+                severity="caution",
+                title="Ships pickle-format data",
+                detail="Loading one of these runs code stored inside it. "
+                       f"{_SAFE_WEIGHTS} carries none. False positives possible.",
+                evidence=_detected(pickles),
+            )
+        )
+
+    wheels = sorted(n for n, low in lower if low.endswith(_WHEEL))
+    if wheels:
+        tags = _wheel_tags(wheels)
+        findings.append(
+            Finding(
+                severity="note",
+                title="Bundles a Python wheel",
+                detail="A prebuilt package, not fetched from an index. Check the tags fit "
+                       "this machine and that you trust the author. False positives possible.",
+                evidence=_detected(wheels) + (f"built for: {', '.join(tags)}",),
+            )
+        )
+
+    orphans = sorted(_sourceless_bytecode(names))
+    if orphans:
+        findings.append(
+            Finding(
+                severity="caution",
+                title="Ships compiled Python without its source",
+                detail="Bytecode with no matching .py, so it cannot be read. Often just a "
+                       "careless build. False positives possible.",
+                evidence=_detected(orphans),
+            )
+        )
+    return findings
+
 
 def inspect_artifact(path: str) -> Assessment:
     """Read a downloaded pack archive and report what it will do on arrival.
@@ -302,6 +465,8 @@ def inspect_artifact(path: str) -> Assessment:
                 evidence=tuple(f"file: {name}" for name in scripted),
             )
         )
+
+    findings.extend(_uncommon_payloads(names))
 
     for requirement in requirements:
         for entry in advisories.for_requirement(requirement):
