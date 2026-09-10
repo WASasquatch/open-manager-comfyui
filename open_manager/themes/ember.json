@@ -1,0 +1,96 @@
+{
+  "id": "om_ember",
+  "name": "Ember",
+  "version": 13,
+  "extras": {
+    "shape": {
+      "radius": 10,
+      "titleHeight": 28,
+      "slotHeight": 20
+    },
+    "links": {
+      "mode": "spline",
+      "border": false
+    },
+    "categories": {
+      "loaders": "#741647",
+      "conditioning": "#747216",
+      "sampling": "#743b16",
+      "latent": "#3f7416",
+      "image": "#741618",
+      "mask": "#16742c",
+      "audio": "#567416",
+      "video": "#207416",
+      "utils": "#544235",
+      "advanced": "#74166e",
+      "model": "#741647",
+      "api": "#3f7416"
+    },
+    "glow": {
+      "selected": "#ff9b45",
+      "blur": 16
+    }
+  },
+  "colors": {
+    "node_slot": {
+      "CLIP": "#ffd500",
+      "CLIP_VISION": "#a8dadc",
+      "CLIP_VISION_OUTPUT": "#ad7452",
+      "CONDITIONING": "#ffa931",
+      "CONTROL_NET": "#6ee7b7",
+      "IMAGE": "#64b5f6",
+      "LATENT": "#ff9cf9",
+      "MASK": "#81c784",
+      "MODEL": "#b39ddb",
+      "STYLE_MODEL": "#c2ffae",
+      "VAE": "#ff6e6e",
+      "TAESD": "#dcc274",
+      "PIPE_LINE": "#7737aa",
+      "INT": "#29699c",
+      "XYPLOT": "#74da5d",
+      "SAMPLING": "#60a5fa"
+    },
+    "litegraph_base": {
+      "BACKGROUND_IMAGE": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMDAnIGhlaWdodD0nMTAwJz48Y2lyY2xlIGN4PScxMCcgY3k9JzEwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nMTAnIGN5PSczMCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzEwJyBjeT0nNTAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PScxMCcgY3k9JzcwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nMTAnIGN5PSc5MCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzMwJyBjeT0nMTAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSczMCcgY3k9JzMwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nMzAnIGN5PSc1MCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzMwJyBjeT0nNzAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSczMCcgY3k9JzkwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nNTAnIGN5PScxMCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzUwJyBjeT0nMzAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSc1MCcgY3k9JzUwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nNTAnIGN5PSc3MCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzUwJyBjeT0nOTAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSc3MCcgY3k9JzEwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nNzAnIGN5PSczMCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzcwJyBjeT0nNTAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSc3MCcgY3k9JzcwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nNzAnIGN5PSc5MCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzkwJyBjeT0nMTAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSc5MCcgY3k9JzMwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nOTAnIGN5PSc1MCcgcj0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEzKScvPjxjaXJjbGUgY3g9JzkwJyBjeT0nNzAnIHI9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4xMyknLz48Y2lyY2xlIGN4PSc5MCcgY3k9JzkwJyByPScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMTMpJy8+PGNpcmNsZSBjeD0nNTAnIGN5PSc1MCcgcj0nMi4xJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMjIpJy8+PC9zdmc+",
+      "CLEAR_BACKGROUND_COLOR": "#150e0a",
+      "NODE_TITLE_COLOR": "#141418",
+      "NODE_SELECTED_TITLE_COLOR": "#ffffff",
+      "NODE_TEXT_SIZE": 14,
+      "NODE_TEXT_COLOR": "#f5e2cf",
+      "NODE_SUBTEXT_SIZE": 12,
+      "NODE_DEFAULT_COLOR": "#e2762f",
+      "NODE_DEFAULT_BGCOLOR": "#241710",
+      "NODE_DEFAULT_BOXCOLOR": "#e2762f",
+      "NODE_DEFAULT_SHAPE": 2,
+      "NODE_BOX_OUTLINE_COLOR": "#ff9b45",
+      "NODE_BYPASS_BGCOLOR": "#ff00ff",
+      "NODE_ERROR_COLOUR": "#e00000",
+      "DEFAULT_SHADOW_COLOR": "rgba(0,0,0,0.35)",
+      "DEFAULT_GROUP_FONT": 24,
+      "WIDGET_BGCOLOR": "#1d130d",
+      "WIDGET_OUTLINE_COLOR": "#422b1d",
+      "WIDGET_TEXT_COLOR": "#f5e2cf",
+      "WIDGET_SECONDARY_TEXT_COLOR": "#ad917a",
+      "LINK_COLOR": "#e0a15e",
+      "EVENT_LINK_COLOR": "#ff9b45",
+      "CONNECTING_LINK_COLOR": "#ff9b45"
+    },
+    "comfy_base": {
+      "fg-color": "#f5e2cf",
+      "bg-color": "#150e0a",
+      "comfy-menu-bg": "#241710",
+      "comfy-input-bg": "#1d130d",
+      "input-text": "#f5e2cf",
+      "descrip-text": "#ad917a",
+      "drag-text": "#ad917a",
+      "error-text": "#ff5555",
+      "border-color": "#422b1d",
+      "tr-even-bg-color": "#241710",
+      "tr-odd-bg-color": "#150e0a",
+      "content-bg": "#241710",
+      "content-fg": "#f5e2cf",
+      "content-hover-bg": "#422b1d",
+      "content-hover-fg": "#f5e2cf"
+    }
+  }
+}

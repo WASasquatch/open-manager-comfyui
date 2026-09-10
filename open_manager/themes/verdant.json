@@ -1,0 +1,96 @@
+{
+  "id": "om_verdant",
+  "name": "Verdant",
+  "version": 13,
+  "extras": {
+    "shape": {
+      "radius": 10,
+      "titleHeight": 28,
+      "slotHeight": 20
+    },
+    "links": {
+      "mode": "spline",
+      "border": false
+    },
+    "categories": {
+      "loaders": "#327316",
+      "conditioning": "#166073",
+      "sampling": "#167350",
+      "latent": "#162a73",
+      "image": "#16732a",
+      "mask": "#411673",
+      "audio": "#164173",
+      "video": "#221673",
+      "utils": "#375348",
+      "advanced": "#587316",
+      "model": "#327316",
+      "api": "#162a73"
+    },
+    "glow": {
+      "selected": "#5ff2ad",
+      "blur": 16
+    }
+  },
+  "colors": {
+    "node_slot": {
+      "CLIP": "#ffd500",
+      "CLIP_VISION": "#a8dadc",
+      "CLIP_VISION_OUTPUT": "#ad7452",
+      "CONDITIONING": "#ffa931",
+      "CONTROL_NET": "#6ee7b7",
+      "IMAGE": "#64b5f6",
+      "LATENT": "#ff9cf9",
+      "MASK": "#81c784",
+      "MODEL": "#b39ddb",
+      "STYLE_MODEL": "#c2ffae",
+      "VAE": "#ff6e6e",
+      "TAESD": "#dcc274",
+      "PIPE_LINE": "#7737aa",
+      "INT": "#29699c",
+      "XYPLOT": "#74da5d",
+      "SAMPLING": "#60a5fa"
+    },
+    "litegraph_base": {
+      "BACKGROUND_IMAGE": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxMDAnIGhlaWdodD0nMTAwJz48cmVjdCB4PScyMCcgeT0nMCcgd2lkdGg9JzEnIGhlaWdodD0nMTAwJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMDUpJy8+PHJlY3QgeD0nMCcgeT0nMjAnIHdpZHRoPScxMDAnIGhlaWdodD0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjA1KScvPjxyZWN0IHg9JzQwJyB5PScwJyB3aWR0aD0nMScgaGVpZ2h0PScxMDAnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4wNSknLz48cmVjdCB4PScwJyB5PSc0MCcgd2lkdGg9JzEwMCcgaGVpZ2h0PScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMDUpJy8+PHJlY3QgeD0nNjAnIHk9JzAnIHdpZHRoPScxJyBoZWlnaHQ9JzEwMCcgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjA1KScvPjxyZWN0IHg9JzAnIHk9JzYwJyB3aWR0aD0nMTAwJyBoZWlnaHQ9JzEnIGZpbGw9J3JnYmEoMjU1LDI1NSwyNTUsMC4wNSknLz48cmVjdCB4PSc4MCcgeT0nMCcgd2lkdGg9JzEnIGhlaWdodD0nMTAwJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMDUpJy8+PHJlY3QgeD0nMCcgeT0nODAnIHdpZHRoPScxMDAnIGhlaWdodD0nMScgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjA1KScvPjxyZWN0IHg9JzAnIHk9JzAnIHdpZHRoPScxJyBoZWlnaHQ9JzEwMCcgZmlsbD0ncmdiYSgyNTUsMjU1LDI1NSwwLjEpJy8+PHJlY3QgeD0nMCcgeT0nMCcgd2lkdGg9JzEwMCcgaGVpZ2h0PScxJyBmaWxsPSdyZ2JhKDI1NSwyNTUsMjU1LDAuMSknLz48L3N2Zz4=",
+      "CLEAR_BACKGROUND_COLOR": "#06120d",
+      "NODE_TITLE_COLOR": "#ffffff",
+      "NODE_SELECTED_TITLE_COLOR": "#ffffff",
+      "NODE_TEXT_SIZE": 14,
+      "NODE_TEXT_COLOR": "#d6f2e0",
+      "NODE_SUBTEXT_SIZE": 12,
+      "NODE_DEFAULT_COLOR": "#24b981",
+      "NODE_DEFAULT_BGCOLOR": "#0e2018",
+      "NODE_DEFAULT_BOXCOLOR": "#24b981",
+      "NODE_DEFAULT_SHAPE": 2,
+      "NODE_BOX_OUTLINE_COLOR": "#5ff2ad",
+      "NODE_BYPASS_BGCOLOR": "#ff00ff",
+      "NODE_ERROR_COLOUR": "#e00000",
+      "DEFAULT_SHADOW_COLOR": "rgba(0,0,0,0.35)",
+      "DEFAULT_GROUP_FONT": 24,
+      "WIDGET_BGCOLOR": "#0a1a12",
+      "WIDGET_OUTLINE_COLOR": "#1c3a2b",
+      "WIDGET_TEXT_COLOR": "#d6f2e0",
+      "WIDGET_SECONDARY_TEXT_COLOR": "#7ba894",
+      "LINK_COLOR": "#6fd9bd",
+      "EVENT_LINK_COLOR": "#5ff2ad",
+      "CONNECTING_LINK_COLOR": "#5ff2ad"
+    },
+    "comfy_base": {
+      "fg-color": "#d6f2e0",
+      "bg-color": "#06120d",
+      "comfy-menu-bg": "#0e2018",
+      "comfy-input-bg": "#0a1a12",
+      "input-text": "#d6f2e0",
+      "descrip-text": "#7ba894",
+      "drag-text": "#7ba894",
+      "error-text": "#ff5555",
+      "border-color": "#1c3a2b",
+      "tr-even-bg-color": "#0e2018",
+      "tr-odd-bg-color": "#06120d",
+      "content-bg": "#0e2018",
+      "content-fg": "#d6f2e0",
+      "content-hover-bg": "#1c3a2b",
+      "content-hover-fg": "#d6f2e0"
+    }
+  }
+}

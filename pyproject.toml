@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "comfyui-open-manager"
+description = "An alternative package manager for ComfyUI. Browse and install custom nodes and custom themes."
+version = "0.0.1"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/WASasquatch/open-manager-comfyui"
+
+# Two ways to load, one core:
+#   pip install .   -> provides the `comfyui_manager` import name, loaded by --enable-manager
+#   clone into custom_nodes -> loaded by the custom_nodes scan, can live besides core ComfyUI Manager
+[tool.setuptools]
+packages = ["open_manager", "comfyui_manager"]
+
+[tool.setuptools.package-data]
+open_manager = ["web/*.js", "web/*.svg", "themes/*.json"]
+
+[tool.comfy]
+PublisherId = "was"
+DisplayName = "Open Manager"
+Icon = "https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-comfyui.svg"
+Banner = "https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-banner.png"
