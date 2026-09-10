@@ -1443,14 +1443,40 @@ async function flushLicenses() {
 }
 
 // A list row's artwork, falling back to a tile carrying the pack's initial.
-function packIcon(url, name) {
+function packIcon(url, name, extra) {
   const initial = (String(name || "?").replace(/^[^a-z0-9]+/i, "") || "?")[0].toUpperCase();
   const letter = el("div", "om-side-icon om-side-initial", initial);
+  if (extra) letter.classList.add(extra);
   if (!url) return letter;
   const icon = el("img", "om-side-icon");
+  if (extra) icon.classList.add(extra);
   icon.src = url;
+  // The fallback keeps the caller's extra class, so a broken image still sizes correctly.
   icon.onerror = () => icon.replaceWith(letter);
   return icon;
+}
+
+// Large counts read better abbreviated; smaller ones are left exact. The unit is chosen
+// from the value after rounding, so 999,999 reads "1.0M" rather than "1000k", and the
+// decimal is dropped past 100 of a unit to keep the text about four characters wide.
+function countText(value) {
+  const n = Number(value) || 0;
+  if (n < 1e4) return n.toLocaleString();
+  const scale = (size, suffix) => {
+    const v = n / size;
+    return (v >= 99.95 ? String(Math.round(v)) : v.toFixed(1)) + suffix;
+  };
+  return n >= 999500 ? scale(1e6, "M") : scale(1e3, "k");
+}
+
+// A pack's GitHub stars. Null where the registry records none, so callers can leave the
+// metadata line uncluttered rather than printing a zero.
+function starCount(stars) {
+  const n = Number(stars) || 0;
+  if (!n) return null;
+  const pill = el("span", "om-stars", `★ ${countText(n)}`);
+  pill.title = `${n.toLocaleString()} GitHub stars`;
+  return pill;
 }
 
 function buildResultRow(entry) {
@@ -1461,6 +1487,8 @@ function buildResultRow(entry) {
   const meta = el("div", "om-side-meta");
   meta.appendChild(document.createTextNode(
     `${entry.advertised || "no version"} · ${entry.downloads.toLocaleString()} downloads`));
+  const stars = starCount(entry.stars);
+  if (stars) meta.appendChild(stars);
   const lic = el("span", "om-lic");
   paintLicense(lic, entry);
   queueLicense(entry, lic);
@@ -1477,6 +1505,45 @@ function buildResultRow(entry) {
   control.el.classList.add("om-side-ictl");
   row.appendChild(control.el);
   return row;
+}
+
+// The same catalogue entry drawn as a card: a larger icon, the publisher, and the
+// description, for the grid view. The metadata line carries whatever fits on one row.
+function buildResultCard(entry) {
+  const card = el("div", "om-card");
+  const head = el("div", "om-card-head");
+  head.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-card-icon"));
+  const title = el("div", "om-card-title");
+  title.appendChild(el("div", "om-side-name", entry.name || entry.id));
+  if (entry.publisher) title.appendChild(el("div", "om-card-pub", entry.publisher));
+  head.appendChild(title);
+  head.onclick = () => openPack(entry.id);
+  card.appendChild(head);
+
+  const desc = el("div", "om-card-desc", entry.description || "No description published.");
+  desc.onclick = () => openPack(entry.id);
+  card.appendChild(desc);
+
+  const meta = el("div", "om-side-meta");
+  meta.appendChild(document.createTextNode(
+    `${entry.advertised || "no version"} · ${countText(entry.downloads)} ↓`));
+  const stars = starCount(entry.stars);
+  if (stars) meta.appendChild(stars);
+  const lic = el("span", "om-lic");
+  paintLicense(lic, entry);
+  queueLicense(entry, lic);
+  meta.appendChild(lic);
+  card.appendChild(meta);
+
+  const control = makeInstallControl({
+    packId: entry.id,
+    withMenu: false,
+    onInstall: () => quickInstall(entry.id, control),
+  });
+  control.setInstall();
+  control.el.classList.add("om-card-ictl");
+  card.appendChild(control.el);
+  return card;
 }
 
 // The node types in the open graph that ComfyUI has no registered class for. ComfyUI reports
@@ -1810,6 +1877,8 @@ function buildInstalledRow(pack) {
   const meta = el("div", "om-side-meta");
   const shownDir = pack.disabled ? pack.dir.replace(/\.disabled$/, "") : pack.dir;
   meta.appendChild(document.createTextNode(`${pack.version}${shownDir !== pack.id ? " · " + shownDir : ""}`));
+  const istars = starCount(pack.stars);
+  if (istars) meta.appendChild(istars);
   if (pack.disabled) meta.appendChild(el("span", "om-disabled", "disabled"));
   if (updatable) meta.appendChild(el("span", "om-upd", `update → ${pack.latest}`));
   text.appendChild(meta);
@@ -1959,6 +2028,18 @@ function dropdown(storageKey, fallback, options) {
   return select;
 }
 
+// How a sync should read the catalogue, from the panel's settings. The backend clamps the
+// count, so a mistyped preference cannot turn the sync into a flood.
+function syncOptions() {
+  const get = (key, fallback) => {
+    try { return app.extensionManager.setting.get(key) ?? fallback; } catch { return fallback; }
+  };
+  return {
+    parallel: get("openManager.parallelSync", true) !== false,
+    concurrency: Number(get("openManager.syncConcurrency", 8)) || 8,
+  };
+}
+
 // The registry browser over the cached catalogue: search, a chosen sort, and a licence
 // filter. Only a sync, an update or an install reaches the network.
 function renderRegistry(container) {
@@ -2001,7 +2082,13 @@ function renderRegistry(container) {
   };
 
   const startSync = async () => {
-    try { await api.fetchApi(`${API}/catalog/sync`, { method: "POST" }); } catch (error) {}
+    try {
+      await api.fetchApi(`${API}/catalog/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(syncOptions()),
+      });
+    } catch (error) {}
     showSyncing();
   };
 
@@ -2034,6 +2121,10 @@ function renderRegistry(container) {
     container.appendChild(search);
 
     const controls = el("div", "om-side-controls");
+    const viewSel = dropdown("om-registry-view", "list", [
+      ["list", "List view"],
+      ["cards", "Card view"],
+    ]);
     const sortSel = dropdown("om-registry-sort", "downloads", [
       ["downloads", "Most downloads"],
       ["released", "Recently released"],
@@ -2056,6 +2147,7 @@ function renderRegistry(container) {
     filterBox.checked = (localStorage.getItem("om-registry-published") ?? "1") === "1";
     filterWrap.appendChild(filterBox);
     filterWrap.appendChild(el("span", null, "Published only"));
+    controls.appendChild(viewSel);
     controls.appendChild(sortSel);
     controls.appendChild(licSel);
     controls.appendChild(filterWrap);
@@ -2078,8 +2170,9 @@ function renderRegistry(container) {
     let rendered = 0;
 
     const more = () => {
+      const build = viewSel.value === "cards" ? buildResultCard : buildResultRow;
       const slice = filtered.slice(rendered, rendered + CHUNK);
-      for (const entry of slice) list.appendChild(buildResultRow(entry));
+      for (const entry of slice) list.appendChild(build(entry));
       rendered += slice.length;
     };
     const apply = () => {
@@ -2095,6 +2188,8 @@ function renderRegistry(container) {
           || (node.publisher || "").toLowerCase().includes(query);
       }).sort(comparators[sortSel.value] || comparators.downloads);
       count.textContent = `${filtered.length.toLocaleString()} shown`;
+      // The grid lays columns out to the sidebar's width; the list stays a single column.
+      list.classList.toggle("om-card-grid", viewSel.value === "cards");
       list.replaceChildren();
       rendered = 0;
       more();
@@ -2106,6 +2201,7 @@ function renderRegistry(container) {
     });
     let timer = null;
     search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(apply, 150); });
+    viewSel.addEventListener("change", () => { localStorage.setItem("om-registry-view", viewSel.value); apply(); });
     sortSel.addEventListener("change", () => { localStorage.setItem("om-registry-sort", sortSel.value); apply(); });
     licSel.addEventListener("change", () => { localStorage.setItem("om-registry-license", licSel.value); apply(); });
     filterBox.addEventListener("change", () => {
@@ -2176,6 +2272,25 @@ sidebarStyle.textContent = `
 .om-disabled { font-size: 10px; font-weight: 600; padding: 0 6px; margin-left: 6px;
   border: 1px solid var(--om-border); color: var(--om-muted); border-radius: 999px; line-height: 15px; }
 .om-side-ictl { flex: none; }
+.om-stars { color: var(--om-muted); font-size: 11px; white-space: nowrap; }
+/* Card view. The column count follows the sidebar's width rather than a fixed breakpoint,
+   so widening the panel packs more cards per row instead of stretching them. */
+.om-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px; align-content: start; }
+.om-card { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px;
+  border: 1px solid var(--om-border); border-radius: 9px; background: var(--om-surface); }
+.om-card:hover { background: var(--om-hover); }
+.om-card-head { display: flex; gap: 9px; align-items: center; min-width: 0; cursor: pointer; }
+.om-card-icon { width: 44px; height: 44px; border-radius: 8px; font-size: 18px; }
+.om-card-title { flex: 1; min-width: 0; }
+.om-card-pub { color: var(--om-muted); font-size: 11px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+/* Three lines of description, clipped rather than wrapped, so cards stay the same height. */
+.om-card-desc { color: var(--om-text-2); font-size: 11px; line-height: 1.45; cursor: pointer;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+/* Pushed to the bottom so the button lines up across cards of unequal text length. */
+.om-card-ictl { margin-top: auto; }
+.om-card-ictl .om-btn { width: 100%; padding: 6px 12px; font-size: 12px; }
 .om-alert { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px;
   background: #2b2412; border: 1px solid #9e6a00; border-left-width: 3px; border-radius: 8px;
   padding: 10px 12px; color: var(--om-text); }
@@ -2250,6 +2365,20 @@ app.registerExtension({
       tooltip: "Used by the 'When stale' renewal policy.",
     },
     {
+      id: "openManager.parallelSync",
+      name: "Open Manager: sync the registry in parallel",
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Read several catalogue pages at once. Much faster on a broadband link; turn it off to read one page at a time.",
+    },
+    {
+      id: "openManager.syncConcurrency",
+      name: "Open Manager: catalogue pages read at once",
+      type: "number",
+      defaultValue: 8,
+      tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16; higher is not always faster and risks the registry rate-limiting you.",
+    },
+    {
       id: "openManager.githubToken",
       name: "Open Manager: GitHub token for one-click starring (optional)",
       type: "text",
@@ -2294,7 +2423,7 @@ app.registerExtension({
     api.fetchApi(`${API}/catalog/auto-sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ policy, stale_days: staleDays }),
+      body: JSON.stringify({ policy, stale_days: staleDays, ...syncOptions() }),
     }).catch(() => {});
   },
 });

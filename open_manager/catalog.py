@@ -27,6 +27,23 @@ PAGE_LIMIT = 100
 #: Seconds one page request may take.
 TIMEOUT = 30
 
+#: Page requests in flight at once. The pages after the first are independent, so they are
+#: read together rather than one after another.
+CONCURRENCY = 8
+
+#: Most page requests a caller may ask for at once. A preference above this is clamped, so a
+#: mistyped setting cannot turn the sync into a flood.
+MAX_CONCURRENCY = 16
+
+#: Attempts made per page before the sync gives up.
+ATTEMPTS = 3
+
+#: Seconds waited before retrying a page, doubled for each attempt after.
+RETRY_BACKOFF = 0.5
+
+#: Statuses worth another attempt: the registry rate limiting, or a transient server fault.
+_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+
 logger = log.get_logger("catalog")
 
 _state = {"syncing": False, "done": 0, "total": 0, "error": ""}
@@ -119,33 +136,103 @@ def _entry(node: dict) -> dict:
     }
 
 
-async def sync() -> None:
-    """Fetch the whole catalogue page by page and write it to the cache.
+def _limit(concurrency: int | None) -> int:
+    """The page requests to keep in flight, held inside the range a sync will accept.
 
-    Runs one at a time, reports progress through :func:`state`, and leaves any existing cache
-    in place on failure.
+    Args:
+        concurrency: A caller's preference, or ``None`` for the default.
+
+    Returns:
+        A count between one and :data:`MAX_CONCURRENCY`.
+    """
+    if concurrency is None:
+        return CONCURRENCY
+    try:
+        wanted = int(concurrency)
+    except (TypeError, ValueError):
+        return CONCURRENCY
+    return max(1, min(MAX_CONCURRENCY, wanted))
+
+
+async def _page(session: aiohttp.ClientSession, number: int) -> dict:
+    """Fetch one catalogue page, trying again where the registry is busy.
+
+    Args:
+        session: Session the request runs on.
+        number: Page to read, counted from one.
+
+    Returns:
+        The decoded body.
+
+    Raises:
+        RuntimeError: Where the page was refused, or every attempt failed.
+    """
+    url = f"{BASE}?limit={PAGE_LIMIT}&page={number}"
+    delay = RETRY_BACKOFF
+    attempts = max(1, ATTEMPTS)
+    for attempt in range(1, attempts + 1):
+        detail = ""
+        retryable = True
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as answer:
+                if answer.status == 200:
+                    return await answer.json()
+                detail = f"registry returned {answer.status}"
+                retryable = answer.status in _RETRY_STATUS
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+            detail = f"{type(error).__name__}: {error}"
+        if not retryable or attempt == attempts:
+            raise RuntimeError(f"page {number}: {detail}")
+        await asyncio.sleep(delay)
+        delay *= 2
+
+
+async def sync(concurrency: int | None = None) -> None:
+    """Fetch the whole catalogue and write it to the cache.
+
+    The first page is read on its own, because it reports how many pages there are; the rest
+    are read several at a time. Runs one at a time, reports progress through :func:`state`,
+    and leaves any existing cache in place on failure.
+
+    Args:
+        concurrency: Page requests to keep in flight, clamped to ``1..MAX_CONCURRENCY``.
+            One reads the pages one after another. ``None`` uses :data:`CONCURRENCY`.
     """
     if _state["syncing"]:
         return
     _session["synced"] = True
     _state.update(syncing=True, done=0, total=0, error="")
-    nodes: list[dict] = []
     try:
         async with aiohttp.ClientSession() as session:
-            page = 1
-            total_pages = 1
-            while page <= total_pages:
-                url = f"{BASE}?limit={PAGE_LIMIT}&page={page}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=TIMEOUT)) as answer:
-                    if answer.status != 200:
-                        raise RuntimeError(f"registry returned {answer.status}")
-                    data = await answer.json()
-                total_pages = max(1, int(data.get("totalPages") or 1))
-                _state["total"] = total_pages
-                nodes.extend(_entry(node) for node in data.get("nodes", []))
-                _state["done"] = page
-                page += 1
-                await asyncio.sleep(0.2)
+            first = await _page(session, 1)
+            total_pages = max(1, int(first.get("totalPages") or 1))
+            _state.update(total=total_pages, done=1)
+
+            # Pages finish out of order, so each keeps its own slot and they are joined in
+            # page order once every read has come back.
+            pages: list[list[dict]] = [[] for _ in range(total_pages)]
+            pages[0] = [_entry(node) for node in first.get("nodes", [])]
+            gate = asyncio.Semaphore(_limit(concurrency))
+
+            async def read(number: int) -> None:
+                async with gate:
+                    data = await _page(session, number)
+                pages[number - 1] = [_entry(node) for node in data.get("nodes", [])]
+                _state["done"] += 1
+
+            # A page that fails every attempt abandons the sync, so a partial catalogue is
+            # never written over a complete one. The reads still running are cancelled and
+            # drained first, so none of them outlive the session they were issued on.
+            reads = [asyncio.ensure_future(read(number)) for number in range(2, total_pages + 1)]
+            try:
+                await asyncio.gather(*reads)
+            except Exception:
+                for task in reads:
+                    task.cancel()
+                await asyncio.gather(*reads, return_exceptions=True)
+                raise
+
+        nodes = [entry for page in pages for entry in page]
         _path().write_text(
             json.dumps({"fetched_at": time.time(), "nodes": nodes}), encoding="utf-8"
         )

@@ -703,10 +703,37 @@ def register_routes() -> None:
         """Whether the catalogue is cached, its size and age, and any sync in progress."""
         return web.json_response(catalog.state())
 
+    def _sync_concurrency(body: dict) -> int | None:
+        """The page concurrency a sync request asks for.
+
+        Args:
+            body: The decoded request body.
+
+        Returns:
+            One where the caller turned parallel syncing off, the requested count where it
+            gave one, or ``None`` to leave the default in place. The count is clamped by
+            :func:`catalog.sync` itself.
+        """
+        if not body.get("parallel", True):
+            return 1
+        wanted = body.get("concurrency")
+        if wanted is None:
+            return None
+        try:
+            return int(wanted)
+        except (TypeError, ValueError):
+            return None
+
     @PromptServer.instance.routes.post(f"{PREFIX}/catalog/sync")
-    async def catalog_sync(_request: web.Request) -> web.Response:
+    async def catalog_sync(request: web.Request) -> web.Response:
         """Start a catalogue sync in the background."""
-        asyncio.get_running_loop().create_task(catalog.sync())
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        asyncio.get_running_loop().create_task(catalog.sync(_sync_concurrency(body)))
         return web.json_response({"ok": True})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/catalog/auto-sync")
@@ -719,6 +746,8 @@ def register_routes() -> None:
             body = await request.json()
         except ValueError:
             body = {}
+        if not isinstance(body, dict):
+            body = {}
         policy = str(body.get("policy", "startup"))
         try:
             stale_days = float(body.get("stale_days", 7) or 7)
@@ -726,7 +755,7 @@ def register_routes() -> None:
             stale_days = 7.0
         triggered = catalog.should_auto_sync(policy, stale_days)
         if triggered:
-            asyncio.get_running_loop().create_task(catalog.sync())
+            asyncio.get_running_loop().create_task(catalog.sync(_sync_concurrency(body)))
         return web.json_response({"triggered": triggered, **catalog.state()})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/installed")
@@ -749,6 +778,7 @@ def register_routes() -> None:
             pack["latest"] = entry.get("advertised", "") if entry else ""
             pack["repository"] = entry.get("repository", "") if entry else ""
             pack["icon"] = entry.get("icon", "") if entry else ""
+            pack["stars"] = int(entry.get("stars") or 0) if entry else 0
             pack["status"] = ""
 
         # The installed version's status is looked up only where it is not the advertised

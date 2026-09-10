@@ -217,5 +217,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# WSL
-*:Zone.Identifier
+# Windows alternate data stream markers, whose separator byte is not always an ASCII colon.
+*Zone.Identifier
