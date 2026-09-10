@@ -208,12 +208,22 @@ async def _text(session: aiohttp.ClientSession, url: str) -> str:
         return ""
 
 
-async def _json(session: aiohttp.ClientSession, url: str) -> dict:
-    """Fetch JSON, answering an empty object on any failure."""
+async def _json(session: aiohttp.ClientSession, url: str, token: str = "") -> dict:
+    """Fetch JSON, answering an empty object on any failure.
+
+    Args:
+        session: Session the request runs on.
+        url: Absolute URL.
+        token: GitHub token, which lifts the hourly limit from 60 requests to 5,000. A pack
+            page spends up to three, so without one a browsing session runs out quickly.
+    """
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "open-manager"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
         async with session.get(
             url,
-            headers={"Accept": "application/vnd.github+json", "User-Agent": "open-manager"},
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=TIMEOUT),
         ) as answer:
             if answer.status != 200:
@@ -224,7 +234,7 @@ async def _json(session: aiohttp.ClientSession, url: str) -> dict:
 
 
 async def _issue_counts(
-    session: aiohttp.ClientSession, owner: str, repo: str, info: dict
+    session: aiohttp.ClientSession, owner: str, repo: str, info: dict, token: str = ""
 ) -> tuple[int, int]:
     """Open issue and pull request counts, counted apart.
 
@@ -238,7 +248,9 @@ async def _issue_counts(
         ``(open_issues, open_prs)``.
     """
     data = await _json(
-        session, f"https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=100"
+        session,
+        f"https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=100",
+        token,
     )
     if not isinstance(data, list):
         return int(info.get("open_issues_count") or 0), 0
@@ -249,6 +261,7 @@ async def _issue_counts(
             session,
             f"https://api.github.com/search/issues"
             f"?q=repo:{owner}/{repo}+type:issue+state:open&per_page=1",
+            token,
         )
         if isinstance(search, dict) and "total_count" in search:
             issues = int(search["total_count"])
@@ -256,7 +269,7 @@ async def _issue_counts(
 
 
 async def fetch(
-    node_id: str, repository: str, sig: str, session: aiohttp.ClientSession
+    node_id: str, repository: str, sig: str, session: aiohttp.ClientSession, token: str = ""
 ) -> Metadata:
     """Repository metadata for a pack, from cache where the versions are unchanged.
 
@@ -280,13 +293,16 @@ async def fetch(
         _write_cache(node_id, meta)
         return meta
 
-    meta = await _scrape(owner_repo[0], owner_repo[1], sig, session)
-    _write_cache(node_id, meta)
+    meta = await _scrape(owner_repo[0], owner_repo[1], sig, session, token)
+    # A record keyed by the version signature is kept until the pack publishes again, so a
+    # scrape that came back with nothing at all is left uncached and tried again instead.
+    if not _is_blank(meta):
+        _write_cache(node_id, meta)
     return meta
 
 
 async def fetch_repo(
-    repository: str, session: aiohttp.ClientSession, max_age: float = 86400.0
+    repository: str, session: aiohttp.ClientSession, max_age: float = 86400.0, token: str = ""
 ) -> Metadata:
     """Repository metadata for a repo that is not on the registry, cached by repository.
 
@@ -309,12 +325,97 @@ async def fetch_repo(
             return Metadata.from_json(data)
     except (OSError, ValueError):
         pass
-    meta = await _scrape(owner_repo[0], owner_repo[1], "", session)
-    _write_cache(key, meta)
+    meta = await _scrape(owner_repo[0], owner_repo[1], "", session, token)
+    if not _is_blank(meta):
+        _write_cache(key, meta)
     return meta
 
 
-async def _scrape(owner: str, repo: str, sig: str, session: aiohttp.ClientSession) -> Metadata:
+#: Filenames a README is commonly held under, tried in order.
+README_NAMES = ("README.md", "README.MD", "readme.md", "README.rst", "README")
+
+#: A ref the panel will read: a branch name or a commit sha. Slashes are allowed because
+#: branches carry them; a leading dash and any traversal are not.
+_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
+
+
+def valid_ref(ref: str) -> bool:
+    """Whether a ref is one worth putting in a raw content URL.
+
+    Args:
+        ref: A branch name or commit sha.
+
+    Returns:
+        True where the ref is well formed and climbs nowhere.
+    """
+    text = (ref or "").strip()
+    return bool(text) and ".." not in text and bool(_REF.match(text))
+
+
+async def read_at_ref(
+    owner: str, repo: str, ref: str, session: aiohttp.ClientSession
+) -> dict:
+    """Read a repository's README and pyproject at one branch or commit.
+
+    Only the raw content host is used, so this costs nothing against the API's hourly limit
+    and keeps working when that limit is spent.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        ref: Branch name or commit sha to read at.
+        session: Session the reads run on.
+
+    Returns:
+        ``{readme, readme_format, developer}``, the README empty where the ref holds none.
+    """
+    readme, fmt = "", "markdown"
+    for name in README_NAMES:
+        readme = await _text(
+            session, f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{name}"
+        )
+        if readme:
+            fmt = "markdown" if name.lower().endswith((".md", ".rst")) or name == "README" else "text"
+            break
+    pyproject = await _text(
+        session, f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/pyproject.toml"
+    )
+    return {
+        "readme": readme,
+        "readme_format": fmt,
+        "developer": developer.from_pyproject(pyproject),
+    }
+
+
+def _is_blank(meta: Metadata) -> bool:
+    """Whether a scrape came back with nothing at all.
+
+    A repository that yields neither a README nor a single field did not fail to find
+    anything, it failed to ask: GitHub's hourly limit, or no network. Caching that would
+    leave the pack page empty until its next release, so it is not cached.
+
+    Args:
+        meta: The record a scrape produced.
+
+    Returns:
+        True where every field a read could have filled is empty.
+    """
+    return not (
+        meta.readme
+        or meta.topics
+        or meta.license
+        or meta.pushed_at
+        or meta.open_issues
+        or meta.open_prs
+        or meta.requires_python
+        or meta.requires_comfyui
+        or meta.developer
+    )
+
+
+async def _scrape(
+    owner: str, repo: str, sig: str, session: aiohttp.ClientSession, token: str = ""
+) -> Metadata:
     """Read a repository's README and support fields from GitHub.
 
     Args:
@@ -326,24 +427,42 @@ async def _scrape(owner: str, repo: str, sig: str, session: aiohttp.ClientSessio
     Returns:
         The metadata, with empty fields where a read failed.
     """
-    info = await _json(session, f"https://api.github.com/repos/{owner}/{repo}")
-    branch = info.get("default_branch", "main") or "main"
-    open_issues, open_prs = await _issue_counts(session, owner, repo, info)
+    info = await _json(session, f"https://api.github.com/repos/{owner}/{repo}", token)
+    open_issues, open_prs = await _issue_counts(session, owner, repo, info, token)
 
-    readme = ""
-    for name in ("README.md", "README.MD", "readme.md", "README.rst", "README"):
-        readme = await _text(
-            session, f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{name}"
-        )
+    # Where the API answered, it named the branch. Where it did not -- an outage, or the
+    # hourly limit spent -- the branch is a guess, and the raw host is case sensitive, so
+    # the usual names are tried rather than assuming "main". This keeps the README, the
+    # pyproject and the gallery readable when only the API is unavailable.
+    named = info.get("default_branch") or ""
+    # Both spellings of main are tried before master: a repository carrying either name
+    # alongside an old master should be read from the one it actually develops on.
+    branches = (named,) if named else ("main", "Main", "master")
+
+    readme, fmt, branch = "", "markdown", named or "main"
+    for candidate in branches:
+        for name in ("README.md", "README.MD", "readme.md", "README.rst", "README"):
+            readme = await _text(
+                session, f"https://raw.githubusercontent.com/{owner}/{repo}/{candidate}/{name}"
+            )
+            if readme:
+                fmt = "markdown" if name.lower().endswith((".md", ".rst")) or name == "README" else "text"
+                branch = candidate
+                break
         if readme:
-            fmt = "markdown" if name.lower().endswith((".md", ".rst")) or name == "README" else "text"
             break
-    else:
-        fmt = "markdown"
 
-    pyproject = await _text(
-        session, f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/pyproject.toml"
-    )
+    # The pyproject carries requires-python and the [tool.open_manager] table, the gallery
+    # among it. Where the branch was guessed, a miss is retried on the other candidates
+    # rather than assumed absent: a repository can hold a README on one branch and its
+    # pyproject on another.
+    pyproject = ""
+    for candidate in (branch, *(b for b in branches if b != branch)):
+        pyproject = await _text(
+            session, f"https://raw.githubusercontent.com/{owner}/{repo}/{candidate}/pyproject.toml"
+        )
+        if pyproject:
+            break
     requires_python, requires_comfyui = _requires_from_pyproject(pyproject)
 
     return Metadata(
