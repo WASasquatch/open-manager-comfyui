@@ -36,6 +36,22 @@ __all__ = ["ALLOW_BANNED", "PREFIX", "register_routes"]
 #: Every route this package serves sits below this versioned prefix.
 PREFIX = "/open_manager/v1/api"
 
+#: Most repositories one licence request may ask about.
+LICENSE_BATCH = 200
+
+#: Extensions a gallery image may carry. The bytes are checked too; this only rejects the
+#: obvious before anything is fetched.
+GALLERY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif")
+
+#: Largest gallery image served, in bytes.
+GALLERY_CAP = 12_000_000
+
+#: Branches listed for a repository.
+REF_BRANCHES = 100
+
+#: Recent commits listed for a repository.
+REF_COMMITS = 20
+
 #: Statuses blocked rather than warned about. ``OPEN_MANAGER_ALLOW_BANNED=1`` lifts the
 #: block and treats a ban as a warning.
 BLOCKED_STATUSES = ("banned",)
@@ -53,6 +69,65 @@ _registered = False
 
 #: Hosts allowed to trigger a server restart.
 _LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _github_headers(token: str) -> dict:
+    """Headers for a GitHub API call, carrying the token where one is configured.
+
+    Args:
+        token: A GitHub token, or empty for an anonymous call.
+
+    Returns:
+        Request headers. A token lifts the hourly limit from 60 to 5,000.
+    """
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "open-manager"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _flag(value) -> bool:
+    """Read a boolean that may have arrived as a query string rather than as JSON.
+
+    ``bool("false")`` is true, so query parameters cannot be trusted to ``bool`` directly.
+
+    Args:
+        value: A JSON boolean, or the text a query string carried.
+
+    Returns:
+        What the caller meant.
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _license_options(source: dict) -> "license_files.Options":
+    """How a licence lookup should run, from the panel's settings.
+
+    Each of the three speed-ups is off unless the caller turns it on, so the default
+    behaviour is what it was before they existed. The values are clamped by
+    :class:`license_files.Options`.
+
+    Args:
+        source: A decoded request body, or a request's query parameters.
+
+    Returns:
+        The options to resolve with.
+    """
+    if not isinstance(source, dict):
+        return license_files.Options()
+    wanted = source.get("concurrency")
+    try:
+        concurrency = int(wanted) if wanted is not None else 8
+    except (TypeError, ValueError):
+        concurrency = 8
+    return license_files.Options(
+        concurrency=concurrency,
+        race=_flag(source.get("race")),
+        use_api=_flag(source.get("use_api")),
+        token=str(source.get("token") or ""),
+    )
 
 
 def _reboot() -> None:
@@ -144,6 +219,68 @@ def _pack_file(repo: str, relative: str, cap: int) -> str:
         return target.read_text(encoding="utf-8", errors="replace")[:cap]
     except OSError:
         return ""
+
+
+def _pack_bytes(repo: str, relative: str, cap: int) -> bytes | None:
+    """A file read as bytes from the installed copy of a pack.
+
+    Args:
+        repo: The pack's repository URL, matched against installed directories.
+        relative: Path inside the pack, already checked for traversal.
+        cap: Most bytes returned.
+
+    Returns:
+        The bytes, or ``None`` where the pack is not installed or holds no such file.
+    """
+    owner_repo = metadata._owner_repo(repo)
+    if owner_repo is None:
+        return None
+    directory = installer.resolve_install_dir(owner_repo[1])
+    if directory is None:
+        return None
+    try:
+        root = directory.resolve()
+        target = (root / relative).resolve()
+        if not target.is_file() or root not in target.parents:
+            return None
+        with target.open("rb") as handle:
+            return handle.read(cap)
+    except OSError:
+        return None
+
+
+#: Leading bytes that identify each image type, as hex with the offset they sit at.
+_IMAGE_MAGIC = (
+    ("89504e470d0a1a0a", 0, "image/png"),
+    ("ffd8ff", 0, "image/jpeg"),
+    ("474946383761", 0, "image/gif"),
+    ("474946383961", 0, "image/gif"),
+)
+
+
+def _image_type(data: bytes) -> str:
+    """The content type of an image, from its leading bytes.
+
+    The bytes are sniffed rather than the extension trusted, because this is served from
+    ComfyUI's own origin: a pack that listed markup or a script would otherwise have it run
+    with the page's privileges.
+
+    Args:
+        data: Start of the file.
+
+    Returns:
+        An image content type, or empty where the bytes are not one.
+    """
+    for prefix, offset, kind in _IMAGE_MAGIC:
+        raw = bytes.fromhex(prefix)
+        if data[offset:offset + len(raw)] == raw:
+            return kind
+    # RIFF and ISO-BMFF carry their marker after a length, so they are matched by span.
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp" and data[8:12] in (b"avif", b"avis", b"mif1"):
+        return "image/avif"
+    return ""
 
 
 def _local_developer(repo: str) -> dict:
@@ -319,7 +456,10 @@ def register_routes() -> None:
             if lic["tier"] == "unknown" and record.repository:
                 try:
                     resolved = await asyncio.wait_for(
-                        license_files.resolve(record.repository, session), timeout=8
+                        license_files.resolve(
+                            record.repository, session, _license_options(dict(request.query))
+                        ),
+                        timeout=8,
                     )
                 except (asyncio.TimeoutError, aiohttp.ClientError):
                     resolved = ""
@@ -389,7 +529,9 @@ def register_routes() -> None:
                     status=502,
                 )
             sig = metadata.signature(versions)
-            meta = await metadata.fetch(node_id, record.repository, sig, session)
+            meta = await metadata.fetch(
+                node_id, record.repository, sig, session, str(request.query.get("token") or "")
+            )
         payload = meta.to_json()
         payload["repository"] = record.repository
         # An installed pack's own pyproject describes the copy in use and wins over the
@@ -410,7 +552,9 @@ def register_routes() -> None:
         if not repo:
             return web.json_response({"error": "no repository named"}, status=400)
         async with aiohttp.ClientSession() as session:
-            meta = await metadata.fetch_repo(repo, session)
+            meta = await metadata.fetch_repo(
+                repo, session, token=str(request.query.get("token") or "")
+            )
         payload = meta.to_json()
         payload["repository"] = repo
         info = licenses.classify(meta.license)
@@ -450,7 +594,7 @@ def register_routes() -> None:
         text = _pack_file(repo, clean, 8_000_000)
         if not text:
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "master"):
+                for candidate in (branch, "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
@@ -499,7 +643,7 @@ def register_routes() -> None:
         text = _pack_file(repo, clean, 1_000_000)
         if not text:
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "master"):
+                for candidate in (branch, "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
@@ -519,6 +663,162 @@ def register_routes() -> None:
         if not _looks_like_theme(data):
             return web.json_response({"ok": False, "reason": "the file is not a colour palette"}, status=422)
         return web.json_response({"ok": True, "theme": data})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/refs")
+    async def repo_refs(request: web.Request) -> web.Response:
+        """List a repository's branches and its most recent commits.
+
+        Two API calls, so the panel asks only when the picker is opened rather than on
+        every pack page. A token lifts the hourly limit that otherwise applies.
+        """
+        repo = request.query.get("repo", "")
+        token = str(request.query.get("token") or "")
+        owner_repo = metadata._owner_repo(repo)
+        if owner_repo is None:
+            return web.json_response({"ok": False, "reason": "not a GitHub repository"}, status=400)
+        owner, name = owner_repo
+        headers = _github_headers(token)
+
+        async def read(url: str):
+            try:
+                async with session.get(
+                    url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+                ) as answer:
+                    if answer.status != 200:
+                        return None, answer.status
+                    return await answer.json(), 200
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                return None, 0
+
+        async with aiohttp.ClientSession() as session:
+            info, _ = await read(f"https://api.github.com/repos/{owner}/{name}")
+            branches, status = await read(
+                f"https://api.github.com/repos/{owner}/{name}/branches?per_page={REF_BRANCHES}"
+            )
+            commits, _ = await read(
+                f"https://api.github.com/repos/{owner}/{name}/commits?per_page={REF_COMMITS}"
+            )
+
+        if branches is None and commits is None:
+            reason = (
+                "GitHub's hourly limit is spent; set a GitHub token in settings to raise it"
+                if status == 403
+                else "the repository's refs could not be read"
+            )
+            return web.json_response({"ok": False, "reason": reason}, status=502)
+
+        return web.json_response({
+            "ok": True,
+            "default_branch": (info or {}).get("default_branch", "") or "",
+            "branches": [
+                {"name": b.get("name", ""), "sha": (b.get("commit") or {}).get("sha", "")[:7]}
+                for b in (branches or []) if b.get("name")
+            ],
+            "commits": [
+                {
+                    "sha": c.get("sha", ""),
+                    "short": c.get("sha", "")[:7],
+                    "message": ((((c.get("commit") or {}).get("message", "") or "")
+                                 .splitlines() or [""])[0])[:120],
+                    "date": ((c.get("commit") or {}).get("author") or {}).get("date", "") or "",
+                }
+                for c in (commits or []) if c.get("sha")
+            ],
+        })
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/readme-at")
+    async def readme_at(request: web.Request) -> web.Response:
+        """Read a pack's README and declared table at one branch or commit.
+
+        Only the raw content host is read, so switching ref costs nothing against the API's
+        hourly limit and still works once that limit is spent.
+        """
+        repo = request.query.get("repo", "")
+        ref = request.query.get("ref", "")
+        owner_repo = metadata._owner_repo(repo)
+        if owner_repo is None:
+            return web.json_response({"ok": False, "reason": "not a GitHub repository"}, status=400)
+        if not metadata.valid_ref(ref):
+            return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
+        async with aiohttp.ClientSession() as session:
+            payload = await metadata.read_at_ref(owner_repo[0], owner_repo[1], ref, session)
+        if not payload["readme"] and not payload["developer"]:
+            return web.json_response(
+                {"ok": False, "reason": f"nothing to read at {ref}"}, status=404
+            )
+        return web.json_response({"ok": True, "ref": ref, **payload})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/gallery-image")
+    async def gallery_image(request: web.Request) -> web.Response:
+        """Serve one image a pack lists in ``[tool.open_manager] gallery``.
+
+        The image comes from the installed copy where the pack is installed, and from the
+        repository where it is not. Entries that are already absolute URLs never reach here:
+        the panel points the browser straight at them.
+
+        Only bytes that are recognisably an image are returned, and they are served with the
+        type those bytes say they are, so a pack cannot place markup on ComfyUI's origin.
+        """
+        repo = request.query.get("repo", "")
+        branch = request.query.get("branch", "")
+        path = request.query.get("path", "")
+        clean = path.strip().lstrip("/")
+        if (
+            not clean
+            or ".." in clean
+            or "\\" in clean
+            or len(clean) > 300
+            or not clean.lower().endswith(GALLERY_SUFFIXES)
+        ):
+            return web.json_response({"ok": False, "reason": "invalid image path"}, status=400)
+        owner_repo = metadata._owner_repo(repo)
+        if owner_repo is None:
+            return web.json_response({"ok": False, "reason": "not a GitHub repository"}, status=400)
+        owner, name = owner_repo
+
+        data = _pack_bytes(repo, clean, GALLERY_CAP)
+        if not data:
+            async with aiohttp.ClientSession() as session:
+                for candidate in (branch, "main", "Main", "master"):
+                    if not candidate:
+                        continue
+                    url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
+                    try:
+                        async with session.get(
+                            url, timeout=aiohttp.ClientTimeout(total=20)
+                        ) as answer:
+                            if answer.status == 200:
+                                # read(n) returns only what has arrived, so the body is
+                                # gathered in chunks and stopped at the cap instead.
+                                chunks: list[bytes] = []
+                                total = 0
+                                async for chunk in answer.content.iter_chunked(65536):
+                                    chunks.append(chunk)
+                                    total += len(chunk)
+                                    if total >= GALLERY_CAP:
+                                        break
+                                data = b"".join(chunks)[:GALLERY_CAP]
+                                break
+                    except (aiohttp.ClientError, TimeoutError):
+                        continue
+        if not data:
+            return web.json_response(
+                {"ok": False, "reason": "image not found in the repository"}, status=404
+            )
+        kind = _image_type(data)
+        if not kind:
+            return web.json_response(
+                {"ok": False, "reason": "the file is not an image"}, status=422
+            )
+        return web.Response(
+            body=data,
+            content_type=kind,
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": "inline",
+            },
+        )
 
     @PromptServer.instance.routes.get(f"{PREFIX}/search")
     async def find(request: web.Request) -> web.Response:
@@ -649,7 +949,10 @@ def register_routes() -> None:
         if not repo:
             return web.json_response({"ok": False, "reason": "repo is required"}, status=400)
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, installer.inspect_repo, repo)
+        ref = str(body.get("ref", "")).strip()
+        if ref and not metadata.valid_ref(ref):
+            return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
+        result = await loop.run_in_executor(None, installer.inspect_repo, repo, ref)
         return web.json_response(result, status=200 if result.get("ok") else 502)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install-repo")
@@ -663,8 +966,14 @@ def register_routes() -> None:
         if not repo:
             return web.json_response({"ok": False, "reason": "repo is required"}, status=400)
         with_deps = bool(body.get("with_deps", True))
+        ref = str(body.get("ref", "")).strip()
+        if ref and not metadata.valid_ref(ref):
+            return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
+        overwrite = bool(body.get("overwrite"))
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, installer.install_repo, repo, "", with_deps)
+        result = await loop.run_in_executor(
+            None, installer.install_repo, repo, "", with_deps, ref, overwrite
+        )
         return web.json_response(result.to_json(), status=200 if result.ok else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/uninstall")
@@ -855,11 +1164,16 @@ def register_routes() -> None:
             for i in raw
             if isinstance(i, dict) and i.get("id") and i.get("repository")
         ] if isinstance(raw, list) else []
+        # A listing only ever asks about the rows it has drawn. The cap stops a client
+        # queueing the whole catalogue into one request.
+        items = items[:LICENSE_BATCH]
         if not items:
             return web.json_response({"licenses": {}})
 
         async with aiohttp.ClientSession() as session:
-            by_repo = await license_files.resolve_many([repo for _, repo in items], session)
+            by_repo = await license_files.resolve_many(
+                [repo for _, repo in items], session, _license_options(body)
+            )
 
         out = {}
         for pack_id, repo in items:
