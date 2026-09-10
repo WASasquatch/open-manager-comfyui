@@ -258,7 +258,30 @@ def _extract(archive: Path, destination: Path, strip_top: bool = False) -> list[
 _GITHUB_REPO = re.compile(r"github\.com[:/]+([^/]+)/([^/#?]+)", re.I)
 
 
-def inspect_repo(repo_url: str) -> dict:
+def _archive_urls(owner: str, repo: str, ref: str) -> list[tuple[str, str]]:
+    """Where a repository's zip lives, as ``(label, url)`` pairs to try in order.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        ref: A branch name or commit sha. Empty guesses at the usual branch names.
+
+    Returns:
+        One pair per candidate. A commit sha is fetched by sha; a branch by its head; an
+        empty ref falls back to the branch names a default is commonly called.
+    """
+    base = f"https://codeload.github.com/{owner}/{repo}/zip"
+    ref = (ref or "").strip()
+    if not ref:
+        return [(name, f"{base}/refs/heads/{name}") for name in ("main", "Main", "master")]
+    # A full or abbreviated sha is fetched directly; anything else is treated as a branch,
+    # with the bare form tried after in case it names a tag.
+    if re.fullmatch(r"[0-9a-fA-F]{7,40}", ref):
+        return [(ref, f"{base}/{ref}")]
+    return [(ref, f"{base}/refs/heads/{ref}"), (ref, f"{base}/{ref}")]
+
+
+def inspect_repo(repo_url: str, ref: str = "") -> dict:
     """Report what a GitHub pack would run and change, without installing it.
 
     Args:
@@ -280,14 +303,18 @@ def inspect_repo(repo_url: str) -> dict:
     tmp = Path(tempfile.mkdtemp(prefix="open_manager_inspect_"))
     archive = tmp / "repo.zip"
     try:
-        for candidate in ("main", "master"):
+        for _, url in _archive_urls(owner, repo, ref):
             try:
-                _download(f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{candidate}", archive)
+                _download(url, archive)
                 break
             except RuntimeError:
                 continue
         else:
-            return {"ok": False, "reason": "could not download the repository archive", "findings": [], "impact": {}}
+            reason = (
+                f"could not download {repo} at {ref}" if ref
+                else "could not download the repository archive"
+            )
+            return {"ok": False, "reason": reason, "findings": [], "impact": {}}
 
         assessment = risk.inspect_artifact(str(archive))
         requirements = _requirements_in_archive(archive)
@@ -338,7 +365,13 @@ def _requirements_in_archive(archive: Path) -> list[str]:
     return lines
 
 
-def install_repo(repo_url: str, python: str = "", with_deps: bool = True) -> InstallResult:
+def install_repo(
+    repo_url: str,
+    python: str = "",
+    with_deps: bool = True,
+    ref: str = "",
+    overwrite: bool = False,
+) -> InstallResult:
     """Install a pack from its GitHub repository, for packs not on the registry.
 
     The repository archive is downloaded and extracted with its wrapping directory stripped.
@@ -347,6 +380,10 @@ def install_repo(repo_url: str, python: str = "", with_deps: bool = True) -> Ins
         repo_url: The repository URL.
         python: Interpreter requirements install into. Defaults to the running one.
         with_deps: Whether to install declared requirements.
+        ref: A branch name or commit sha to install. Empty takes the default branch. The ref
+            is recorded in the pack's marker, so the installed list shows what is in place.
+        overwrite: Whether to replace an existing install rather than refusing. Installing a
+            branch over a release is the ordinary case when testing a change.
 
     Returns:
         An :class:`InstallResult`.
@@ -361,23 +398,36 @@ def install_repo(repo_url: str, python: str = "", with_deps: bool = True) -> Ins
     except RuntimeError as error:
         return InstallResult(ok=False, reason=str(error))
 
-    if resolve_install_dir(repo) is not None:
-        return InstallResult(ok=False, reason=f"{repo} is already present. Remove it first to reinstall.")
+    existing = resolve_install_dir(repo)
+    if existing is not None:
+        if not overwrite:
+            return InstallResult(
+                ok=False,
+                directory=str(existing),
+                reason=f"{repo} is already present. Remove it first to reinstall.",
+            )
+        removed = uninstall(existing.name)
+        if not removed.ok:
+            return removed
 
     tmp = Path(tempfile.mkdtemp(prefix="open_manager_"))
     archive = tmp / "repo.zip"
     target = base / _safe_dir_name(repo)
     try:
-        branch = ""
-        for candidate in ("main", "master"):
+        landed = ""
+        for label, url in _archive_urls(owner, repo, ref):
             try:
-                _download(f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{candidate}", archive)
-                branch = candidate
+                _download(url, archive)
+                landed = label
                 break
             except RuntimeError:
                 continue
-        if not branch:
-            return InstallResult(ok=False, reason="could not download the repository archive")
+        if not landed:
+            reason = (
+                f"could not download {repo} at {ref}" if ref
+                else "could not download the repository archive"
+            )
+            return InstallResult(ok=False, reason=reason)
         target.mkdir(parents=True, exist_ok=True)
         try:
             written = _extract(archive, target, strip_top=True)
@@ -386,7 +436,7 @@ def install_repo(repo_url: str, python: str = "", with_deps: bool = True) -> Ins
             return InstallResult(ok=False, reason=str(error))
         (target / ".tracking").write_text("\n".join(written) + "\n", encoding="utf-8")
         (target / MARKER).write_text(
-            json.dumps({"id": repo, "version": f"git:{branch}", "installed_at": time.time()}),
+            json.dumps({"id": repo, "version": f"git:{landed}", "installed_at": time.time()}),
             encoding="utf-8",
         )
     finally:
