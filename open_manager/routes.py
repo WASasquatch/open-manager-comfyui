@@ -31,6 +31,7 @@ from . import (
     registry,
     risk,
     sources,
+    trust,
 )
 
 __all__ = ["ALLOW_BANNED", "PREFIX", "register_routes"]
@@ -945,6 +946,28 @@ def register_routes() -> None:
             },
         )
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/trust")
+    async def trusted_authors(request: web.Request) -> web.Response:
+        """Whether one owner is trusted, or the whole list where none is named."""
+        owner = request.query.get("owner", "").strip()
+        if owner:
+            return web.json_response({"owner": owner, "trusted": trust.is_trusted(owner)})
+        return web.json_response({"authors": trust.listing()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/trust")
+    async def set_trust(request: web.Request) -> web.Response:
+        """Add or remove an owner from the trusted list."""
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        owner = str((body or {}).get("owner") or "").strip()
+        if not owner or len(owner) > 100:
+            return web.json_response({"ok": False, "reason": "owner is required"}, status=400)
+        wanted = _flag((body or {}).get("trusted", True))
+        ok = trust.record(owner) if wanted else trust.forget(owner)
+        return web.json_response({"ok": ok, "owner": owner, "trusted": wanted and ok})
+
     @PromptServer.instance.routes.get(f"{PREFIX}/pack-for-repo")
     async def pack_for_repo(request: web.Request) -> web.Response:
         """The registry pack a repository belongs to, for links between pack pages.
@@ -952,6 +975,18 @@ def register_routes() -> None:
         Read from the cached catalogue rather than the registry, so following a link in a
         README costs nothing and works offline.
         """
+        # Answers either direction: a repository to its pack, or a pack id to its repository.
+        # Both read the cached catalogue, so neither costs a request.
+        pack_id = request.query.get("id", "").strip()
+        if pack_id:
+            folded = _fold(pack_id)
+            for entry in catalog.load():
+                if _fold(entry.get("id")) == folded:
+                    return web.json_response(
+                        {"id": entry.get("id", ""), "repository": entry.get("repository", "")}
+                    )
+            return web.json_response({"id": "", "repository": ""})
+
         wanted = _norm_repo(request.query.get("repo", ""))
         if not wanted:
             return web.json_response({"id": ""})
