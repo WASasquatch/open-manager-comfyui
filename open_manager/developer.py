@@ -239,8 +239,14 @@ def expand(table: dict, lister) -> dict:
                 resolved.extend(sorted(found))
         seen: set[str] = set()
         deduped = [f for f in resolved if not (f in seen or seen.add(f))]
+        # Assigned even when empty. A pattern the lister could not match names nothing, and
+        # keeping it would put a path the pack never had in front of the reader as a button
+        # that cannot work. A lister that sees nothing at all returned above, so an empty
+        # result here means the repository really holds no such file.
         if deduped:
             out[field] = deduped[:_GALLERY_CAP if field == "gallery" else _LIST_CAP]
+        else:
+            out.pop(field, None)
 
     if not out.get("example_workflows"):
         for name in _WORKFLOW_DIRS:
