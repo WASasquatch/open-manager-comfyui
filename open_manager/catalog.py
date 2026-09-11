@@ -103,6 +103,9 @@ def state() -> dict:
     return info
 
 
+#: A licence field that arrived as a pyproject table field rather than a name.
+_LICENCE_FIELD = re.compile(r"^(file|text|spdx_id|type)\s*[=:]", re.I)
+
 #: Owner and repository from a GitHub URL.
 _REPO_URL = re.compile(r"github\.com[:/]+([^/]+)/([^/#?]+)", re.I)
 
@@ -110,8 +113,8 @@ _REPO_URL = re.compile(r"github\.com[:/]+([^/]+)/([^/#?]+)", re.I)
 def load() -> list[dict]:
     """The cached catalogue entries, empty where nothing is cached.
 
-    Borrowed star counts are dropped here as well as at sync, so a cache written before that
-    was noticed is corrected on read rather than only after the next sync.
+    Corrections are applied here as well as at sync, so a cache written before one was
+    noticed is fixed on read rather than only after the next sync.
     """
     try:
         nodes = json.loads(_path().read_text(encoding="utf-8")).get("nodes", [])
@@ -121,6 +124,20 @@ def load() -> list[dict]:
         if node.get("stars") and _borrowed(node.get("repository", "")):
             node["stars"] = 0
             node["borrowed"] = True
+        # A licence stored as a pyproject table rather than a name, classified before that
+        # was read properly. Anything still carrying a brace or a key is classified again.
+        # The colour is derived from the tier, so a change to the palette reaches entries
+        # cached under the old one instead of waiting for the next sync.
+        tier = node.get("license_tier")
+        if tier:
+            node["license_color"] = licenses.colour(tier)
+        name = node.get("license") or ""
+        if name and (name.startswith("{") or _LICENCE_FIELD.match(name)):
+            again = licenses.classify(name)
+            node["license"] = again["name"]
+            node["license_tier"] = again["tier"]
+            node["license_rank"] = again["rank"]
+            node["license_color"] = again["color"]
     return nodes
 
 
