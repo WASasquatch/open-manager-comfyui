@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -102,12 +103,97 @@ def state() -> dict:
     return info
 
 
+#: Owner and repository from a GitHub URL.
+_REPO_URL = re.compile(r"github\.com[:/]+([^/]+)/([^/#?]+)", re.I)
+
+
 def load() -> list[dict]:
-    """The cached catalogue entries, empty where nothing is cached."""
+    """The cached catalogue entries, empty where nothing is cached.
+
+    Borrowed star counts are dropped here as well as at sync, so a cache written before that
+    was noticed is corrected on read rather than only after the next sync.
+    """
     try:
-        return json.loads(_path().read_text(encoding="utf-8")).get("nodes", [])
+        nodes = json.loads(_path().read_text(encoding="utf-8")).get("nodes", [])
     except (OSError, ValueError):
         return []
+    for node in nodes:
+        if node.get("stars") and _borrowed(node.get("repository", "")):
+            node["stars"] = 0
+            node["borrowed"] = True
+    return nodes
+
+
+#: Open Manager's own repository. It cannot install itself, so it is not offered.
+SELF_REPO = ("wasasquatch", "open-manager-comfyui")
+
+
+def _pair(repository: str) -> tuple[str, str] | None:
+    """Owner and repository from a GitHub URL, or ``None`` where it is not one."""
+    match = _REPO_URL.search(repository or "")
+    if match is None:
+        return None
+    return (match.group(1).lower(), match.group(2).lower().removesuffix(".git"))
+
+
+def hidden(repository: str) -> bool:
+    """Whether a pack belongs in the browsable listing.
+
+    Managers are not node packs, and reaching one through another is a category error: this
+    one cannot install itself, and a second manager is a decision about the installation
+    rather than a pack to browse. Both remain installable from the GitHub tab, and both stay
+    in :func:`load`, so an installed copy keeps its icon, version and update path.
+
+    Args:
+        repository: The repository URL the registry gives.
+
+    Returns:
+        True where the entry is kept out of browsing.
+    """
+    from . import risk
+
+    pair = _pair(repository)
+    return pair is not None and (pair == SELF_REPO or pair in risk.MANAGER_REPOS)
+
+
+def browsable() -> list[dict]:
+    """The catalogue as the registry browser shows it, managers and self removed."""
+    return [entry for entry in load() if not hidden(entry.get("repository", ""))]
+
+
+def _borrowed(repository: str) -> bool:
+    """Whether a listing's repository is another project's rather than the pack's.
+
+    A registry entry may point at ComfyUI itself. Everything the listing would show about it
+    then describes that project, not the pack.
+
+    Args:
+        repository: The repository URL the registry gives.
+
+    Returns:
+        True where the repository is ComfyUI or part of its tooling.
+    """
+    from . import risk
+
+    pair = _pair(repository)
+    return pair is not None and pair in risk.CORE_REPOS
+
+
+def _stars(raw, repository: str) -> int:
+    """A pack's stars, dropped where they belong to a project it merely points at.
+
+    ``lth_extended_prompting_nodes`` names ``comfyanonymous/ComfyUI`` as its repository and
+    so reports that project's six-figure star count, which puts it top of a sort by stars.
+    The count is not the pack's to show, so it is not shown.
+
+    Args:
+        raw: ``github_stars`` as the registry gives it.
+        repository: The repository URL the registry gives.
+
+    Returns:
+        The star count, or zero where it is not this pack's.
+    """
+    return 0 if _borrowed(repository) else int(raw or 0)
 
 
 def _entry(node: dict) -> dict:
@@ -124,7 +210,8 @@ def _entry(node: dict) -> dict:
         "description": (node.get("description") or "")[:200],
         "publisher": (node.get("publisher") or {}).get("id", ""),
         "downloads": int(node.get("downloads") or 0),
-        "stars": int(node.get("github_stars") or 0),
+        "stars": _stars(node.get("github_stars"), repository),
+        "borrowed": _borrowed(repository),
         "icon": node.get("icon", "") or "",
         "repository": node.get("repository", "") or "",
         "advertised": (node.get("latest_version") or {}).get("version", "") or "",
