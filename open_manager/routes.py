@@ -20,6 +20,7 @@ from . import (
     deps,
     developer,
     impact,
+    virustotal,
     installer,
     license_files,
     licenses,
@@ -664,6 +665,81 @@ def register_routes() -> None:
             return web.json_response({"ok": False, "reason": "the file is not a colour palette"}, status=422)
         return web.json_response({"ok": True, "theme": data})
 
+    @PromptServer.instance.routes.post(f"{PREFIX}/scan")
+    async def start_scan(request: web.Request) -> web.Response:
+        """Begin a reputation scan of an installed pack.
+
+        The key arrives in the body rather than the query string, because a query string is
+        the part that reaches proxy and server logs. It is passed to the scan and kept
+        nowhere else.
+        """
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        key = str(body.get("key") or "").strip()
+        pack_id = str(body.get("id") or "").strip()
+        if not key:
+            return web.json_response({"ok": False, "reason": "no VirusTotal key set"}, status=400)
+        if not pack_id:
+            return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        directory = installer.resolve_install_dir(pack_id)
+        if directory is None:
+            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
+        asyncio.get_running_loop().create_task(
+            virustotal.scan(pack_id, directory, key)
+        )
+        return web.json_response({"ok": True, **virustotal.state()})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/scan/state")
+    async def scan_state(_request: web.Request) -> web.Response:
+        """How the running scan is going, and what it has found."""
+        return web.json_response(virustotal.state())
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/install-requirements")
+    async def install_requirements(request: web.Request) -> web.Response:
+        """Install a pack's requirements after the fact.
+
+        Used where the requirements were deferred so the pack could be scanned first.
+        """
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        pack_id = str((body or {}).get("id") or "").strip()
+        if not pack_id:
+            return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        directory = installer.resolve_install_dir(pack_id)
+        if directory is None:
+            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
+        loop = asyncio.get_running_loop()
+        ok, output = await loop.run_in_executor(
+            None, installer.install_requirements, directory, ""
+        )
+        return web.json_response({"ok": ok, "output": output})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/status-reasons/" + "{node_id}")
+    async def status_reasons(request: web.Request) -> web.Response:
+        """Why each version of a pack carries the status it does.
+
+        The registry only returns these when asked and answers in megabytes, so the reading
+        and the summarising both happen here; what travels on is a sentence per version.
+        """
+        node_id = request.match_info.get("node_id", "")
+        if not node_id:
+            return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        async with aiohttp.ClientSession() as session:
+            try:
+                reasons = await registry.fetch_status_reasons(node_id, session)
+            except registry.RegistryError as error:
+                return web.json_response(
+                    {"ok": False, "reason": error.detail or "the registry did not answer"},
+                    status=502,
+                )
+        return web.json_response({"ok": True, "reasons": reasons})
+
     @PromptServer.instance.routes.get(f"{PREFIX}/refs")
     async def repo_refs(request: web.Request) -> web.Response:
         """List a repository's branches and its most recent commits.
@@ -1003,9 +1079,14 @@ def register_routes() -> None:
 
     @PromptServer.instance.routes.get(f"{PREFIX}/catalog")
     async def catalog_get(_request: web.Request) -> web.Response:
-        """The cached catalogue, for offline browsing, searching and sorting."""
+        """The cached catalogue, for offline browsing, searching and sorting.
+
+        Browsing only: the other readers of the cache index it by id and repository, and a
+        manager left out of those would lose its icon, version and update path once
+        installed.
+        """
         info = catalog.state()
-        return web.json_response({"nodes": catalog.load(), **info})
+        return web.json_response({"nodes": catalog.browsable(), **info})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/catalog/state")
     async def catalog_state(_request: web.Request) -> web.Response:
