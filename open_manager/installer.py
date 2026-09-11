@@ -325,7 +325,7 @@ def inspect_repo(repo_url: str, ref: str = "") -> dict:
     findings = [
         {"severity": f.severity, "title": f.title, "detail": f.detail,
          "evidence": list(f.evidence), "reference": f.reference}
-        for f in assessment.findings
+        for f in (*risk.repository_findings(owner, repo), *assessment.findings)
     ]
     findings.extend(impact_mod.findings_from(report))
     return {
@@ -472,19 +472,142 @@ def _requirements(directory: Path) -> list[str]:
     ]
 
 
-def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
-    """Install a pack's requirements.
+#: Never installed from a pack's requirements: these carry the build a working ComfyUI was
+#: set up with -- a CUDA wheel, a matching torchvision -- which a generic one would replace.
+PIP_BLACKLIST = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
+
+#: A requirement line's package name: what precedes any extras, specifier or marker.
+_REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def overrides_path() -> Path:
+    """The file holding the user's package substitutions."""
+    try:
+        import folder_paths
+
+        base = Path(folder_paths.get_user_directory()) / "open_manager"
+    except Exception:
+        base = Path(__file__).resolve().parent.parent / "_cache"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "pip_overrides.json"
+
+
+def pip_overrides() -> dict:
+    """Package substitutions the user has configured.
+
+    A mapping of package name to the requirement to install instead, applied before pip
+    runs. The usual case is pointing a desktop build at a headless one, or the reverse.
+
+    Returns:
+        ``{name: replacement}``, empty where the file is absent or unreadable.
+    """
+    try:
+        data = json.loads(overrides_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key).strip().lower().replace("_", "-"): str(value).strip()
+        for key, value in data.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
+def _requirement_name(line: str) -> str:
+    """The package a requirement line names, folded for comparison.
+
+    Args:
+        line: One line of a requirements file.
+
+    Returns:
+        The package name, empty for an option line, a URL, or anything unparseable.
+    """
+    text = line.strip()
+    if not text or text.startswith(("-", "#")):
+        return ""
+    if "://" in text or text.startswith("."):
+        return ""
+    match = _REQ_NAME.match(text)
+    return match.group(1).lower().replace("_", "-") if match else ""
+
+
+def plan_requirements(lines: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """What will be handed to pip, and what changed on the way.
+
+    Args:
+        lines: Requirement lines as the pack wrote them.
+
+    Returns:
+        ``(to_install, held_back, substituted)``. ``held_back`` names requirements dropped
+        because installing them would disturb the running environment; ``substituted``
+        records each ``before -> after`` the user's overrides applied.
+    """
+    overrides = pip_overrides()
+    keep: list[str] = []
+    held: list[str] = []
+    swapped: list[str] = []
+    for line in lines:
+        name = _requirement_name(line)
+        if name and name in PIP_BLACKLIST:
+            held.append(line.strip())
+            continue
+        if name and name in overrides:
+            swapped.append(f"{line.strip()} -> {overrides[name]}")
+            keep.append(overrides[name])
+            continue
+        keep.append(line)
+    return keep, held, swapped
+
+
+def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
+    """Install an already-placed pack's requirements.
+
+    Separate from the install itself so the files can be looked at before anything is added
+    to the environment.
 
     Args:
         directory: The installed pack directory.
         python: Interpreter to install into.
 
     Returns:
-        ``(succeeded, output)``.
+        ``(succeeded, output)``. Succeeds trivially where the pack declares none.
     """
+    if not _requirements(directory):
+        return True, "No requirements declared."
+    return _pip_install(directory, python)
+
+
+def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
+    """Install a pack's requirements, less anything held back.
+
+    Args:
+        directory: The installed pack directory.
+        python: Interpreter to install into.
+
+    Returns:
+        ``(succeeded, output)``. The output names what was held back or substituted, so the
+        result says what was done rather than only that it finished.
+    """
+    keep, held, swapped = plan_requirements(_requirements(directory))
+    notes = []
+    if held:
+        notes.append("Held back to protect the running install: " + ", ".join(held))
+    if swapped:
+        notes.append("Substituted by your overrides: " + "; ".join(swapped))
+    if not keep:
+        return True, "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
+
+    # Written out rather than passed as arguments, so pip parses option lines itself.
+    filtered = directory / ".open_manager_requirements.txt"
+    try:
+        filtered.write_text("\n".join(keep) + "\n", encoding="utf-8")
+    except OSError as error:
+        return False, f"requirements could not be prepared ({error})"
+
     command = [
         python or sys.executable, "-m", "pip", "install", "--no-input",
-        "--disable-pip-version-check", "-r", str(directory / "requirements.txt"),
+        "--disable-pip-version-check", "-r", str(filtered),
     ]
     try:
         finished = subprocess.run(
@@ -493,8 +616,14 @@ def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
         )
     except (OSError, subprocess.SubprocessError) as error:
         return False, f"pip could not be run ({type(error).__name__}: {error})"
+    try:
+        filtered.unlink()
+    except OSError:
+        pass
     output = (finished.stdout or "") + (finished.stderr or "")
     tail = "\n".join(output.strip().splitlines()[-12:])
+    if notes:
+        tail = f"{chr(10).join(notes)}\n{tail}" if tail else chr(10).join(notes)
     return finished.returncode == 0, tail
 
 
