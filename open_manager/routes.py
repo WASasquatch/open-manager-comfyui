@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import posixpath
 import re
 import sys
 import time
@@ -42,7 +43,10 @@ LICENSE_BATCH = 200
 
 #: Extensions a gallery image may carry. The bytes are checked too; this only rejects the
 #: obvious before anything is fetched.
-GALLERY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif")
+GALLERY_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+    ".mp4", ".webm", ".mov", ".m4v",
+)
 
 #: Largest gallery image served, in bytes.
 GALLERY_CAP = 12_000_000
@@ -279,8 +283,16 @@ def _image_type(data: bytes) -> str:
     # RIFF and ISO-BMFF carry their marker after a length, so they are matched by span.
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
-    if data[4:8] == b"ftyp" and data[8:12] in (b"avif", b"avis", b"mif1"):
-        return "image/avif"
+    if data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand in (b"avif", b"avis", b"mif1"):
+            return "image/avif"
+        # An ISO-BMFF clip: same container family, different brand.
+        if brand in (b"isom", b"iso2", b"mp41", b"mp42", b"avc1", b"M4V ", b"qt  "):
+            return "video/quicktime" if brand == b"qt  " else "video/mp4"
+    # Matroska, which is what a WebM clip is.
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "video/webm"
     return ""
 
 
@@ -293,7 +305,43 @@ def _local_developer(repo: str) -> dict:
     Returns:
         The declared table, empty where the pack is not installed or declares none.
     """
-    return developer.from_pyproject(_pack_file(repo, "pyproject.toml", 400_000))
+    table = developer.from_pyproject(_pack_file(repo, "pyproject.toml", 400_000))
+    # Expanded even where the pack declares no table: reading an installed directory costs
+    # nothing, so the conventional workflow directories are worth offering regardless. The
+    # remote path is stricter, because there a listing costs a GitHub call.
+    lister = _pack_lister(repo)
+    return developer.expand(table, lister) if lister(".") else table
+
+
+def _pack_lister(repo: str):
+    """A lister for :func:`developer.expand`, reading the installed copy of a pack.
+
+    Args:
+        repo: The pack's repository URL.
+
+    Returns:
+        A callable taking a directory and returning the pack-relative paths below it.
+    """
+    owner_repo = metadata._owner_repo(repo)
+    directory = installer.resolve_install_dir(owner_repo[1]) if owner_repo else None
+
+    def listing(folder: str) -> list[str]:
+        if directory is None:
+            return []
+        try:
+            root = directory.resolve()
+            base = (root / (folder or ".")).resolve()
+            # Same containment rule as _pack_file: a pattern may not climb out of the pack.
+            if not base.is_dir() or not (base == root or base.is_relative_to(root)):
+                return []
+            return [
+                posixpath.join(*child.relative_to(root).parts)
+                for child in sorted(base.rglob("*")) if child.is_file()
+            ]
+        except OSError:
+            return []
+
+    return listing
 
 
 def _looks_like_theme(data) -> bool:
@@ -832,8 +880,9 @@ def register_routes() -> None:
         repository where it is not. Entries that are already absolute URLs never reach here:
         the panel points the browser straight at them.
 
-        Only bytes that are recognisably an image are returned, and they are served with the
-        type those bytes say they are, so a pack cannot place markup on ComfyUI's origin.
+        Only bytes that are recognisably an image or a clip are returned, and they are served
+        with the type those bytes say they are, so a pack cannot place markup on ComfyUI's
+        origin.
         """
         repo = request.query.get("repo", "")
         branch = request.query.get("branch", "")
@@ -884,7 +933,7 @@ def register_routes() -> None:
         kind = _image_type(data)
         if not kind:
             return web.json_response(
-                {"ok": False, "reason": "the file is not an image"}, status=422
+                {"ok": False, "reason": "the file is not an image or a clip"}, status=422
             )
         return web.Response(
             body=data,
@@ -895,6 +944,21 @@ def register_routes() -> None:
                 "Content-Disposition": "inline",
             },
         )
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/pack-for-repo")
+    async def pack_for_repo(request: web.Request) -> web.Response:
+        """The registry pack a repository belongs to, for links between pack pages.
+
+        Read from the cached catalogue rather than the registry, so following a link in a
+        README costs nothing and works offline.
+        """
+        wanted = _norm_repo(request.query.get("repo", ""))
+        if not wanted:
+            return web.json_response({"id": ""})
+        for entry in catalog.load():
+            if _norm_repo(entry.get("repository")) == wanted:
+                return web.json_response({"id": entry.get("id", ""), "name": entry.get("name", "")})
+        return web.json_response({"id": ""})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/search")
     async def find(request: web.Request) -> web.Response:
@@ -1170,6 +1234,14 @@ def register_routes() -> None:
             pack["icon"] = entry.get("icon", "") if entry else ""
             pack["stars"] = int(entry.get("stars") or 0) if entry else 0
             pack["status"] = ""
+            # Where it came from, most specific first. A working copy is a repository
+            # install whether or not the registry also carries the pack; a registry match
+            # names it otherwise; anything left arrived some other way.
+            pack["source"] = (
+                "github" if pack.get("from_git")
+                else "registry" if pack["registry_id"]
+                else "disk"
+            )
 
         # The installed version's status is looked up only where it is not the advertised
         # active one.
