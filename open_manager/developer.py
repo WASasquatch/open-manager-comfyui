@@ -36,6 +36,11 @@ _STR_FIELDS = ("source", "branch", "docs", "funding", "release_note")
 #: List-of-string fields kept from the table.
 _LIST_FIELDS = ("incompatible", "example_workflows", "themes", "gallery")
 
+#: String fields that name a link the panel opens. These reach ``window.open`` in the
+#: browser, which executes a ``javascript:`` URL in ComfyUI's own origin, so anything that
+#: is not an ``http``/``https`` URL is dropped here rather than handed to the panel.
+_URL_STR_FIELDS = ("docs", "funding")
+
 #: Most gallery entries kept. Lower than the general cap: a gallery is a showcase, and every
 #: entry is an image the panel will fetch.
 _GALLERY_CAP = 24
@@ -82,6 +87,12 @@ def from_pyproject(text: str) -> dict:
             items = [v.strip() for v in value if isinstance(v, str) and v.strip()]
             if items:
                 out[key] = items[:_LIST_CAP]
+    # Link fields must be http/https. A "javascript:" or "data:" docs/funding value would
+    # otherwise reach window.open in the panel and run in ComfyUI's origin.
+    for key in _URL_STR_FIELDS:
+        value = out.get(key)
+        if value and not value.lower().startswith(_URL_SCHEMES):
+            out.pop(key, None)
     if "gallery" in out:
         gallery = [entry for entry in out["gallery"] if _gallery_entry(entry)]
         if gallery:

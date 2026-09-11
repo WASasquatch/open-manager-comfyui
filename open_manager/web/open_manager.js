@@ -211,6 +211,20 @@ const badge = (status) => {
   return node;
 };
 
+// Opens an external link in a new tab, but only when it is an http(s) URL. Pack-supplied
+// strings (a developer's docs/funding link, a repository field) reach here, and
+// window.open("javascript:...") would run that script in ComfyUI's own origin. Anything
+// that is not http/https is refused rather than opened. `noopener` also keeps the opened
+// page from reaching back through window.opener.
+function openExternal(url) {
+  const target = String(url == null ? "" : url).trim();
+  if (/^https?:\/\//i.test(target)) {
+    window.open(target, "_blank", "noopener,noreferrer");
+  } else if (target) {
+    notify("Link not opened", "This link is not an http(s) URL, so it was not opened.");
+  }
+}
+
 function closeOn(backdrop) {
   backdrop.addEventListener("click", (event) => {
     if (event.target === backdrop) backdrop.remove();
@@ -897,8 +911,8 @@ async function reflectStar(repository, button) {
 
 async function starRepo(repository, button) {
   const parts = repoOwnerName(repository);
-  if (!parts) { if (repository) window.open(repository, "_blank"); return; }
-  const openRepo = () => window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank");
+  if (!parts) { if (repository) openExternal(repository); return; }
+  const openRepo = () => window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener");
   const token = (app.extensionManager.setting.get("openManager.githubToken") || "").trim();
   if (!token) { openRepo(); return; }
   const starred = button.classList.contains("om-starred");
@@ -987,7 +1001,7 @@ async function openPack(packId) {
   if (pack.repository) {
     const repo = el("button", "om-btn", "View on GitHub");
     repo.title = "Open the repository";
-    repo.onclick = () => window.open(pack.repository, "_blank");
+    repo.onclick = () => openExternal(pack.repository);
     actions.appendChild(repo);
     if (repoOwnerName(pack.repository)) actions.appendChild(makeStarButton(pack.repository, pack.stars));
   }
@@ -1138,7 +1152,7 @@ function openRepoPack(pack) {
 
   const actions = el("div", "om-actions om-hero-actions");
   const repoBtn = el("button", "om-btn", "View on GitHub");
-  repoBtn.onclick = () => window.open(pack.repo, "_blank");
+  repoBtn.onclick = () => openExternal(pack.repo);
   actions.appendChild(repoBtn);
   if (repoOwnerName(pack.repo)) actions.appendChild(makeStarButton(pack.repo, null));
   const control = makeInstallControl({
@@ -1457,13 +1471,13 @@ function appendDeveloperBlock(slot, meta) {
     if (dev.docs) {
       const b = el("button", "om-btn", "Docs");
       b.title = dev.docs;
-      b.onclick = () => window.open(dev.docs, "_blank");
+      b.onclick = () => openExternal(dev.docs);
       links.appendChild(b);
     }
     if (dev.funding) {
       const b = el("button", "om-btn", "Funding");
       b.title = dev.funding;
-      b.onclick = () => window.open(dev.funding, "_blank");
+      b.onclick = () => openExternal(dev.funding);
       links.appendChild(b);
     }
     const hero = slot.closest(".om-dialog")?.querySelector(".om-hero-actions");
@@ -1750,6 +1764,21 @@ function absolutiseLinks(view, repository, branch) {
       anchor.href = `https://github.com/${owner}/${repo}${href}`;
     } else {
       anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${relative(href)}`;
+    }
+  }
+
+  // Defence in depth: the README HTML comes from the host markdown sanitizer, whose version
+  // this panel does not control. Now that relative links are absolute github URLs, drop any
+  // remaining src/href whose scheme is not one we expect, so a sanitiser that is absent,
+  // older or bypassed cannot leave a "javascript:"/"data:text" link live in the readme.
+  for (const img of view.querySelectorAll("img[src]")) {
+    const src = img.getAttribute("src") || "";
+    if (!/^https?:\/\//i.test(src) && !/^data:image\//i.test(src)) img.removeAttribute("src");
+  }
+  for (const anchor of view.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href") || "";
+    if (!/^https?:\/\//i.test(href) && !/^mailto:/i.test(href) && !href.startsWith("#")) {
+      anchor.removeAttribute("href");
     }
   }
 }
@@ -2129,7 +2158,7 @@ function buildGithubRow(repo, container) {
   row.appendChild(text);
 
   const items = [
-    { label: "Open on GitHub", fn: () => window.open(repo.url, "_blank") },
+    { label: "Open on GitHub", fn: () => openExternal(repo.url) },
     { label: "Remove from list", danger: true, fn: () => removeGithubSource(repo, container) },
   ];
   if (repo.installed_version) {
