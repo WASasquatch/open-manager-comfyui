@@ -140,11 +140,41 @@ style.textContent = `
 .om-readme .om-chips { margin-bottom: 8px; }
 .om-readme .om-tags { margin-bottom: 14px; }
 .om-readme-status { color: var(--om-muted); }
-.om-readme-body { line-height: 1.6; overflow-wrap: anywhere; }
+/* Capped for reading rather than filled to the dialog: a line that runs the whole width of
+   a wide panel is hard to follow, which is the width GitHub settles on too. */
+.om-readme-body { line-height: 1.6; overflow-wrap: anywhere; max-width: 1080px; margin-inline: auto; }
 .om-readme-body img { max-width: 100%; height: auto; }
 .om-readme-body pre { background: var(--om-input); padding: 10px; border-radius: 6px; overflow: auto; }
 .om-readme-body h1, .om-readme-body h2 { border-bottom: 1px solid var(--om-border); padding-bottom: 4px; }
 .om-readme-body a { color: #539bf5; }
+.om-wf-shot { width: 56px; height: 32px; object-fit: cover; border-radius: 4px;
+  flex: none; background: var(--om-surface); }
+.om-repo-link {
+  flex: none; text-decoration: none; color: var(--om-muted); font-size: 12px;
+  padding: 0 3px; border-radius: 4px; line-height: 1;
+}
+.om-repo-link:hover { color: var(--om-text); background: var(--om-hover); }
+/* Long URLs need breaking anywhere, but the same rule inside a table breaks mid-word and
+   collapses every column, which is why READMEs rendered here looked squished against
+   GitHub. Tables wrap on word boundaries and scroll sideways instead. */
+.om-readme-body table {
+  overflow-wrap: normal; word-break: normal; border-collapse: collapse;
+  display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 12px 0;
+}
+.om-readme-body th, .om-readme-body td {
+  border: 1px solid var(--om-border); padding: 6px 10px; text-align: left;
+  overflow-wrap: normal; word-break: normal;
+}
+.om-readme-body th { background: var(--om-surface); font-weight: 600; }
+.om-readme-body tr:nth-child(even) td { background: color-mix(in srgb, var(--om-surface) 45%, transparent); }
+/* Media the README linked, shown in place of the bare URL. */
+.om-readme-media { max-width: 100%; height: auto; border-radius: 6px; margin: 12px 0; display: block; }
+/* Honour the alignment attribute a README uses, which the markdown renderer may pass
+   through but browsers no longer style on their own. */
+.om-readme-body [align="center"] { text-align: center; }
+.om-readme-body [align="right"] { text-align: right; }
+.om-readme-body div[align="center"] > img,
+.om-readme-body p[align="center"] > img { margin-inline: auto; }
 .om-row {
   display: grid; grid-template-columns: 150px 110px 200px 1fr auto;
   gap: 12px; align-items: center; padding: 10px 12px;
@@ -567,6 +597,31 @@ function confirmAction(title, message, actionLabel, danger) {
   });
 }
 
+// Like confirmAction but with more than one way to say yes. Resolves the chosen action's
+// key, or an empty string where the reader backed out.
+function chooseAction(title, message, choices) {
+  return new Promise((resolve) => {
+    const backdrop = el("div", "om-backdrop");
+    const box = el("div", "om-note");
+    box.appendChild(el("div", "om-note-title", title));
+    if (message) box.appendChild(el("div", "om-note-body", message));
+    const foot = el("div", "om-note-foot");
+    const cancel = el("button", "om-btn", "Cancel");
+    cancel.onclick = () => { backdrop.remove(); resolve(""); };
+    foot.appendChild(cancel);
+    for (const choice of choices) {
+      const button = el("button", `om-btn ${choice.primary ? "om-go" : ""}`, choice.label);
+      if (choice.hint) button.title = choice.hint;
+      button.onclick = () => { backdrop.remove(); resolve(choice.key); };
+      foot.appendChild(button);
+    }
+    box.appendChild(foot);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+    closeOn(backdrop);
+  });
+}
+
 // --- install control ----------------------------------------------------------------
 
 // A button that moves Install -> Queued -> Installing -> Installed. Once installed and
@@ -657,6 +712,59 @@ function openRowMenu(anchor, { packId, entry, control, rowsRoot, items }) {
 // installing row and back would offer Install again while the install was still running.
 const installState = new Map();
 
+// What is already on disk, so a row can say so before anything is installed this session.
+// installState above records what this session did; this records what it found.
+const installedIndex = new Map();
+
+const foldId = (value) => String(value ?? "").trim().toLowerCase().replace(/_/g, "-");
+
+// Index one /installed payload. Keyed every way a row might ask: registry id, pyproject
+// name and directory name, because a row only knows the registry's spelling.
+function indexInstalled(packs) {
+  installedIndex.clear();
+  for (const pack of packs || []) {
+    for (const key of [pack.registry_id, pack.id, pack.dir]) {
+      const folded = foldId(key);
+      if (folded) installedIndex.set(folded, pack);
+    }
+  }
+}
+
+async function loadInstalledIndex() {
+  try {
+    const answer = await api.fetchApi(`${API}/installed`);
+    const data = await answer.json();
+    if (answer.ok) indexInstalled(data.packs);
+  } catch {
+    // Rows fall back to offering Install, which is what they did before.
+  }
+}
+
+function installedPack(packId) {
+  return installedIndex.get(foldId(packId)) || null;
+}
+
+// The menu a registry row offers once its pack is on disk: the same actions the Installed
+// tab gives, so the two do not disagree about what can be done.
+// `getControl` rather than the control itself: the caller builds these while its own
+// `const control` is still being initialised, so reading it here would throw.
+function installedMenu(record, entry, getControl, rowsRoot) {
+  const items = [];
+  if (vtReady()) items.push({ label: "Scan install", fn: () => openScanDialog(record.id) });
+  items.push({
+    label: "Uninstall",
+    danger: true,
+    fn: () => uninstall({
+      packId: record.id,
+      entry: entry || { name: record.id },
+      control: getControl(),
+      rowsRoot,
+      registryId: record.registry_id || entry?.id || "",
+    }),
+  });
+  return items;
+}
+
 function rememberInstall(packId, state) {
   if (!packId) return;
   if (state) installState.set(packId, state);
@@ -669,6 +777,7 @@ function restoreInstall(packId, control) {
   if (state === "queued") control.setQueued();
   else if (state === "installing") control.setInstalling();
   else if (state === "installed") control.setInstalled();
+  else if (installedPack(packId)) control.setInstalled();
   else control.setInstall();
 }
 
@@ -721,6 +830,7 @@ async function runInstallQueue() {
       }
       job.control?.setInstalled();
       rememberInstall(job.packId, "installed");
+      loadInstalledIndex();
       if (job.scanFirst) await scanThenFinish(job.packId);
       if (result.pip_ran && !result.pip_ok) {
         issues.push(`${job.name}: requirements did not install cleanly`);
@@ -910,6 +1020,7 @@ async function uninstall({ packId, entry, control, rowsRoot, registryId }) {
     // behind would show Installed for something that is no longer there.
     rememberInstall(packId, null);
     rememberInstall(registryId, null);
+    loadInstalledIndex();
     progress.settle(`Uninstalled ${name}.`, "ok", 6000);
     remindRestart();
   } else {
@@ -1340,7 +1451,10 @@ async function paintPackBody(host, meta, source) {
   try {
     const html = await app.extensionManager.renderMarkdownToHtml(source.readme);
     view.innerHTML = typeof html === "string" ? html : "";
+    linkHeadings(view);
     absolutiseLinks(view, meta.repository, source.ref || meta.default_branch);
+    embedMediaLinks(view);
+    offerImageWorkflows(view);
   } catch {
     const pre = el("pre");
     pre.textContent = source.readme;
@@ -1690,8 +1804,19 @@ function appendDeveloperBlock(slot, meta) {
   }
 
   if (workflows.length) {
+    const previews = dev.example_workflow_previews || {};
     block.appendChild(collapsible("Example workflows", workflows, (path) => {
       const item = el("button", "om-wf-item");
+      // A preview beside the workflow, where the pack ships one. Shows what it produces
+      // before it is loaded.
+      if (previews[path]) {
+        const shot = el("img", "om-wf-shot");
+        shot.loading = "lazy";
+        shot.alt = "";
+        shot.src = galleryUrl(previews[path], meta);
+        shot.onerror = () => shot.remove();
+        item.appendChild(shot);
+      }
       item.appendChild(el("span", "om-wf-name", path.split("/").pop()));
       item.appendChild(el("span", "om-wf-path", path));
       item.title = `Load ${path}`;
@@ -1808,10 +1933,23 @@ function buildGallery(meta, entries) {
     cell.title = entry;
     cell._url = galleryUrl(entry, meta);
     cell._label = entry.split("/").pop() || entry;
-    const img = el("img", "om-gal-img");
-    img.loading = "lazy";
-    img.decoding = "async";
-    img.alt = cell._label;
+    // A gallery entry may be a clip. Authors list them, and a still cannot show motion.
+    const moving = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(entry);
+    const img = moving ? el("video", "om-gal-img") : el("img", "om-gal-img");
+    if (moving) {
+      img.muted = true;
+      img.loop = true;
+      img.playsInline = true;
+      img.preload = "metadata";
+      // Motion on hover only: a grid of autoplaying clips is noise, and a still frame is
+      // enough to pick one out.
+      cell.onmouseenter = () => { img.play?.().catch(() => {}); };
+      cell.onmouseleave = () => { try { img.pause(); img.currentTime = 0; } catch {} };
+    } else {
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.alt = cell._label;
+    }
     img.src = cell._url;
     // A tile that cannot load is taken out rather than left broken, and the count follows
     // it down so the heading never promises more than is on screen. The full view is built
@@ -1939,14 +2077,243 @@ async function loadExampleWorkflow(repository, branch, path) {
     return;
   }
   progress.remove();
-  if (!(await confirmAction("Load example workflow", `This replaces the current graph with "${path}".`, "Load"))) return;
+
+  const workflow = data.workflow.nodes ? data.workflow : (data.workflow.workflow || data.workflow);
+  await loadWorkflowGraph(workflow, path);
+}
+
+// Ask how a workflow should land, then land it that way. loadGraphData opens a new tab when
+// given no workflow to load into, and replaces that workflow's graph when given one, so
+// replacing is only offered where an active workflow can actually be reached.
+async function loadWorkflowGraph(workflow, label) {
+  const active = activeWorkflow();
+  const choices = [{ key: "tab", label: "Open in new tab", primary: true }];
+  if (active) choices.push({ key: "replace", label: "Replace current graph",
+                             hint: "Discards unsaved changes to the open workflow" });
+  const how = await chooseAction(
+    "Load workflow",
+    active
+      ? `"${label}" can open alongside your work or take the place of the graph you have open.`
+      : `"${label}" opens in a new tab, leaving the graph you have open untouched.`,
+    choices);
+  if (!how) return;
+  const name = String(label).split("/").pop();
   try {
-    const workflow = data.workflow.nodes ? data.workflow : (data.workflow.workflow || data.workflow);
-    await app.loadGraphData(workflow);
-    toast(`Loaded ${name}.`, { kind: "ok" });
+    if (how === "replace") await app.loadGraphData(workflow, true, true, active);
+    else await app.loadGraphData(workflow);
+    toast(how === "replace" ? `Loaded ${name} into the open workflow.` : `Opened ${name} in a new tab.`,
+          { kind: "ok" });
   } catch (error) {
     notify("Could not load workflow", error.message);
   }
+}
+
+// The workflow the reader has open, or null where this build of ComfyUI does not say.
+// Probed rather than assumed: there is no documented accessor, and the shape has moved.
+function activeWorkflow() {
+  const candidates = [
+    () => app.workflowManager?.activeWorkflow,
+    () => app.extensionManager?.workflow?.activeWorkflow,
+    () => window.comfyAPI?.workflowStore?.useWorkflowStore?.()?.activeWorkflow,
+  ];
+  for (const read of candidates) {
+    try {
+      const found = read();
+      if (found && typeof found === "object") return found;
+    } catch {
+      // Not this one; try the next.
+    }
+  }
+  return null;
+}
+
+// GitHub's heading slug: lowercased, punctuation dropped, spaces hyphenated. Matched here
+// so a README's own "#section" links have something to point at, since the markdown
+// renderer emits headings without ids.
+function slugify(text) {
+  return String(text || "").trim().toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-");
+}
+
+// Give every heading an id and point the README's own anchors at them. Without this a
+// "#section" link is rewritten to the repository and leaves the panel for GitHub.
+function linkHeadings(view) {
+  const seen = new Map();
+  for (const heading of view.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+    const base = slugify(heading.textContent);
+    if (!base) continue;
+    // GitHub appends -1, -2 to repeated headings; the same rule keeps links unambiguous.
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    heading.id = count ? `${base}-${count}` : base;
+  }
+}
+
+// Turn a bare media link into the thing it points at. GitHub embeds its own attachment
+// URLs and the markdown renderer here does not, so the README shows a link where GitHub
+// shows a player. Runs after the scheme scrub, so only http(s) links reach it.
+//
+// An attachment URL carries no extension and may be either a video or an image, so the
+// element is chosen by trying: video first, an image if the video will not decode, and the
+// original link back if neither works. Guessing wrong and leaving a dead player would be
+// worse than the link it replaced.
+function embedMediaLinks(view) {
+  const ATTACHMENT = /^https?:\/\/(www\.)?github\.com\/user-attachments\/assets\//i;
+  const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
+  const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i;
+
+  for (const anchor of [...view.querySelectorAll("a[href]")]) {
+    const href = anchor.getAttribute("href") || "";
+    const bare = ATTACHMENT.test(href);
+    if (!bare && !VIDEO_EXT.test(href) && !IMAGE_EXT.test(href)) continue;
+    // A link with its own words reads as a link, not an embed.
+    const text = (anchor.textContent || "").trim();
+    if (text && text !== href) continue;
+
+    const asImage = () => {
+      const image = el("img", "om-readme-media");
+      image.src = href;
+      // Not lazy: a deleted attachment must fail now so the link can come back. Deferred,
+      // an offscreen one never errors and leaves an empty box where a link used to be.
+      image.alt = "";
+      // Neither a video nor an image: give the reader the link back.
+      image.onerror = () => image.replaceWith(anchor.cloneNode(true));
+      return image;
+    };
+    if (IMAGE_EXT.test(href)) { anchor.replaceWith(asImage()); continue; }
+
+    const video = el("video", "om-readme-media");
+    video.src = href;
+    video.controls = true;
+    video.preload = "metadata";
+    video.playsInline = true;
+    // An attachment that will not decode as video is almost always an image.
+    if (bare) video.onerror = () => video.replaceWith(asImage());
+    else video.onerror = () => video.replaceWith(anchor.cloneNode(true));
+    anchor.replaceWith(video);
+  }
+}
+
+// A README often points at another pack's repository. Where the registry carries that
+// repository, the link opens the pack here instead of sending the reader to GitHub. The
+// lookup happens on the click, not on render: a page can hold a hundred links.
+function offerPackLink(anchor, href) {
+  const match = /^https?:\/\/(?:www\.)?github\.com\/([^/#?]+)\/([^/#?]+)\/?$/i.exec(href || "");
+  if (!match) return;
+  anchor.onclick = async (event) => {
+    // A modifier or the middle button means the reader asked for a tab; leave them to it.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    let found = null;
+    try {
+      const answer = await api.fetchApi(`${API}/pack-for-repo?repo=${encodeURIComponent(href)}`);
+      found = (await answer.json()).id || null;
+    } catch {
+      // Fall through to the repository itself.
+    }
+    if (found) await openPack(found);
+    else openUrl(href);
+  };
+}
+
+// A PNG's text chunks, which is where ComfyUI leaves the workflow that produced an image.
+// Read from the bytes rather than the decoded image: the chunks sit before the pixel data,
+// so this stops as soon as it reaches it.
+//
+// Returns the named chunk's text, or an empty string.
+async function pngText(bytes, wanted) {
+  if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50) return "";
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const decoder = new TextDecoder();
+  let at = 8;
+  while (at + 12 <= bytes.length) {
+    const length = view.getUint32(at);
+    const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
+    if (type === "IDAT" || type === "IEND") break;
+    if (type === "tEXt" || type === "iTXt") {
+      const body = bytes.subarray(at + 8, at + 8 + length);
+      let split = 0;
+      while (split < body.length && body[split] !== 0) split += 1;
+      if (decoder.decode(body.subarray(0, split)) === wanted) {
+        if (type === "tEXt") return decoder.decode(body.subarray(split + 1));
+        // iTXt: a compression flag and method, then two more terminated fields.
+        const compressed = body[split + 1] === 1;
+        let cursor = split + 3;
+        for (let field = 0; field < 2; field += 1) {
+          while (cursor < body.length && body[cursor] !== 0) cursor += 1;
+          cursor += 1;
+        }
+        const payload = body.subarray(cursor);
+        if (!compressed) return decoder.decode(payload);
+        try {
+          const stream = new Blob([payload]).stream()
+            .pipeThrough(new DecompressionStream("deflate"));
+          return decoder.decode(new Uint8Array(await new Response(stream).arrayBuffer()));
+        } catch {
+          return "";
+        }
+      }
+    }
+    at += 12 + length;
+  }
+  return "";
+}
+
+// The workflow an image was produced by, where it carries one. Only the head of the file is
+// asked for, because the chunks precede the pixels and these images run to megabytes; a
+// server that will not serve a range is read in full instead.
+async function workflowInImage(url) {
+  const read = async (headers) => {
+    const answer = await fetch(url, headers ? { headers } : undefined);
+    if (!answer.ok) throw new Error(`HTTP ${answer.status}`);
+    return new Uint8Array(await answer.arrayBuffer());
+  };
+  let bytes;
+  try {
+    bytes = await read({ Range: "bytes=0-262143" });
+    // A server ignoring the range hands back everything, which is equally fine.
+  } catch {
+    bytes = await read(null);
+  }
+  for (const key of ["workflow", "prompt"]) {
+    const text = await pngText(bytes, key);
+    if (!text) continue;
+    try {
+      const parsed = JSON.parse(text);
+      // A prompt is the executed form and carries no nodes to lay out; only a workflow does.
+      if (key === "workflow" || parsed.nodes) return parsed;
+    } catch {
+      // Truncated by the range, or not JSON. Fall through.
+    }
+  }
+  return null;
+}
+
+// Right-click a README image to load the workflow it was made with. Authors publish these
+// as "workflow included" screenshots, and ComfyUI writes the graph into the file.
+// Nothing is fetched until asked: the images on a page run to tens of megabytes.
+function offerImageWorkflows(view) {
+  view.addEventListener("contextmenu", async (event) => {
+    const image = event.target instanceof HTMLImageElement ? event.target : null;
+    if (!image || !safeUrl(image.src)) return;
+    event.preventDefault();
+    const progress = toast("Reading the image...", { sticky: true });
+    let workflow = null;
+    try {
+      workflow = await workflowInImage(image.src);
+    } catch (error) {
+      progress.remove();
+      notify("Could not read the image", error.message);
+      return;
+    }
+    progress.remove();
+    if (!workflow) {
+      notify("No workflow in this image", "The file carries no workflow to load.");
+      return;
+    }
+    await loadWorkflowGraph(workflow, image.getAttribute("alt") || "this image");
+  });
 }
 
 // Rewrites a README's relative paths to absolute URLs on the repository.
@@ -1964,13 +2331,52 @@ function absolutiseLinks(view, repository, branch) {
     if (!src || absolute(src) || src.startsWith("#")) continue;
     img.src = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${relative(src)}`;
   }
+  // Whether a link points back at this repository, and at which heading. Parsed rather
+  // than matched: a repository name can carry dots, and URLs vary in trailing slashes.
+  const selfHash = (url) => {
+    try {
+      const parsed = new URL(url);
+      if (!/(^|\.)github\.com$/i.test(parsed.hostname)) return null;
+      const parts = parsed.pathname.replace(/^\/|\/$/g, "").split("/");
+      if (parts.length !== 2) return null;
+      if (parts[0].toLowerCase() !== owner.toLowerCase()) return null;
+      if (parts[1].replace(/\.git$/i, "").toLowerCase() !== repo.toLowerCase()) return null;
+      return parsed.hash || "";
+    } catch {
+      return null;
+    }
+  };
   for (const anchor of view.querySelectorAll("a[href]")) {
     const href = anchor.getAttribute("href");
     anchor.target = "_blank";
     anchor.rel = "noopener noreferrer";
-    if (!href || absolute(href)) continue;
+    if (absolute(href || "")) {
+      // A link back to this repository's own heading means "further down this page", even
+      // written the long way, so it is answered here rather than sent to GitHub.
+      const hash = selfHash(href || "");
+      if (hash) {
+        anchor.removeAttribute("target");
+        anchor.onclick = (event) => {
+          const target = view.querySelector(`[id="${CSS.escape(hash.slice(1))}"]`);
+          if (!target) return;
+          event.preventDefault();
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+      } else {
+        offerPackLink(anchor, href);
+      }
+      continue;
+    }
+    if (!href) continue;
     if (href.startsWith("#")) {
-      anchor.href = `https://github.com/${owner}/${repo}${href}`;
+      // The reader means "further down this page", so it is answered here.
+      anchor.removeAttribute("target");
+      anchor.onclick = (event) => {
+        const target = view.querySelector(`[id="${CSS.escape(href.slice(1))}"]`);
+        if (!target) return;
+        event.preventDefault();
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
     } else {
       anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${relative(href)}`;
     }
@@ -2022,6 +2428,10 @@ async function quickInstall(packId, control) {
 // Licence resolution for rows the registry left unnamed. A row's repository is read for its
 // licence file, batched across a render and cached on the server.
 const licJobs = new Map();
+
+// Set by the registry list while it is on screen, so a licence resolved after the list was
+// filtered can put the list right. Null when no list is listening.
+let onLicencesResolved = null;
 let licTimer = 0;
 
 // Repositories one licence request may ask about. This mirrors LICENSE_BATCH on the server,
@@ -2029,11 +2439,28 @@ let licTimer = 0;
 // would be marked resolved without ever having been looked at.
 const LICENSE_BATCH = 200;
 
+// What each tier means for the reader's own project. The colour grades how freely a pack
+// can be used, so it is worth saying what the grade is about: these are obligations, not a
+// judgement about the pack.
+const LICENCE_MEANING = {
+  "permissive": "Use, modify and ship closed-source, with attribution.",
+  "weak-copyleft": "Changes to the pack's own files must stay open; your code need not.",
+  "copyleft": "Strong copyleft: distributing work built on it requires releasing source "
+    + "under the same terms, so it does not suit a closed-source product.",
+  "community": "Free for most use, but the licence sets conditions on commercial use.",
+  "non-commercial": "Commercial use is restricted or forbidden.",
+  "unknown": "Nothing stated, so no permission is granted by default.",
+};
+
 function paintLicense(pill, entry) {
   pill.textContent = entry.license || "unlicensed";
   pill.style.color = entry.license_color || "var(--om-muted)";
   pill.style.borderColor = entry.license_color || "var(--om-muted)";
-  pill.title = `licence: ${entry.license_tier || "unknown"}`;
+  const tier = entry.license_tier || "unknown";
+  const meaning = LICENCE_MEANING[tier];
+  // Without a name the meaning stands alone, rather than repeating "no licence stated".
+  if (!meaning) pill.title = `licence: ${tier}`;
+  else pill.title = entry.license ? `${entry.license} — ${meaning}` : meaning;
 }
 
 function queueLicense(entry, pill) {
@@ -2073,6 +2500,7 @@ async function resolveLicenceBatch(jobs) {
   } catch {
     return;
   }
+  let changed = false;
   for (const job of jobs) {
     job.entry._licResolved = true;
     const info = res[job.entry.id];
@@ -2082,7 +2510,9 @@ async function resolveLicenceBatch(jobs) {
       license_rank: info.rank, license_color: info.color,
     });
     for (const pill of job.pills) paintLicense(pill, job.entry);
+    changed = true;
   }
+  if (changed && onLicencesResolved) onLicencesResolved();
 }
 
 // A list row's artwork, falling back to a tile carrying the pack's initial.
@@ -2110,6 +2540,22 @@ function countText(value) {
     return (v >= 99.95 ? String(Math.round(v)) : v.toFixed(1)) + suffix;
   };
   return n >= 999500 ? scale(1e6, "M") : scale(1e3, "k");
+}
+
+// A link to the pack's repository, as an anchor rather than a click handler: readers open
+// many at once with the middle button or a modifier, which a handler cannot offer.
+// Null where the registry names no usable repository.
+function repoLink(entry, extra) {
+  const url = safeUrl(entry.repository);
+  if (!url) return null;
+  const link = el("a", `om-repo-link ${extra || ""}`.trim(), "↗");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.title = `Open ${entry.repository} in a new tab`;
+  // The row opens the pack page; this opens the repository and nothing else.
+  link.onclick = (event) => event.stopPropagation();
+  return link;
 }
 
 // A pack's GitHub stars. Null where the registry records none, so callers can leave the
@@ -2141,12 +2587,17 @@ function buildResultRow(entry) {
   row._entry = entry;
   row._licPill = lic;
   meta.appendChild(lic);
+  const link = repoLink(entry);
+  if (link) meta.appendChild(link);
   text.appendChild(meta);
   text.onclick = () => openPack(entry.id);
   row.appendChild(text);
+  const onDisk = installedPack(entry.id);
   const control = makeInstallControl({
     packId: entry.id,
-    withMenu: false,
+    entry,
+    withMenu: !!onDisk,
+    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
     onInstall: () => quickInstall(entry.id, control),
   });
   restoreInstall(entry.id, control);
@@ -2174,13 +2625,18 @@ function buildResultTableRow(entry, index) {
   title.appendChild(name);
   title.title = entry.name || entry.id;
   title.onclick = () => openPack(entry.id);
+  const tableLink = repoLink(entry);
+  if (tableLink) title.appendChild(tableLink);
   row.appendChild(title);
 
   row.appendChild(el("div", "om-tcell om-tcell-ver", entry.advertised || "—"));
 
+  const onDisk = installedPack(entry.id);
   const control = makeInstallControl({
     packId: entry.id,
-    withMenu: false,
+    entry,
+    withMenu: !!onDisk,
+    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
     onInstall: () => quickInstall(entry.id, control),
   });
   restoreInstall(entry.id, control);
@@ -2243,11 +2699,16 @@ function buildResultCard(entry) {
   card._entry = entry;
   card._licPill = lic;
   meta.appendChild(lic);
+  const cardLink = repoLink(entry);
+  if (cardLink) meta.appendChild(cardLink);
   card.appendChild(meta);
 
+  const onDisk = installedPack(entry.id);
   const control = makeInstallControl({
     packId: entry.id,
-    withMenu: false,
+    entry,
+    withMenu: !!onDisk,
+    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
     onInstall: () => quickInstall(entry.id, control),
   });
   restoreInstall(entry.id, control);
@@ -2400,6 +2861,60 @@ function addLegacyMenuButton() {
   }
 }
 
+//: Share of the window the drawer opens at, where the reader has not chosen a width. A
+//: registry row carries a name, a version, counts and two badges; ComfyUI's own default of
+//: about 18% crams them on a normal screen.
+const DRAWER_SHARE = 23;
+
+//: Where the reader's own drawer width is kept. ComfyUI's splitter stores one width for
+//: every sidebar tab under "unified-sidebar"; this is Open Manager's alone, so widening
+//: here does not resize the other tabs or overwrite what the reader set on them.
+const DRAWER_KEY = "om-drawer-share";
+
+// Open the drawer at the reader's width, or wider than ComfyUI's default if they have not
+// set one. No minimum is imposed: the splitter stays draggable in both directions, and
+// whatever it lands on becomes the remembered width.
+async function sizeDrawer(root) {
+  // ComfyUI renders the tab before putting it in the document, so the splitter is not
+  // reachable yet on the first frame. Wait for it rather than bailing silently.
+  let panel = null;
+  let splitter = null;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    panel = root.closest(".p-splitterpanel");
+    splitter = panel?.closest(".p-splitter");
+    if (panel && splitter && splitter.getBoundingClientRect().width > 0) break;
+    if (!root.isConnected && attempt > 20) return;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  if (!panel || !splitter) return;
+
+  let saved = null;
+  try { saved = parseFloat(localStorage.getItem(DRAWER_KEY)); } catch {}
+  const share = Number.isFinite(saved) && saved > 0 ? saved : DRAWER_SHARE;
+  // The same shape the splitter writes, so it reads back as its own.
+  panel.style.flexBasis = `calc(${share}% - 4px)`;
+
+  // A drag rewrites the basis, so the basis is what gets kept -- not the rendered width.
+  // Flex shrink and grow mean the two differ, and feeding a measured width back in as a
+  // basis would move the drawer a little on every open.
+  let timer = null;
+  const remember = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const found = /(-?[\d.]+)%/.exec(panel.style.flexBasis || "");
+      const pct = found ? parseFloat(found[1]) : NaN;
+      if (!Number.isFinite(pct) || pct <= 0) return;
+      try { localStorage.setItem(DRAWER_KEY, String(pct)); } catch {}
+    }, 300);
+  };
+  const watch = new MutationObserver(() => {
+    // Let go once the tab has been replaced, rather than watching a detached panel.
+    if (!root.isConnected) { watch.disconnect(); return; }
+    remember();
+  });
+  watch.observe(panel, { attributes: true, attributeFilter: ["style"] });
+}
+
 function renderSidebar(root, initial) {
   root.replaceChildren();
   root.className = "om-side";
@@ -2408,6 +2923,8 @@ function renderSidebar(root, initial) {
   const content = el("div", "om-content");
   root.appendChild(nav);
   root.appendChild(content);
+  // Only the sidebar tab sits in a splitter; the panel window sizes itself.
+  sizeDrawer(root);
 
   const views = {
     registry: { label: "Registry", render: () => renderRegistry(content) },
@@ -2608,6 +3125,7 @@ async function renderInstalled(container) {
   }
   if (!viewIsCurrent(generation)) return;
   const packs = data.packs;
+  indexInstalled(packs);
 
   const controls = el("div", "om-side-controls");
   const sortSel = dropdown("om-installed-sort", "name", [
@@ -2619,6 +3137,9 @@ async function renderInstalled(container) {
     ["all", "All installed"],
     ["updates", "Updates available"],
     ["flagged", "Flagged or banned"],
+    ["registry", "Registry"],
+    ["github", "GitHub (from repo)"],
+    ["disk", "Disk (local)"],
     ["off-registry", "Not on registry"],
   ]);
   controls.appendChild(sortSel);
@@ -2635,6 +3156,7 @@ async function renderInstalled(container) {
       if (mode === "updates") return isInstalledUpdatable(pack);
       if (mode === "flagged") return ["flagged", "banned"].includes((pack.status || "").toLowerCase());
       if (mode === "off-registry") return !pack.registry_id;
+      if (mode === "registry" || mode === "github" || mode === "disk") return pack.source === mode;
       return true;
     });
     const rank = (pack) => (pack.status === "banned" ? 0 : pack.status === "flagged" ? 1 : 2);
@@ -3113,18 +3635,22 @@ function renderRegistry(container) {
       }, 250);
     };
 
-    const apply = () => {
+    // One predicate, used by the full apply below and by the re-filter a resolved licence
+    // triggers, so the two can never disagree about what belongs on screen.
+    const matches = (node) => {
       const query = search.value.trim().toLowerCase();
       const tier = licSel.value;
-      filtered = nodes.filter((node) => {
-        if (filterBox.checked && !node.advertised) return false;
-        if (tier !== "all" && node.license_tier !== tier) return false;
-        if (!query) return true;
-        return (node.name || "").toLowerCase().includes(query)
-          || node.id.toLowerCase().includes(query)
-          || (node.description || "").toLowerCase().includes(query)
-          || (node.publisher || "").toLowerCase().includes(query);
-      }).sort(comparators[sortSel.value] || comparators.downloads);
+      if (filterBox.checked && !node.advertised) return false;
+      if (tier !== "all" && node.license_tier !== tier) return false;
+      if (!query) return true;
+      return (node.name || "").toLowerCase().includes(query)
+        || node.id.toLowerCase().includes(query)
+        || (node.description || "").toLowerCase().includes(query)
+        || (node.publisher || "").toLowerCase().includes(query);
+    };
+
+    const apply = () => {
+      filtered = nodes.filter(matches).sort(comparators[sortSel.value] || comparators.downloads);
       count.textContent = `${filtered.length.toLocaleString()} shown`;
       win.className = `om-virt-win ${
         cardsOn() ? "om-card-grid" : tableOn() ? "om-table-win" : "om-list-win"}`;
@@ -3134,6 +3660,24 @@ function renderRegistry(container) {
       from = to = -1;
       repaint();
       queueVisibleLicences();
+    };
+
+    // A licence read from a repository can move a pack out of the tier it was filtered by:
+    // "unknown" is exactly the set being resolved, so rows leave it as answers arrive.
+    // The reader's place in the list is kept rather than reset, since this happens while
+    // they are reading it.
+    onLicencesResolved = () => {
+      if (!viewIsCurrent(generation)) { onLicencesResolved = null; return; }
+      if (licSel.value === "all") return;
+      const before = filtered.length;
+      const anchor = list.scrollTop;
+      filtered = nodes.filter(matches).sort(comparators[sortSel.value] || comparators.downloads);
+      if (filtered.length === before) return;
+      count.textContent = `${filtered.length.toLocaleString()} shown`;
+      const rows = Math.ceil(filtered.length / perRow);
+      list.scrollTop = Math.min(anchor, Math.max(0, rows * pitch - list.clientHeight));
+      from = to = -1;
+      repaint();
     };
 
     list.addEventListener("scroll", () => { paint(); queueVisibleLicences(); }, { passive: true });
@@ -3172,7 +3716,11 @@ sidebarStyle.textContent = `
 /* The panel as a window, for the legacy menu. The host fills the dialog so the panel keeps
    the height it relies on. */
 .om-panel-window > div { flex: 1; min-height: 0; }
+/* The close button floats over the dialog's top-right corner, which is where the panel's
+   last tab would otherwise sit. The tab row stops short of it rather than running under. */
+.om-panel-window .om-nav { padding-right: 30px; }
 .om-legacy-btn { width: 100%; }
+
 .om-side { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 8px;
   font: 13px/1.5 system-ui, sans-serif; color: var(--om-text); box-sizing: border-box; }
 .om-nav { display: flex; gap: 4px; flex: none; }
@@ -3663,6 +4211,9 @@ app.registerExtension({
     });
     // The legacy menu has no sidebar, so it gets a button to the same panel.
     addLegacyMenuButton();
+
+    // What is already on disk, so registry rows can say "Installed" on first paint.
+    loadInstalledIndex();
 
     // Themes registered beside the built-ins, each carrying its grid background and its light
     // or dark UI mode.
