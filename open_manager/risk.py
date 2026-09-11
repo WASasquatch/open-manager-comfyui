@@ -479,14 +479,42 @@ def inspect_artifact(path: str) -> Assessment:
                     reference=entry.reference,
                 )
             )
-        if "git+" in requirement:
+        stripped = requirement.strip()
+        lowered = stripped.lower()
+        if "git+" in lowered:
             findings.append(
                 Finding(
                     severity="caution",
                     title="Installs a package straight from a git URL",
                     detail="The requirement is fetched from a repository rather than an "
                            "index, so it is not pinned to a reviewed release.",
-                    evidence=(f"requirement: {requirement.strip()}",),
+                    evidence=(f"requirement: {stripped}",),
+                )
+            )
+        elif stripped.startswith("-"):
+            # A pip option in requirements.txt, e.g. --index-url or --find-links, can point
+            # the install at an index or location the author chose. The dependency preview
+            # does not act on these, so they are named here instead of silently ignored.
+            findings.append(
+                Finding(
+                    severity="caution",
+                    title="Requirements set a pip option",
+                    detail="A requirements line is a pip option rather than a package. "
+                           "Options such as --index-url or --find-links redirect where pip "
+                           "fetches from, and are not evaluated by the dependency preview.",
+                    evidence=(f"requirement: {stripped}",),
+                )
+            )
+        elif ("://" in lowered or lowered.startswith("file:")
+                or ("@" in stripped and "://" in lowered)):
+            findings.append(
+                Finding(
+                    severity="caution",
+                    title="Installs a package from a URL or path",
+                    detail="The requirement points at a URL, archive or local path rather "
+                           "than a named package on an index, so it is not a reviewed, "
+                           "pinned release. The dependency preview does not resolve it.",
+                    evidence=(f"requirement: {stripped}",),
                 )
             )
 

@@ -181,6 +181,39 @@ def _installed(python: str) -> dict[str, str]:
         return {}
 
 
+def _resolvable_requirement(line: str) -> bool:
+    """Whether a requirement line is a plain name/specifier safe to hand to a dry-run.
+
+    The preview resolves untrusted requirement lines with pip. A dry-run must therefore not
+    be steered to attacker-chosen code or indexes, because resolving such a line can execute
+    code (a source distribution's build backend runs during metadata generation) or reach an
+    arbitrary index -- all before the user has agreed to install anything. Only bare
+    ``name``/``name==x``/extras/marker forms are resolved; anything carrying a pip option, a
+    URL or VCS reference, or a local path is dropped.
+
+    Args:
+        line: One requirement line, already stripped.
+
+    Returns:
+        True where the line is safe to resolve.
+    """
+    text = line.strip()
+    if not text or text.startswith(("#", "-")):
+        return False
+    lowered = text.lower()
+    # A URL/VCS/file reference, whether bare or as a PEP 508 "name @ url" direct reference.
+    if "://" in lowered or lowered.startswith(("git+", "hg+", "svn+", "bzr+", "file:")):
+        return False
+    if "@" in text:  # '@' in a requirement is a direct reference; markers use ';', extras []
+        return False
+    # A local path or a bare archive rather than a named package.
+    if "/" in text or "\\" in text:
+        return False
+    if lowered.endswith((".whl", ".zip", ".tar.gz", ".tgz", ".tar.bz2", ".egg")):
+        return False
+    return True
+
+
 def analyse(requirements: Sequence[str], python: str = "") -> Impact:
     """Report what installing a requirement set would change, without installing it.
 
@@ -192,10 +225,13 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
         An :class:`Impact`. A resolve that fails carries its reason in ``failure`` rather
         than raising.
     """
+    # Only plain name/specifier lines are resolved. URL/VCS/path/option lines are dropped so
+    # the preview cannot be made to build a source distribution or fetch from an
+    # attacker-chosen index before any install is confirmed. See _resolvable_requirement.
     wanted = [
         line.strip()
         for line in requirements
-        if line.strip() and not line.strip().startswith("#")
+        if line.strip() and not line.strip().startswith("#") and _resolvable_requirement(line)
     ]
     if not wanted:
         return Impact(checked=True)
@@ -259,9 +295,15 @@ def _resolve(python: str, path: str) -> list | str:
     Returns:
         The report's ``install`` list, or a sentence saying why pip could not answer.
     """
+    # --only-binary=:all: keeps pip from selecting or building any source distribution while
+    # it resolves. Metadata for a wheel is read from the wheel, so no build backend (no
+    # setup.py, no PEP 517 hook) runs during the preview; a package that offers only an sdist
+    # simply is not resolved rather than being built. This is what stops the preview from
+    # executing attacker code before an install is confirmed.
     command = [
         python, "-m", "pip", "install",
         "--dry-run", "--no-input", "--disable-pip-version-check", "--quiet",
+        "--only-binary=:all:",
         "--report", "-", "-r", path,
     ]
     try:
