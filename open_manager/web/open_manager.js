@@ -2366,6 +2366,7 @@ function offerPackLink(anchor, href) {
   const match = /^https?:\/\/(?:www\.)?github\.com\/([^/#?]+)\/([^/#?]+)\/?$/i.exec(href || "");
   if (!match) return;
   anchor.onclick = async (event) => {
+    if (panelSetting("openManager.packLinks", true) !== true) return;
     // A modifier or the middle button means the reader asked for a tab; leave them to it.
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
@@ -2477,6 +2478,9 @@ async function workflowInImage(url) {
 // Nothing is fetched until asked: the images on a page run to tens of megabytes.
 function offerImageWorkflows(view) {
   view.addEventListener("contextmenu", async (event) => {
+    // Off leaves the browser's own menu alone, which is what someone who wants to copy or
+    // save the image is reaching for.
+    if (panelSetting("openManager.imageWorkflows", true) !== true) return;
     const image = event.target instanceof HTMLImageElement ? event.target : null;
     if (!image || !safeUrl(image.src)) return;
     event.preventDefault();
@@ -4267,7 +4271,23 @@ app.registerExtension({
       category: ["Open Manager", "Interface", "trustRegistry"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Repository installs always ask, because nothing has scanned them. Turn this on to be asked for registry packs too. Findings against a pack are shown either way.",
+      tooltip: "Repository installs always ask, because nothing has scanned them. Turn this on to be asked for registry packs too. Asked once per author, so several packs by someone already trusted do not ask again. Findings against a pack are shown either way.",
+    },
+    {
+      id: "openManager.imageWorkflows",
+      name: "Right-click a README image to load its workflow",
+      category: ["Open Manager", "Interface", "imageWorkflows"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Authors publish screenshots with the workflow written into the file. Right-clicking one offers to load it. Turn this off to keep the browser's own menu on README images.",
+    },
+    {
+      id: "openManager.packLinks",
+      name: "Open README links to other packs here",
+      category: ["Open Manager", "Interface", "packLinks"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "A README link to another pack's repository opens that pack's page in Open Manager rather than leaving for GitHub. Middle-click and ctrl-click always go to GitHub.",
     },
     {
       id: "openManager.enrichMetadata",

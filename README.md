@@ -28,7 +28,7 @@ Open Manager addresses these limitations by:
 | | |
 | --- | --- |
 | Full registry | Every version and its status, flagged and withheld included |
-| Warn, never block | Risk changes the wording of the confirmation, not whether Install works |
+| Warn, never block (except the banned; shame!) | Risk changes the wording of the confirmation, not whether Install works |
 | Before you install | The findings against a version and the dependency changes it would make |
 | What's in the box | A GitHub install is read first. Compiled binaries, pickle-format data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
 | Missing nodes | The packs for the node types a workflow is missing, matched against GitHub |
