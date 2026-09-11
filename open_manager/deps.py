@@ -33,7 +33,8 @@ def comfyui_core() -> dict:
         import folder_paths
 
         path = os.path.join(os.path.dirname(os.path.abspath(folder_paths.__file__)), "requirements.txt")
-        text = open(path, encoding="utf-8", errors="replace").read()
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
     except Exception:
         return {}
     pins: dict = {}

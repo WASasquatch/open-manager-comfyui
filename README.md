@@ -1,6 +1,7 @@
 # Open Manager for ComfyUI  ![Open Manager](https://img.shields.io/badge/Open-Manager-yellow) ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![License](https://img.shields.io/badge/License-MIT-green) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
 
 <img src="./open-manager-banner.png" width="80%" alt="Open Manager for ComfyUI">
+<video src="https://i.imgur.com/hG26zsF.mp4" width="80%" alt="Open Manager for ComfyUI" controls></video>
 
 ## An alternative package manager for ComfyUI. 
 
@@ -18,23 +19,22 @@ ComfyUI Manager is a great package manager for ComfyUI, but it has some limitati
 - It isn't transparent about the status of packages (e.g., flagged, withheld).
 - It quietly substitutes an approved version when the one you asked for is flagged, without telling you it did.
 - It installs without showing you the dependency changes an install would make to your environment.
-- It doesn't show each pack's licence, so there is no at-a-glance read on whether one fits your project; e.g., a pack is AGPL and your project can't accept its source-disclosure terms.
-- It can install from a Git URL, but there is nowhere to keep those repositories: no list, no update path, and no inspection before it runs. A friend's repo, or a pack not yet on the registry, is a fresh paste every time.
+- It doesn't show each pack's licence, so there is no at-a-glance read on whether one fits your project.
+- It can install from a Git URL, but there is nowhere to keep those repositories: no list, no update path, no inspection.
 
 Open Manager addresses these limitations by:
 
 | | |
 | --- | --- |
-| Full registry | Every version with its status, including the flagged and withheld ones |
-| Warn, never block | Install is always available; risk changes the wording of the confirmation, not whether the button exists |
-| Before you install | The findings against a version and the dependency changes an install would make, shown first |
-| What's in the box | A GitHub install is read before it lands: compiled binaries, pickle-format data, bundled wheels and bytecode shipped without its source are named, with what each one means and the note that false positives are possible |
-| Missing nodes | The packs for the node types a workflow is missing, with an attempt to find the best match on GitHub |
-| From anywhere | The registry, or straight from a GitHub repository after inspection |
-| Your own list | A GitHub tab holding repositories you add, kept in `user/` so it outlives an uninstall |
-| Licences | Read from each pack and shown, sortable by type, most permissive first |
-| Fast sync | The whole 5,500 Comfy Registry pack catalogue in about 3 seconds rather than 31+ seconds, with the concurrency yours to set |
-| Any ref | Read a pack's page at another branch or a recent commit, README and gallery together, and install that ref straight from GitHub to test a change |
+| Full registry | Every version and its status, flagged and withheld included |
+| Warn, never block | Risk changes the wording of the confirmation, not whether Install works |
+| Before you install | The findings against a version and the dependency changes it would make |
+| What's in the box | A GitHub install is read first. Compiled binaries, pickle-format data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
+| Missing nodes | The packs for the node types a workflow is missing, matched against GitHub |
+| Your own list | A GitHub tab of repositories you add, kept in `user/` so it outlives an uninstall |
+| Licences | Read from each pack and shown, sortable, most permissive first |
+| Any ref | Read a pack's page at another branch or recent commit, README and gallery together, and install that ref to test a change |
+| Fast sync | The whole Comfy Registry in seconds, with the concurrency yours to set |
 
 The only version that cannot be installed is one the registry has banned. Set
 `OPEN_MANAGER_ALLOW_BANNED=1` to lift that too.
@@ -81,33 +81,44 @@ and only these:
 | `api.comfy.org` | browsing and installing |
 | `cdn.comfy.org` | downloading a registry version to install |
 | `codeload.github.com` | downloading a GitHub repository to install |
-| `raw.githubusercontent.com` | reading a pack's licence; README images |
-| `api.github.com` | naming a licence, when the GitHub licence lookup is on (off by default); a pack page's README, stats and gallery, when README enrichment is on (on by default); listing branches and commits, when you open the ref picker; starring a repository, when you press Star |
-| wherever a pack points | a gallery entry given as an absolute URL, when galleries are on. Turn galleries off to keep to the hosts above |
+| `raw.githubusercontent.com` | licences, READMEs, images |
+| `api.github.com` | a pack page's stats and gallery, branches and commits, starring, and the licence lookup when it is on |
+| wherever a pack points | a gallery entry given as an absolute URL. Turn galleries off to keep to the hosts above |
 
-**Settings.** Everything is off or at its default until you change it, under
-`Settings -> Open Manager`. Set `open_manager.registry.BASE_URL` to route the registry
-through a mirror or a private index.
+**Where it appears.** A sidebar tab on the current interface. On ComfyUI's legacy menu
+(`Settings -> Comfy -> Use new menu -> Disabled`) it adds an **Open Manager** button there
+instead. Where it replaces the manager, the top menu's **Extensions** button opens it too.
 
-Reading a pack page costs up to three GitHub API calls. Anonymously that is 60 an hour,
-so roughly twenty new pack pages; setting a token raises it to 5,000. Without one, pages
-still show their README, gallery and versions, because those are read from the raw content
-host, which is not rate limited in the same way.
+**Classic Mode.** On by default: Extensions opens a menu of destinations, the way
+ComfyUI-Manager did. Turn it off in settings to go straight to the panel. The sidebar tab
+is unaffected either way.
 
+**Settings.** Under `Settings -> Open Manager`. Set `open_manager.registry.BASE_URL` to route
+the registry through a mirror or a private index. Set a GitHub token to raise the anonymous
+60 calls an hour to 5,000; without one, pack pages still show their README, gallery and
+versions.
 
-**Your GitHub list.** The GitHub tab holds repositories you add by URL or as `owner/repo`.
-Each one installs, updates and uninstalls like a registry pack, and the list is written to
-`user/open_manager/github_sources.json`, outside the pack, so removing and reinstalling Open
-Manager leaves it intact. Uninstalling a repository keeps it on the list; **Remove from list**
-takes it off and uninstalls it in one step.
+**Requirements.** `torch`, `torchaudio`, `torchsde` and `torchvision` are never installed
+from a pack's requirements: they carry the build your ComfyUI was set up with. Anything held
+back is named in the install output. To substitute a package, map it in
+`user/open_manager/pip_overrides.json`:
+
+```json
+{ "opencv-python": "opencv-python-headless>=4.9" }
+```
+
+**Your GitHub list.** Add repositories by URL or as `owner/repo`. Each installs, updates and
+uninstalls like a registry pack. The list is written to
+`user/open_manager/github_sources.json`, outside the pack, so it survives an uninstall.
+**Remove from list** delists and uninstalls in one step.
 
 ---
 
 ## For pack authors
 
-Declare a `[tool.open_manager]` table in your `pyproject.toml` to carry Open Manager specific
-information. Every field is optional, read from your repository, and packs without the table
-are unaffected.
+Declare a `[tool.open_manager]` table in your `pyproject.toml`. Every field is optional and
+packs without the table are unaffected. For an installed pack these are read from the copy on
+disk, with the repository as the fallback.
 
 ```toml
 [tool.open_manager]
@@ -116,7 +127,7 @@ source = "github"                               # prefer installing from the rep
 branch = "main"                                 # default branch to install from
 docs = "https://example.com/docs"               # documentation URL
 funding = "https://ko-fi.com/you"               # funding URL
-release_note = "1.4.0 needs a restart."         # your note on the current release, 600 chars
+release_note = "1.4.0 needs config regen."      # shown above the version list, 600 chars
 example_workflows = ["examples/interp.json"]    # list example workflows to load
 themes = ["themes/my-theme.json"]               # list themes to offer
 gallery = [                                     # images to show off the pack, up to 24, `png`,
@@ -126,23 +137,14 @@ gallery = [                                     # images to show off the pack, u
 ]
 ```
 
-**Gallery.** are read on the pack page when README enrichment is on, which it is unless you turn
-it off. `release_note` is shown above the version list, so it is read before a version is chosen;
-the rest appear below the README.
-
-For an installed pack these are read from the copy on disk, so what you shipped is what its
-page shows, with the repository as the fallback.
-
 ---
 
 ## Theme format
 
 A theme is a ComfyUI colour palette with an optional `extras` block. ComfyUI reads `colors`
 and ignores `extras`; Open Manager reads both. Themes listed in `[tool.open_manager] themes`
-appear on the pack page with an Add button.
-
-The six shipped themes are in [`open_manager/themes/`](open_manager/themes/) and are the
-intended starting point: copy one, change the id and the colours.
+appear on the pack page with an Add button. Copy one of the six in
+[`open_manager/themes/`](open_manager/themes/), change the id and the colours.
 
 ```jsonc
 {
@@ -171,16 +173,13 @@ intended starting point: copy one, change the id and the colours.
 }
 ```
 
-Notes worth knowing before you write one:
-
 | | |
 | --- | --- |
-| Categories | Matched on the full lowercased category path, longest first, so `was suite/image/masking` wins over `was suite/image`. Core nodes also match the segment below `model/`, so `model/sampling` is `sampling` |
+| Categories | Matched on the full lowercased category path, longest first, so `was suite/image/masking` wins over `was suite/image`. Core nodes also match the segment below `model/` |
 | Precedence | A colour the user set on a node wins, then a `nodes` rule, then a `categories` tint |
 | Nothing is saved | Header, title and text colour are applied for the draw and undone after, so they never enter a saved workflow |
 | Bounded | Unknown keys are dropped and numbers are range-checked; there is no animation, and a theme cannot ask for one |
-| Scoped | `extras` apply only while your theme is active, and geometry is restored when the user switches away |
-| SVGs | Yeah, I know they're bad. I used photoshop and online PSD to SVG, and I thought it would be better than PNG to SVG. |
+| Scoped | Theme color palette `extras` apply only while your theme is active, and geometry is restored when the user switches away |
 
 ---
 
