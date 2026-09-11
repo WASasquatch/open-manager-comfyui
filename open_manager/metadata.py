@@ -100,7 +100,7 @@ class Metadata:
             open_prs=int(data.get("open_prs") or 0),
             pushed_at=data.get("pushed_at", ""),
             fetched_at=float(data.get("fetched_at") or 0.0),
-            developer=data.get("developer") or {},
+            developer=developer.scrub(data.get("developer") or {}),
         )
 
 

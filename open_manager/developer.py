@@ -28,10 +28,14 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         tomllib = None
 
-__all__ = ["from_pyproject", "resolve_incompatible"]
+__all__ = ["from_pyproject", "resolve_incompatible", "scrub"]
 
-#: String fields kept from the table.
-_STR_FIELDS = ("source", "branch", "docs", "funding", "release_note")
+#: String fields kept from the table and shown as text.
+_STR_FIELDS = ("source", "branch", "release_note")
+
+#: String fields the panel turns into links. These are scheme-checked like gallery entries:
+#: the panel opens them, so ``javascript:`` here is script in ComfyUI's own origin.
+_URL_FIELDS = ("docs", "funding")
 
 #: List-of-string fields kept from the table.
 _LIST_FIELDS = ("incompatible", "example_workflows", "themes", "gallery")
@@ -76,6 +80,10 @@ def from_pyproject(text: str) -> dict:
         value = section.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()[:_STR_CAP]
+    for key in _URL_FIELDS:
+        value = section.get(key)
+        if isinstance(value, str) and _link(value.strip()):
+            out[key] = value.strip()[:_STR_CAP]
     for key in _LIST_FIELDS:
         value = section.get(key)
         if isinstance(value, list):
@@ -89,6 +97,47 @@ def from_pyproject(text: str) -> dict:
         else:
             out.pop("gallery")
     return out
+
+
+def scrub(developer: dict) -> dict:
+    """Drop link fields that are not safe to open.
+
+    Applied to metadata read back from the cache, which was written before the check in
+    :func:`from_pyproject` existed and is kept until a pack's versions change. Without this
+    a value cached then is served indefinitely.
+
+    Args:
+        developer: A developer table, from a cache or freshly parsed.
+
+    Returns:
+        The same table without any link field the panel may not open.
+    """
+    if not isinstance(developer, dict):
+        return {}
+    return {
+        key: value
+        for key, value in developer.items()
+        if key not in _URL_FIELDS or (isinstance(value, str) and _link(value))
+    }
+
+
+def _link(value: str) -> bool:
+    """Whether a value is a URL the panel may open.
+
+    Only absolute ``http`` and ``https`` are allowed. ``javascript:`` passed to the panel's
+    link buttons runs in ComfyUI's origin, which reaches every API the server exposes, so
+    the scheme is checked here rather than trusted.
+
+    Args:
+        value: The field's value.
+
+    Returns:
+        True where the value is safe to offer as a link.
+    """
+    text = (value or "").strip()
+    if not text or len(text) > _STR_CAP:
+        return False
+    return text.lower().startswith(_URL_SCHEMES)
 
 
 def _gallery_entry(entry: str) -> bool:
@@ -124,7 +173,7 @@ def resolve_incompatible(specs) -> list[dict]:
         true where an installed package satisfies the specifier.
     """
     try:
-        from importlib.metadata import PackageNotFoundError, version
+        from importlib.metadata import version
         from packaging.requirements import Requirement
     except Exception:
         return []
