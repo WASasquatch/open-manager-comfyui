@@ -34,6 +34,7 @@ Open Manager addresses these limitations by:
 | Missing nodes | The packs for the node types a workflow is missing, matched against GitHub |
 | Your own list | A GitHub tab of repositories you add, kept in `user/` so it outlives an uninstall |
 | Licences | Read from each pack and shown, sortable, most permissive first |
+| Trust the author | A pack from outside the registry asks who you are trusting before it installs, once per author or every time. Findings are shown either way |
 | Any ref | Read a pack's page at another branch or recent commit, README and gallery together, and install that ref to test a change |
 | Fast sync | The whole Comfy Registry in seconds, with the concurrency yours to set |
 
@@ -94,6 +95,9 @@ instead. Where it replaces the manager, the top menu's **Extensions** button ope
 ComfyUI-Manager did. Turn it off in settings to go straight to the panel. The sidebar tab
 is unaffected either way.
 
+**Trust.** Incoporated a simple trust gate for certain actions with Open Manager.
+Make sure you trust the authors.
+
 **Settings.** Under `Settings -> Open Manager`. Set `open_manager.registry.BASE_URL` to route
 the registry through a mirror or a private index. Set a GitHub token to raise the anonymous
 60 calls an hour to 5,000; without one, pack pages still show their README, gallery and
@@ -107,6 +111,11 @@ back is named in the install output. To substitute a package, map it in
 ```json
 { "opencv-python": "opencv-python-headless>=4.9" }
 ```
+
+**Trust.** A pack from outside the registry asks who you are trusting before installing it,
+and again before loading a workflow of theirs. Answer once per author or every time, under
+`Settings -> Open Manager`. Trusted authors are written to
+`user/open_manager/trusted_authors.json`, and trust never hides a finding.
 
 **Your GitHub list.** Add repositories by URL or as `owner/repo`. Each installs, updates and
 uninstalls like a registry pack. The list is written to
@@ -129,14 +138,19 @@ branch = "main"                                 # default branch to install from
 docs = "https://example.com/docs"               # documentation URL
 funding = "https://ko-fi.com/you"               # funding URL
 release_note = "1.4.0 needs config regen."      # shown above the version list, 600 chars
-example_workflows = ["examples/interp.json"]    # list example workflows to load
+example_workflows = ["workflows/*.json"]        # a path, a glob, or a directory
 themes = ["themes/my-theme.json"]               # list themes to offer
-gallery = [                                     # images to show off the pack, up to 24, `png`,
-                                                # `jpg`, `jpeg`, `gif`, `webp` and `avif`
-  "docs/before.png",                            #   a path in your repository
-  "https://cdn.example.com/after.webp",         #   or an image hosted anywhere
+gallery = [                                     # shown off on the pack page, up to 24, `png`,
+                                                # `jpg`, `jpeg`, `gif`, `webp`, `avif`, and
+                                                # `mp4`, `webm`, `mov` for clips
+  "docs/*.png",                                 #   a path or glob in your repository
+  "https://cdn.example.com/after.webp",         #   or a file hosted anywhere
 ]
 ```
+
+Leave `example_workflows` out and `workflows/`, `workflow/`, `examples/`, `example/` and
+`example_workflows/` are read instead. An image named for a workflow beside it becomes its
+thumbnail. `docs` and `funding` fall back to `[project.urls]`.
 
 ---
 
