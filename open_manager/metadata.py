@@ -21,6 +21,15 @@ from . import developer
 
 __all__ = ["Metadata", "cache_dir", "fetch", "fetch_repo", "signature"]
 
+#: Which revision of the scrape produced a cached entry. A scrape is kept until the pack's
+#: versions change, so a change in what we read would otherwise never reach anyone who had
+#: already looked a pack up. Raise this whenever the shape of what is scraped changes.
+#:
+#: 2: pattern and directory entries in the developer table are resolved against the
+#:    repository's files, and the conventional workflow directories are read.
+#: 3: a workflow's preview image is paired with it, and a gallery may hold clips.
+CACHE_REVISION = 3
+
 #: Seconds any single request may take.
 TIMEOUT = 20
 
@@ -82,6 +91,7 @@ class Metadata:
             "pushed_at": self.pushed_at,
             "fetched_at": self.fetched_at,
             "developer": dict(self.developer),
+            "revision": CACHE_REVISION,
         }
 
     @classmethod
@@ -155,6 +165,9 @@ def _read_cache(node_id: str, sig: str) -> Metadata | None:
     except (OSError, ValueError):
         return None
     if data.get("signature") != sig:
+        return None
+    # An entry from an older scrape is read again rather than served as it stands.
+    if int(data.get("revision") or 0) < CACHE_REVISION:
         return None
     return Metadata.from_json(data)
 
@@ -321,7 +334,8 @@ async def fetch_repo(
     path = _cache_path(key)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if time.time() - float(data.get("fetched_at") or 0) < max_age:
+        fresh = time.time() - float(data.get("fetched_at") or 0) < max_age
+        if fresh and int(data.get("revision") or 0) >= CACHE_REVISION:
             return Metadata.from_json(data)
     except (OSError, ValueError):
         pass
@@ -380,11 +394,56 @@ async def read_at_ref(
     pyproject = await _text(
         session, f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/pyproject.toml"
     )
+    table = developer.from_pyproject(pyproject)
+    if table:
+        table = developer.expand(table, await _tree_lister(owner, repo, ref, session))
     return {
         "readme": readme,
         "readme_format": fmt,
-        "developer": developer.from_pyproject(pyproject),
+        "developer": table,
     }
+
+
+async def _tree_lister(owner: str, repo: str, ref: str, session: aiohttp.ClientSession):
+    """A lister for :func:`developer.expand`, backed by the repository's file tree.
+
+    One call returns every path in the repository, which is what resolving a pattern or a
+    bare directory needs for a pack that is not installed locally. Failure is not fatal: the
+    lister then sees nothing and every entry is left as the pack wrote it.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+        ref: Branch or commit to read.
+        session: Session the request runs on.
+
+    Returns:
+        A callable taking a directory and returning the repository-relative paths below it.
+    """
+    paths: list[str] = []
+    try:
+        async with session.get(
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "open-manager"},
+            timeout=aiohttp.ClientTimeout(total=20),
+        ) as answer:
+            if answer.status == 200:
+                payload = await answer.json()
+                paths = [
+                    str(item.get("path") or "")
+                    for item in (payload.get("tree") or [])
+                    if item.get("type") == "blob"
+                ]
+    except (aiohttp.ClientError, TimeoutError, ValueError):
+        paths = []
+
+    def listing(folder: str) -> list[str]:
+        if folder in ("", "."):
+            return list(paths)
+        prefix = folder.rstrip("/") + "/"
+        return [path for path in paths if path.startswith(prefix)]
+
+    return listing
 
 
 def _is_blank(meta: Metadata) -> bool:
@@ -465,6 +524,11 @@ async def _scrape(
             break
     requires_python, requires_comfyui = _requires_from_pyproject(pyproject)
 
+    dev_table = developer.from_pyproject(pyproject)
+    if dev_table:
+        dev_table = developer.expand(
+            dev_table, await _tree_lister(owner, repo, branch or "HEAD", session)
+        )
     return Metadata(
         signature=sig,
         readme=readme,
@@ -478,5 +542,5 @@ async def _scrape(
         open_prs=open_prs,
         pushed_at=info.get("pushed_at", "") or "",
         fetched_at=time.time(),
-        developer=developer.from_pyproject(pyproject),
+        developer=dev_table,
     )
