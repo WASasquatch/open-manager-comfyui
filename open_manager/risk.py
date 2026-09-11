@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import posixpath
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable
 
 from . import advisories
@@ -20,6 +20,7 @@ __all__ = [
     "assess_resolution",
     "assess_version",
     "inspect_artifact",
+    "repository_findings",
     "SEVERITY_ORDER",
 ]
 
@@ -75,6 +76,58 @@ class Assessment:
 def _ordered(findings: Iterable[Finding]) -> tuple[Finding, ...]:
     """Sort findings by severity, keeping insertion order within a severity."""
     return tuple(sorted(findings, key=lambda item: _RANK.get(item.severity, len(SEVERITY_ORDER))))
+
+
+#: ComfyUI itself and its tooling, as lowercased owner/repo pairs. A registry entry can
+#: name one of these as its own, and installing it puts a second ComfyUI in ``custom_nodes``.
+CORE_REPOS = frozenset({
+    ("comfyanonymous", "comfyui"),
+    ("comfy-org", "comfyui"),
+    ("comfy-org", "comfyui_frontend"),
+    ("comfy-org", "comfyui-frontend"),
+    ("comfy-org", "comfyui-desktop"),
+})
+
+#: Other package managers. Ordinary custom nodes that install fine, so this is context.
+MANAGER_REPOS = frozenset({
+    ("ltdrdata", "comfyui-manager"),
+    ("comfy-org", "comfyui-manager"),
+})
+
+
+def repository_findings(owner: str, repo: str) -> list[Finding]:
+    """What is worth saying about the repository an install would come from.
+
+    Args:
+        owner: Repository owner.
+        repo: Repository name.
+
+    Returns:
+        Findings, empty where the repository is an ordinary pack.
+    """
+    pair = ((owner or "").strip().lower(), (repo or "").strip().lower().removesuffix(".git"))
+    if pair in CORE_REPOS:
+        return [
+            Finding(
+                severity="caution",
+                title="This is ComfyUI itself, not a node pack",
+                detail="The repository is ComfyUI or part of its tooling. Installing it "
+                       "places a second copy inside custom_nodes, where it is not a pack "
+                       "and will not load. A registry entry sometimes names it by mistake.",
+                evidence=(f"repository: {pair[0]}/{pair[1]}",),
+            )
+        ]
+    if pair in MANAGER_REPOS:
+        return [
+            Finding(
+                severity="note",
+                title="This is another package manager",
+                detail="It installs and runs normally. Two managers can be loaded at once, "
+                       "and each keeps its own record of what it installed.",
+                evidence=(f"repository: {pair[0]}/{pair[1]}",),
+            )
+        ]
+    return []
 
 
 _STATUS_TEXT = {
@@ -479,14 +532,38 @@ def inspect_artifact(path: str) -> Assessment:
                     reference=entry.reference,
                 )
             )
-        if "git+" in requirement:
+        stripped = requirement.strip()
+        lowered = stripped.lower()
+        if "git+" in lowered:
             findings.append(
                 Finding(
                     severity="caution",
                     title="Installs a package straight from a git URL",
                     detail="The requirement is fetched from a repository rather than an "
                            "index, so it is not pinned to a reviewed release.",
-                    evidence=(f"requirement: {requirement.strip()}",),
+                    evidence=(f"requirement: {stripped}",),
+                )
+            )
+        elif stripped.startswith("-"):
+            findings.append(
+                Finding(
+                    severity="caution",
+                    title="Requirements set a pip option",
+                    detail="A requirements line is a pip option rather than a package. "
+                           "Options such as --index-url or --find-links change where pip "
+                           "fetches from, and the dependency preview does not act on them.",
+                    evidence=(f"requirement: {stripped}",),
+                )
+            )
+        elif "://" in lowered or lowered.startswith("file:"):
+            findings.append(
+                Finding(
+                    severity="caution",
+                    title="Installs a package from a URL or path",
+                    detail="The requirement names a URL, archive or path rather than a "
+                           "package on an index, so it is not a pinned release. The "
+                           "dependency preview does not resolve it.",
+                    evidence=(f"requirement: {stripped}",),
                 )
             )
 
