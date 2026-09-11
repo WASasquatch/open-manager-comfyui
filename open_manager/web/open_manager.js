@@ -120,6 +120,9 @@ style.textContent = `
 .om-menu-danger { color: #f85149; }
 .om-side-ictl .om-btn { padding: 5px 12px; font-size: 12px; }
 .om-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
+/* The header sits inside the scrolling body; the negative margin pulls it back out to the
+   dialog's edges so its divider still spans the full width. */
+.om-body > .om-hero { margin: -16px -20px 16px; }
 .om-notice { border-left: 3px solid #d29922; background: #1c1a12; padding: 10px 14px; margin-bottom: 14px; }
 .om-release { border-left: 3px solid #388bfd; background: var(--om-surface); padding: 10px 14px;
   margin-bottom: 14px; border-radius: 0 7px 7px 0; }
@@ -205,6 +208,21 @@ const el = (tag, cls, text) => {
   return node;
 };
 
+// Pack, registry and advisory URLs all reach here. `javascript:` passed to window.open or
+// an href runs in ComfyUI's origin, so nothing is opened unchecked.
+const safeUrl = (value) => {
+  const text = String(value ?? "").trim();
+  return /^https?:\/\//i.test(text) ? text : "";
+};
+
+const openUrl = (value) => {
+  const url = safeUrl(value);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
+  else if (String(value ?? "").trim()) {
+    notify("Link not opened", "This link is not an http(s) URL, so it was not opened.");
+  }
+};
+
 const badge = (status) => {
   const node = el("span", "om-badge", status);
   node.style.background = STATUS_COLOUR[status] || STATUS_COLOUR.unknown;
@@ -212,10 +230,24 @@ const badge = (status) => {
 };
 
 function closeOn(backdrop) {
+  // A click is dispatched on the nearest ancestor shared by the press and the release, so a
+  // drag that starts inside the dialog and finishes outside it reports the backdrop as the
+  // target. Selecting text or moving a scrollbar would then shut the window. Both ends of
+  // the click have to land on the backdrop for it to count as clicking away.
+  let pressedAway = false;
+  backdrop.addEventListener("mousedown", (event) => {
+    pressedAway = event.target === backdrop;
+  });
   backdrop.addEventListener("click", (event) => {
-    if (event.target === backdrop) backdrop.remove();
+    if (pressedAway && event.target === backdrop) backdrop.remove();
+    pressedAway = false;
   });
   const onKey = (event) => {
+    // Closed by other means, so the listener lets go rather than outliving its dialog.
+    if (!backdrop.isConnected) {
+      window.removeEventListener("keydown", onKey);
+      return;
+    }
     if (event.key === "Escape") {
       backdrop.remove();
       window.removeEventListener("keydown", onKey);
@@ -246,8 +278,9 @@ const findingCard = (finding) => {
   }
   if (finding.reference) {
     const link = el("a", null, finding.reference);
-    link.href = finding.reference;
+    link.href = safeUrl(finding.reference) || "#";
     link.target = "_blank";
+    link.rel = "noopener noreferrer";
     link.style.cssText = "color:#58a6ff;font-size:11px";
     card.appendChild(link);
   }
@@ -670,6 +703,8 @@ async function runInstallQueue() {
         body: JSON.stringify({
           id: job.packId, version: job.entry.version,
           status: job.entry.status, overwrite: !!job.overwrite,
+          // Held back so the files can be looked at before anything joins the environment.
+          with_deps: !job.scanFirst,
         }),
       });
       result = await answer.json();
@@ -686,6 +721,7 @@ async function runInstallQueue() {
       }
       job.control?.setInstalled();
       rememberInstall(job.packId, "installed");
+      if (job.scanFirst) await scanThenFinish(job.packId);
       if (result.pip_ran && !result.pip_ok) {
         issues.push(`${job.name}: requirements did not install cleanly`);
       }
@@ -716,10 +752,26 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
   const installed = rowsRoot ? rowsRoot._installedVersion : "";
   const change = versionSwitch(installed, entry.version);
   if (!(await confirmInstall(packId, entry, change))) return;
+
+  // Where a scan is meant to run first, the requirements are held until it has. If the
+  // day's allowance is gone the choice is offered rather than taken away.
+  let scanFirst = vtReady() && panelSetting("openManager.scanOnInstall", false) === true;
+  if (scanFirst && (await vtRemaining()) === 0) {
+    const go = await confirmAction(
+      "VirusTotal allowance spent",
+      `Today's ${500} lookups are used up, so ${packId} cannot be scanned before it installs. `
+      + "Install without scanning?",
+      "Skip scan and install",
+    );
+    if (!go) return;
+    scanFirst = false;
+  }
+
   enqueueInstall({
     packId, entry, control, rowsRoot,
     overwrite: overwrite || !!change,
     name: entry.name || packId,
+    scanFirst,
   });
 }
 
@@ -897,8 +949,8 @@ async function reflectStar(repository, button) {
 
 async function starRepo(repository, button) {
   const parts = repoOwnerName(repository);
-  if (!parts) { if (repository) window.open(repository, "_blank"); return; }
-  const openRepo = () => window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank");
+  if (!parts) { if (repository) openUrl(repository); return; }
+  const openRepo = () => window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener,noreferrer");
   const token = (app.extensionManager.setting.get("openManager.githubToken") || "").trim();
   if (!token) { openRepo(); return; }
   const starred = button.classList.contains("om-starred");
@@ -987,7 +1039,7 @@ async function openPack(packId) {
   if (pack.repository) {
     const repo = el("button", "om-btn", "View on GitHub");
     repo.title = "Open the repository";
-    repo.onclick = () => window.open(pack.repository, "_blank");
+    repo.onclick = () => openUrl(pack.repository);
     actions.appendChild(repo);
     if (repoOwnerName(pack.repository)) actions.appendChild(makeStarButton(pack.repository, pack.stars));
   }
@@ -1039,9 +1091,11 @@ async function openPack(packId) {
   }
 
   hero.appendChild(info);
-  dialog.appendChild(hero);
 
+  // The header scrolls with the page rather than being pinned above it, so a long README
+  // gets the whole dialog once you have read past the title.
   const body = el("div", "om-body");
+  body.appendChild(hero);
   body.appendChild(el("div", "om-release-slot"));
 
   // The registry advertises only an active release. Where a newer one is published, the
@@ -1059,7 +1113,12 @@ async function openPack(packId) {
   for (const entry of versions) {
     const row = el("div", "om-row");
     row.appendChild(el("div", "om-ver", entry.version));
-    row.appendChild(badge(entry.status));
+    const mark = badge(entry.status);
+    mark.dataset.version = entry.version;
+    // The registry's reason arrives separately and lands here; until then the badge says
+    // only what the status is, which the reader can already see.
+    mark.title = `Status: ${entry.status}`;
+    row.appendChild(mark);
     row.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
 
     const worst = entry.assessment?.findings?.[0];
@@ -1092,6 +1151,7 @@ async function openPack(packId) {
   });
   versionsPanel.body.appendChild(versionsBox);
   body.appendChild(versionsPanel);
+  attachStatusReasons(pack.id, versionsBox, versions);
 
   // README, below the version list, only when enrichment is enabled.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
@@ -1138,7 +1198,7 @@ function openRepoPack(pack) {
 
   const actions = el("div", "om-actions om-hero-actions");
   const repoBtn = el("button", "om-btn", "View on GitHub");
-  repoBtn.onclick = () => window.open(pack.repo, "_blank");
+  repoBtn.onclick = () => openUrl(pack.repo);
   actions.appendChild(repoBtn);
   if (repoOwnerName(pack.repo)) actions.appendChild(makeStarButton(pack.repo, null));
   const control = makeInstallControl({
@@ -1160,9 +1220,11 @@ function openRepoPack(pack) {
   }
 
   hero.appendChild(info);
-  dialog.appendChild(hero);
 
+  // The header scrolls with the page rather than being pinned above it, so a long README
+  // gets the whole dialog once you have read past the title.
   const body = el("div", "om-body");
+  body.appendChild(hero);
   body.appendChild(el("div", "om-release-slot"));
   // The README is read from GitHub behind the same enrichment setting the registry page uses.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
@@ -1414,6 +1476,149 @@ function buildRefPicker(meta, host) {
   return bar;
 }
 
+// Why the registry gave each version its status. Asked for separately because the registry
+// only returns reasons on request and answers in megabytes; the backend summarises, and the
+// badges pick the sentence up on hover once it lands. Only fetched when something is not
+// plainly active, since that is the only time the answer is worth the round trip.
+async function attachStatusReasons(packId, versionsBox, versions) {
+  if (!packId || !(versions || []).some((v) => (v.status || "").toLowerCase() !== "active")) return;
+  let reasons;
+  try {
+    const answer = await api.fetchApi(`${API}/status-reasons/${encodeURIComponent(packId)}`);
+    const data = await answer.json();
+    if (!data.ok) return;
+    reasons = data.reasons || {};
+  } catch {
+    return;
+  }
+  for (const mark of versionsBox.querySelectorAll(".om-badge[data-version]")) {
+    const why = reasons[mark.dataset.version];
+    if (why) mark.title = why;
+  }
+}
+
+// A pack placed but not yet wired in: its requirements are still waiting, and ComfyUI has
+// not been asked to restart. The scan decides which way that goes.
+async function scanThenFinish(packId) {
+  await new Promise((resolve) => {
+    openScanDialog(packId, {
+      onDone: async (state) => {
+        if (!state) { resolve(); return; }
+        const flagged = state.flagged || [];
+        if (flagged.length) {
+          const keep = await confirmAction(
+            `${flagged.length} file(s) flagged in ${packId}`,
+            flagged.map((f) => `${f.file}: ${f.malicious} of ${f.engines} engines`).join("\n")
+            + "\n\nInstall its requirements anyway, or remove the pack?",
+            "Install requirements anyway",
+          );
+          if (!keep) {
+            await uninstall({ packId, entry: { name: packId } });
+            resolve();
+            return;
+          }
+        }
+        try {
+          const answer = await api.fetchApi(`${API}/install-requirements`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: packId }),
+          });
+          const done = await answer.json();
+          if (!done.ok) notify("Requirements", done.output || done.reason || "did not install cleanly");
+        } catch (error) {
+          notify("Requirements", error.message);
+        }
+        resolve();
+      },
+    });
+  });
+}
+
+// A reputation scan of an installed pack. Only hashes are sent; the files stay put. The
+// public allowance is four lookups a minute, so this takes a while and reports as it goes.
+function openScanDialog(packId, { onDone } = {}) {
+  const backdrop = el("div", "om-backdrop");
+  const dialog = el("div", "om-dialog");
+  dialog.style.width = "min(90vw, 820px)";
+  dialog.style.height = "auto";
+  dialog.style.maxHeight = "86vh";
+  const head = el("div", "om-head");
+  head.appendChild(el("div", "om-title", `Scanning ${packId}`));
+  dialog.appendChild(head);
+  const body = el("div", "om-body");
+  const status = el("div", "om-side-status", "Starting...");
+  const list = el("div", "om-wf-list");
+  body.appendChild(status);
+  body.appendChild(list);
+  dialog.appendChild(body);
+  const foot = el("div", "om-foot");
+  const close = el("button", "om-btn", "Close");
+  close.onclick = () => { backdrop.remove(); onDone?.(null); };
+  foot.appendChild(close);
+  dialog.appendChild(foot);
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+
+  const draw = (state) => {
+    const spent = `${state.budget_used}/${state.budget} used today`;
+    status.textContent = state.scanning
+      ? `${state.done} of ${state.total} checked · ${spent}`
+      : (state.error
+          ? `Stopped: ${state.error} · ${spent}`
+          : `${state.done} file(s) checked · ${spent}`);
+    list.replaceChildren();
+    for (const r of state.results || []) {
+      const row = el("div", "om-wf-item");
+      row.appendChild(el("span", "om-wf-name", r.file));
+      const note = {
+        flagged: `${r.malicious} of ${r.engines} engines call this malicious`,
+        known: `seen before, ${r.malicious} of ${r.engines} engines flag it`,
+        unknown: "not seen by VirusTotal before",
+        budget: "not checked, the day's allowance is spent",
+        unreadable: "could not be read",
+        error: r.detail || "lookup failed",
+      }[r.state] || r.state;
+      const tag = el("span", "om-wf-path", note);
+      if (r.state === "flagged") tag.style.color = "#f85149";
+      row.appendChild(tag);
+      list.appendChild(row);
+    }
+    if (!state.scanning && !(state.results || []).length && !state.error) {
+      list.appendChild(stateRow("Nothing in this pack needs checking"));
+    }
+  };
+
+  (async () => {
+    try {
+      const answer = await api.fetchApi(`${API}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: packId, key: vtKey() }),
+      });
+      const started = await answer.json();
+      if (!started.ok) { status.textContent = started.reason || "could not start"; return; }
+    } catch (error) {
+      status.textContent = error.message;
+      return;
+    }
+    for (let i = 0; i < 4000; i++) {
+      let state;
+      try { state = await (await api.fetchApi(`${API}/scan/state`)).json(); }
+      catch { status.textContent = "connection lost"; return; }
+      draw(state);
+      if (!state.scanning) {
+        const bad = (state.results || []).filter((r) => r.state === "flagged");
+        onDone?.({ ...state, flagged: bad });
+        close.textContent = "Close";
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  })();
+  return backdrop;
+}
+
 // The pack's [tool.open_manager] declarations: matched incompatibilities, a source
 // preference, links, and example workflows that load into the graph on click.
 function appendDeveloperBlock(slot, meta) {
@@ -1457,13 +1662,13 @@ function appendDeveloperBlock(slot, meta) {
     if (dev.docs) {
       const b = el("button", "om-btn", "Docs");
       b.title = dev.docs;
-      b.onclick = () => window.open(dev.docs, "_blank");
+      b.onclick = () => openUrl(dev.docs);
       links.appendChild(b);
     }
     if (dev.funding) {
       const b = el("button", "om-btn", "Funding");
       b.title = dev.funding;
-      b.onclick = () => window.open(dev.funding, "_blank");
+      b.onclick = () => openUrl(dev.funding);
       links.appendChild(b);
     }
     const hero = slot.closest(".om-dialog")?.querySelector(".om-hero-actions");
@@ -1498,12 +1703,8 @@ function appendDeveloperBlock(slot, meta) {
   slot.appendChild(block);
 }
 
-// A section that collapses to its header bar and opens with a body beneath it. Heavier than
-// the small folds below, for a part of the page that carries weight: the header stays put
-// when closed and keeps naming what it holds, so nothing is lost by collapsing it.
-//
-// `note` is the line that has to earn the collapse, since it is all that remains visible.
-// `remember` keys the open state so a choice survives reopening the page.
+// A section that collapses to its header bar. `note` is all that stays visible when
+// closed; `remember` keys the open state so a choice survives reopening the page.
 function panel(title, note, { open = true, remember = "" } = {}) {
   const box = el("details", "om-panel");
   const head = el("summary", "om-panel-head");
@@ -1542,6 +1743,28 @@ function collapsible(title, paths, build, { listClass = "om-wf-list", open = fal
   for (const path of paths) list.appendChild(build(path));
   box.appendChild(list);
   return box;
+}
+
+// The user's VirusTotal key. Nothing in the panel offers a scan until one is set, and the
+// key is only ever sent in a request body, never in a URL.
+function vtKey() {
+  return String(panelSetting("openManager.virusTotalKey", "") || "").trim();
+}
+
+// Whether scanning is available at all. Every entry point checks this, so the feature is
+// invisible rather than present-and-broken for anyone who has not set a key up.
+function vtReady() {
+  return vtKey().length > 0;
+}
+
+// Today's remaining allowance, or null where it could not be read.
+async function vtRemaining() {
+  try {
+    const s = await (await api.fetchApi(`${API}/scan/state`)).json();
+    return Math.max(0, (s.budget || 0) - (s.budget_used || 0));
+  } catch {
+    return null;
+  }
 }
 
 // The configured GitHub token, empty when none is set. Sent with the calls that read the
@@ -1752,6 +1975,19 @@ function absolutiseLinks(view, repository, branch) {
       anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${relative(href)}`;
     }
   }
+
+  // ComfyUI's markdown sanitiser handles this, but its version is not pinned here, so any
+  // unexpected scheme left on a link is stripped as well.
+  for (const img of view.querySelectorAll("img[src]")) {
+    const src = img.getAttribute("src") || "";
+    if (!/^https?:\/\//i.test(src) && !/^data:image\//i.test(src)) img.removeAttribute("src");
+  }
+  for (const anchor of view.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href") || "";
+    if (!/^https?:\/\//i.test(href) && !/^mailto:/i.test(href) && !href.startsWith("#")) {
+      anchor.removeAttribute("href");
+    }
+  }
 }
 
 // Resolves a pack's newest version, then routes it through the same confirm and queue as
@@ -1919,6 +2155,64 @@ function buildResultRow(entry) {
   return row;
 }
 
+// The day part of the registry's ISO timestamp.
+function dayText(stamp) {
+  const day = String(stamp || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "—";
+}
+
+// The catalogue entry as a table row. Cells never wrap, for the reason rows and cards do
+// not. The registry has no per-pack node count, so downloads takes that column.
+function buildResultTableRow(entry, index) {
+  const row = el("div", "om-table-row");
+
+  row.appendChild(el("div", "om-tcell om-tcell-num", String((index ?? 0) + 1)));
+
+  const title = el("div", "om-tcell om-tcell-title");
+  title.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-table-icon"));
+  const name = el("span", "om-side-name", entry.name || entry.id);
+  title.appendChild(name);
+  title.title = entry.name || entry.id;
+  title.onclick = () => openPack(entry.id);
+  row.appendChild(title);
+
+  row.appendChild(el("div", "om-tcell om-tcell-ver", entry.advertised || "—"));
+
+  const control = makeInstallControl({
+    packId: entry.id,
+    withMenu: false,
+    onInstall: () => quickInstall(entry.id, control),
+  });
+  restoreInstall(entry.id, control);
+  control.el.classList.add("om-table-ictl");
+  const action = el("div", "om-tcell om-tcell-action");
+  action.appendChild(control.el);
+  row.appendChild(action);
+
+  row.appendChild(el("div", "om-tcell om-tcell-dl", `${countText(entry.downloads)} ↓`));
+
+  const desc = el("div", "om-tcell om-tcell-desc",
+    entry.description || "No description published.");
+  desc.title = entry.description || "";
+  desc.onclick = () => openPack(entry.id);
+  row.appendChild(desc);
+
+  row.appendChild(el("div", "om-tcell om-tcell-auth", entry.publisher || "—"));
+
+  const lic = el("div", "om-tcell om-tcell-lic");
+  const pill = el("span", "om-lic");
+  paintLicense(pill, entry);
+  lic.appendChild(pill);
+  row._entry = entry;
+  row._licPill = pill;
+  row.appendChild(lic);
+
+  row.appendChild(el("div", "om-tcell om-tcell-star",
+    entry.stars ? `★ ${countText(entry.stars)}` : "—"));
+  row.appendChild(el("div", "om-tcell om-tcell-date", dayText(entry.released)));
+  return row;
+}
+
 // The same catalogue entry drawn as a card: a larger icon, the publisher, and the
 // description, for the grid view. The metadata line carries whatever fits on one row.
 function buildResultCard(entry) {
@@ -2000,12 +2294,9 @@ function refreshMissingIfActive() {
   if (active && content && active.textContent === "Missing") renderMissing(content);
 }
 
-// The sidebar tab: a category nav over the registry browser, the installed list, and the
-// packs that would supply nodes missing from the current graph.
-// The sidebar tab belongs to the new interface. With the legacy menu it never appears, so
-// the same panel is offered as a window: identical content, reachable from the command
-// palette, a keybinding, or the button added to the legacy menu below.
-function openPanelWindow() {
+// The same panel as the sidebar tab, as a window. The legacy menu has no sidebar to put a
+// tab in, so this is how it is reached there.
+function openPanelWindow(view) {
   const existing = document.querySelector(".om-backdrop .om-panel-window");
   if (existing) return existing;
   const backdrop = el("div", "om-backdrop");
@@ -2020,7 +2311,76 @@ function openPanelWindow() {
   backdrop.appendChild(dialog);
   document.body.appendChild(backdrop);
   closeOn(backdrop);
-  renderSidebar(host);
+  renderSidebar(host, view);
+  return dialog;
+}
+
+// Toggles, because the commands the interface dispatches are named ToggleVisibility.
+function togglePanelWindow(view) {
+  const existing = document.querySelector(".om-backdrop .om-panel-window");
+  if (existing) {
+    existing.closest(".om-backdrop").remove();
+    return null;
+  }
+  return openPanelWindow(view);
+}
+
+// The hub the Extensions button opens: a menu of destinations, in the shape the manager
+// this replaces used.
+function openManagerMenu() {
+  const existing = document.querySelector(".om-backdrop .om-hub");
+  if (existing) { existing.closest(".om-backdrop").remove(); return null; }
+
+  const backdrop = el("div", "om-backdrop");
+  const dialog = el("div", "om-dialog om-hub");
+  dialog.appendChild(el("div", "om-hub-title", "Open Manager Menu"));
+
+  const body = el("div", "om-hub-body");
+  const status = el("div", "om-hub-status", "Reading the registry cache...");
+  body.appendChild(status);
+
+  const grid = el("div", "om-hub-grid");
+  const go = (label, view, hint) => {
+    const button = el("button", "om-hub-btn", label);
+    if (hint) button.title = hint;
+    button.onclick = () => { backdrop.remove(); openPanelWindow(view); };
+    grid.appendChild(button);
+    return button;
+  };
+  go("Custom Nodes Manager", "registry", "Browse and install from the Comfy Registry");
+  go("Install Missing Custom Nodes", "missing",
+     "The packs supplying the node types this workflow is missing");
+  go("Install via Git URL", "github", "Repositories you add by URL, kept across uninstalls");
+  go("Check for Updates", "installed", "What is installed, and what has a newer version");
+  if (vtReady()) {
+    go("Scan an Install", "installed",
+       "Each installed pack's menu offers a VirusTotal scan of the files it ships");
+  }
+  body.appendChild(grid);
+
+  const restart = el("button", "om-hub-btn om-hub-danger", "Restart ComfyUI");
+  restart.onclick = () => restartServer(restart);
+  body.appendChild(restart);
+  dialog.appendChild(body);
+
+  const close = el("button", "om-hub-close", "Close");
+  close.onclick = () => backdrop.remove();
+  dialog.appendChild(close);
+
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+
+  (async () => {
+    try {
+      const info = await (await api.fetchApi(`${API}/catalog/state`)).json();
+      status.textContent = info.cached
+        ? `${(info.count || 0).toLocaleString()} packs · synced ${sinceText(info.fetched_at)}`
+        : "No registry cache yet · open Custom Nodes Manager to sync";
+    } catch {
+      status.textContent = "The registry cache could not be read";
+    }
+  })();
   return dialog;
 }
 
@@ -2040,7 +2400,7 @@ function addLegacyMenuButton() {
   }
 }
 
-function renderSidebar(root) {
+function renderSidebar(root, initial) {
   root.replaceChildren();
   root.className = "om-side";
 
@@ -2067,7 +2427,8 @@ function renderSidebar(root) {
     buttons[key] = button;
     nav.appendChild(button);
   }
-  select("registry");
+  // Own keys only: "constructor" and friends are truthy on any object literal.
+  select(Object.hasOwn(views, initial ?? "") ? initial : "registry");
 }
 
 // Repositories the user added by hand, held in ComfyUI's user directory. Each row installs,
@@ -2129,7 +2490,7 @@ function buildGithubRow(repo, container) {
   row.appendChild(text);
 
   const items = [
-    { label: "Open on GitHub", fn: () => window.open(repo.url, "_blank") },
+    { label: "Open on GitHub", fn: () => openUrl(repo.url) },
     { label: "Remove from list", danger: true, fn: () => removeGithubSource(repo, container) },
   ];
   if (repo.installed_version) {
@@ -2346,6 +2707,7 @@ function buildInstalledRow(pack) {
   if (pack.registry_id) {
     items.push({ label: "Reinstall", fn: () => install({ packId: pack.registry_id, entry: current, control, rowsRoot: row, overwrite: true }) });
   }
+  if (vtReady()) items.push({ label: "Scan install", fn: () => openScanDialog(pack.id) });
   items.push({ label: "Uninstall", danger: true, fn: () => uninstall({
     packId: pack.id, registryId: pack.registry_id, entry: { name: pack.id }, control, rowsRoot: row }) });
 
@@ -2591,9 +2953,15 @@ function renderRegistry(container) {
     container.appendChild(search);
 
     const controls = el("div", "om-side-controls");
-    const viewSel = dropdown("om-registry-view", "list", [
+    // The sidebar and the window are different widths, so they remember the view apart.
+    // Sort and licence stay shared. The old shared key belongs to neither.
+    try { localStorage.removeItem("om-registry-view"); } catch {}
+    const viewKey = container.closest(".om-panel-window")
+      ? "om-registry-view-window" : "om-registry-view-side";
+    const viewSel = dropdown(viewKey, "list", [
       ["list", "List view"],
       ["cards", "Card view"],
+      ["table", "Table view"],
     ]);
     const sortSel = dropdown("om-registry-sort", "downloads", [
       ["downloads", "Most downloads"],
@@ -2632,6 +3000,15 @@ function renderRegistry(container) {
     sizer.appendChild(win);
     list.appendChild(sizer);
     container.appendChild(count);
+
+    // Outside the scrolling area, on the same grid as the rows.
+    const head = el("div", "om-table-head");
+    for (const [cls, label] of [
+      ["num", "#"], ["title", "Title"], ["ver", "Version"], ["action", "Action"],
+      ["dl", "Downloads"], ["desc", "Description"], ["auth", "Author"],
+      ["lic", "Licence"], ["star", "★"], ["date", "Updated"],
+    ]) head.appendChild(el("div", `om-tcell om-tcell-${cls}`, label));
+    container.appendChild(head);
     container.appendChild(list);
 
     const comparators = {
@@ -2644,7 +3021,8 @@ function renderRegistry(container) {
     // The whole catalogue is already in memory, so nothing here waits on the network: the
     // list is windowed rather than paged, and scrolling only decides which rows to build.
     const OVERSCAN = 4;
-    const GAP = { list: 4, cards: 8 };
+    // Table rows carry their own separator.
+    const GAP = { list: 4, cards: 8, table: 0 };
 
     let filtered = [];
     let pitch = 56;   // one row's height plus its gap, read back from what was drawn
@@ -2653,7 +3031,12 @@ function renderRegistry(container) {
     let to = -1;
 
     const cardsOn = () => viewSel.value === "cards";
-    const gapNow = () => (cardsOn() ? GAP.cards : GAP.list);
+    const tableOn = () => viewSel.value === "table";
+    const gapNow = () => GAP[viewSel.value] ?? GAP.list;
+    // Table column tiers. Each sits above that tier's minimum width, because the list clips
+    // horizontal overflow rather than scrolling it.
+    const WIDE = 1000;   // ten columns, minimum 968
+    const MID = 470;     // six columns, minimum 430
 
     // Geometry is measured from the DOM rather than assumed, so a theme, a thumbnail size
     // or a wider panel is accounted for without being told.
@@ -2682,15 +3065,39 @@ function renderRegistry(container) {
       from = start;
       to = end;
       win.style.transform = `translateY(${firstRow * pitch}px)`;
-      const build = cardsOn() ? buildResultCard : buildResultRow;
-      win.replaceChildren(...filtered.slice(start, end).map(build));
+      const build = cardsOn() ? buildResultCard : tableOn() ? buildResultTableRow : buildResultRow;
+      // The absolute position, so the table numbers the result set and not the window.
+      win.replaceChildren(...filtered.slice(start, end).map((entry, i) => build(entry, start + i)));
+    };
+
+    const fitColumns = () => {
+      const width = list.clientWidth;
+      const want = width <= 0 || width >= WIDE ? "om-t-wide"
+        : width >= MID ? "om-t-mid" : "om-t-tight";
+      for (const node of [head, win]) {
+        node.classList.remove("om-t-wide", "om-t-mid", "om-t-tight");
+        node.classList.add(want);
+      }
+      // The headings sit outside the scrolling list, so they are wider than the rows by
+      // whatever it keeps for its scrollbar. Measured, since that width is the platform's.
+      if (tableOn() && head.clientWidth > 0 && list.clientWidth > 0) {
+        const gutter = Math.max(0, head.clientWidth - list.clientWidth);
+        head.style.paddingRight = `${8 + gutter}px`;
+      }
     };
 
     // The first paint after a change uses the previous geometry; whatever actually landed
     // is measured on the next frame and drawn again where it differs.
     const repaint = (force = true) => {
+      fitColumns();
       paint(force);
-      requestAnimationFrame(() => { if (measure()) paint(true); });
+      // The width read above can precede the layout it causes, leaving the tier a step
+      // behind, so both it and the row height are read again on the settled frame.
+      requestAnimationFrame(() => {
+        const tier = head.className;
+        fitColumns();
+        if (measure() || head.className !== tier) paint(true);
+      });
     };
 
     // Licences are read from the repository, so they are asked for only once the reader has
@@ -2719,8 +3126,10 @@ function renderRegistry(container) {
           || (node.publisher || "").toLowerCase().includes(query);
       }).sort(comparators[sortSel.value] || comparators.downloads);
       count.textContent = `${filtered.length.toLocaleString()} shown`;
-      // The grid lays columns out to the panel's width; the list stays a single column.
-      win.className = `om-virt-win ${cardsOn() ? "om-card-grid" : "om-list-win"}`;
+      win.className = `om-virt-win ${
+        cardsOn() ? "om-card-grid" : tableOn() ? "om-table-win" : "om-list-win"}`;
+      head.style.display = tableOn() ? "" : "none";
+      list.classList.toggle("om-table-list", tableOn());
       list.scrollTop = 0;
       from = to = -1;
       repaint();
@@ -2738,7 +3147,7 @@ function renderRegistry(container) {
     shape.observe(list);
     let timer = null;
     search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(apply, 150); });
-    viewSel.addEventListener("change", () => { localStorage.setItem("om-registry-view", viewSel.value); apply(); });
+    viewSel.addEventListener("change", () => { localStorage.setItem(viewKey, viewSel.value); apply(); });
     sortSel.addEventListener("change", () => { localStorage.setItem("om-registry-sort", sortSel.value); apply(); });
     licSel.addEventListener("change", () => { localStorage.setItem("om-registry-license", licSel.value); apply(); });
     filterBox.addEventListener("change", () => {
@@ -2810,6 +3219,125 @@ sidebarStyle.textContent = `
 .om-virt-win .om-card .om-side-meta {
   flex-wrap: nowrap; white-space: nowrap; overflow: hidden; min-width: 0; }
 .om-virt-win .om-card-title { min-width: 0; }
+/* Table view. One grid template, declared once and used by both the headings and the rows,
+   so the two cannot drift apart. The description is the only flexible column; everything
+   else is sized to its content, which is what keeps the columns steady while scrolling
+   replaces the rows under them. */
+.om-table-head, .om-virt-win.om-table-win .om-table-row {
+  display: grid; align-items: center; column-gap: 10px;
+  grid-template-columns:
+    34px               /* #          */
+    minmax(150px, 1.1fr) /* Title    */
+    68px               /* Version    */
+    92px               /* Action     */
+    92px               /* Downloads  */
+    minmax(120px, 2fr) /* Description*/
+    minmax(80px, .7fr) /* Author     */
+    104px              /* Licence    */
+    56px               /* Stars      */
+    82px;              /* Updated    */
+}
+/* Narrower panels drop columns rather than crush them. Per tier the template must have
+   exactly as many columns as the tier leaves visible: a cell without one wraps and breaks
+   the pitch the window scrolls on. Minimums, which set the breakpoints in fitColumns:
+   wide 878px + 90px of gaps, mid 400px + 30px, tight 196px + 12px. */
+.om-table-head.om-t-mid, .om-virt-win.om-table-win.om-t-mid .om-table-row {
+  grid-template-columns: 26px minmax(88px, 1.3fr) 54px 84px minmax(72px, 1fr) 76px;
+  column-gap: 6px;
+}
+.om-table-head.om-t-mid > .om-tcell-dl,
+.om-table-head.om-t-mid > .om-tcell-auth,
+.om-table-head.om-t-mid > .om-tcell-star,
+.om-table-head.om-t-mid > .om-tcell-date,
+.om-virt-win.om-table-win.om-t-mid .om-tcell-dl,
+.om-virt-win.om-table-win.om-t-mid .om-tcell-auth,
+.om-virt-win.om-table-win.om-t-mid .om-tcell-star,
+.om-virt-win.om-table-win.om-t-mid .om-tcell-date { display: none; }
+/* The sidebar tier. The row number goes too: at this width it costs the title a third of
+   its room. */
+.om-table-head.om-t-tight, .om-virt-win.om-table-win.om-t-tight .om-table-row {
+  grid-template-columns: minmax(70px, 1fr) 50px 76px;
+  column-gap: 6px;
+}
+.om-table-head.om-t-tight > .om-tcell-num,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-num,
+.om-table-head.om-t-tight > .om-tcell-dl,
+.om-table-head.om-t-tight > .om-tcell-desc,
+.om-table-head.om-t-tight > .om-tcell-auth,
+.om-table-head.om-t-tight > .om-tcell-lic,
+.om-table-head.om-t-tight > .om-tcell-star,
+.om-table-head.om-t-tight > .om-tcell-date,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-dl,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-desc,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-auth,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-lic,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-star,
+.om-virt-win.om-table-win.om-t-tight .om-tcell-date { display: none; }
+.om-table-head {
+  padding: 6px 8px; box-sizing: border-box; font-size: 11px; font-weight: 600;
+  color: var(--om-muted); text-transform: uppercase; letter-spacing: .04em;
+  background: var(--om-surface); border: 1px solid var(--om-border);
+  border-bottom: none; border-radius: 6px 6px 0 0;
+}
+/* The headings sit outside the scrolling area, which the rows do not, so the gap the list
+   leaves for its scrollbar is matched here or the columns sit off by that much. */
+.om-side-list.om-table-list { padding-right: 0; scrollbar-gutter: stable; }
+.om-side-list.om-table-list { border: 1px solid var(--om-border); border-top: none;
+  border-radius: 0 0 6px 6px; }
+.om-virt-win.om-table-win { display: block; }
+.om-virt-win.om-table-win .om-table-row {
+  height: 34px; box-sizing: border-box; padding: 0 8px;
+  border-bottom: 1px solid var(--om-border); font-size: 12px; color: var(--om-text-2);
+}
+.om-virt-win.om-table-win .om-table-row:hover { background: var(--om-hover); }
+/* Every cell is one line. A wrapped cell would make its row taller than the pitch the
+   window scrolls on, and the error would accumulate over thousands of rows. */
+.om-tcell { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.om-tcell-num { color: var(--om-muted); font-variant-numeric: tabular-nums; }
+.om-tcell-title { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.om-tcell-title .om-side-name { overflow: hidden; text-overflow: ellipsis; }
+.om-table-icon { width: 18px; height: 18px; flex: none; font-size: 10px; }
+.om-tcell-ver, .om-tcell-dl, .om-tcell-star { font-variant-numeric: tabular-nums; }
+.om-tcell-desc { color: var(--om-muted); cursor: pointer; }
+/* Licence names arrive in several shapes, so the pill is clipped to its column rather than
+   allowed to push the columns after it out of line. */
+.om-tcell-lic { display: flex; align-items: center; }
+.om-tcell-lic > .om-lic { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-tcell-date { color: var(--om-muted); font-variant-numeric: tabular-nums; }
+.om-tcell-action { overflow: visible; }
+.om-table-ictl { transform: scale(.85); transform-origin: left center; }
+/* The heading row carries no icon, so its title cell is plain text like the rest. */
+.om-table-head .om-tcell-title { display: block; cursor: default; }
+/* The hub. Sized to its contents rather than the viewport: it is a short menu, and the
+   panel behind it is the thing that wants the room. */
+.om-dialog.om-hub {
+  width: min(92vw, 430px); height: auto; max-height: 86vh;
+  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+}
+.om-hub-title {
+  padding: 10px 14px; text-align: center; font-weight: 700; letter-spacing: .06em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--om-surface); border-bottom: 1px solid var(--om-border);
+}
+.om-hub-body { padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  overflow-y: auto; }
+.om-hub-status { color: var(--om-muted); font-size: 11px; text-align: center; }
+.om-hub-grid { display: flex; flex-direction: column; gap: 6px; }
+.om-hub-btn {
+  padding: 9px 12px; text-align: center; font-size: 13px; cursor: pointer;
+  background: var(--om-surface); color: var(--om-text);
+  border: 1px solid var(--om-border); border-radius: 6px;
+}
+.om-hub-btn:hover { background: var(--om-hover); }
+/* Restarting is the one entry that throws work away, so it is the one that looks different. */
+.om-hub-danger { border-color: #7f1d1d; color: #fca5a5; }
+.om-hub-danger:hover { background: #7f1d1d; color: #fff; }
+.om-hub-close {
+  padding: 10px; font-size: 13px; cursor: pointer; color: var(--om-text);
+  background: var(--om-surface); border: none; border-top: 1px solid var(--om-border);
+}
+.om-hub-close:hover { background: var(--om-hover); }
 /* Scrollbars for the scrolling areas.
 
    From Chrome 121, Firefox, and Safari 18.2 the standard 'scrollbar-width' and
@@ -2963,15 +3491,25 @@ app.registerExtension({
   name: "openmanager.browser",
   settings: [
     {
+      id: "openManager.classicMenu",
+      name: "Classic Mode",
+      category: ["Open Manager", "Interface", "classicMenu"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Open the Extensions button on a menu of destinations, the way ComfyUI-Manager did, instead of going straight to the panel. Only applies where Open Manager answers as the manager; the sidebar tab is unaffected.",
+    },
+    {
       id: "openManager.enrichMetadata",
-      name: "Open Manager: read pack README and repository metadata",
+      name: "Read pack README and repository metadata",
+      category: ["Open Manager", "Registry", "enrichMetadata"],
       type: "boolean",
       defaultValue: true,
       tooltip: "A pack page reads its README, repository stats and gallery from the repository. Cached until the pack's versions change. Turn it off to keep a pack page to the registry alone and save the traffic.",
     },
     {
       id: "openManager.autoRenew",
-      name: "Open Manager: renew the offline registry",
+      name: "Renew the offline registry",
+      category: ["Open Manager", "Registry", "autoRenew"],
       type: "combo",
       options: [
         { text: "Off (manual only)", value: "off" },
@@ -2983,70 +3521,96 @@ app.registerExtension({
     },
     {
       id: "openManager.staleDays",
-      name: "Open Manager: days before the registry is stale",
+      name: "Days before the registry is stale",
+      category: ["Open Manager", "Registry", "staleDays"],
       type: "number",
       defaultValue: 7,
       tooltip: "Used by the 'When stale' renewal policy.",
     },
     {
       id: "openManager.parallelSync",
-      name: "Open Manager: sync the registry in parallel",
+      name: "Sync the registry in parallel",
+      category: ["Open Manager", "Registry", "parallelSync"],
       type: "boolean",
       defaultValue: true,
       tooltip: "Read several catalogue pages at once. Much faster on a broadband link; turn it off to read one page at a time.",
     },
     {
       id: "openManager.syncConcurrency",
-      name: "Open Manager: catalogue pages read at once",
+      name: "Catalogue pages read at once",
+      category: ["Open Manager", "Registry", "syncConcurrency"],
       type: "number",
       defaultValue: 8,
       tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16; higher is not always faster and risks the registry rate-limiting you.",
     },
     {
       id: "openManager.galleryShow",
-      name: "Open Manager: show pack galleries",
+      name: "Show pack galleries",
+      category: ["Open Manager", "Gallery", "galleryShow"],
       type: "boolean",
       defaultValue: true,
       tooltip: "Show the images a pack lists in [tool.open_manager] gallery. Entries given as absolute URLs are fetched from wherever the pack points, so turning this off keeps the panel to the hosts it already uses.",
     },
     {
       id: "openManager.galleryThumb",
-      name: "Open Manager: gallery thumbnail size",
+      name: "Gallery thumbnail size",
+      category: ["Open Manager", "Gallery", "galleryThumb"],
       type: "number",
       defaultValue: 120,
       tooltip: "Edge of a gallery thumbnail in pixels. Clamped to 80-320; the grid fits as many columns as the width allows.",
     },
     {
       id: "openManager.galleryExpanded",
-      name: "Open Manager: open pack galleries by default",
+      name: "Open pack galleries by default",
+      category: ["Open Manager", "Gallery", "galleryExpanded"],
       type: "boolean",
       defaultValue: false,
       tooltip: "Start the gallery section expanded on a pack page rather than collapsed.",
     },
     {
       id: "openManager.licenseUseApi",
-      name: "Open Manager: name licences through the GitHub API",
+      name: "Name licences through the GitHub API",
+      category: ["Open Manager", "Licences", "licenseUseApi"],
       type: "boolean",
       defaultValue: false,
       tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Set the GitHub token below first: without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
     },
     {
       id: "openManager.licenseRace",
-      name: "Open Manager: fetch licence filenames together",
+      name: "Fetch licence filenames together",
+      category: ["Open Manager", "Licences", "licenseRace"],
       type: "boolean",
       defaultValue: false,
       tooltip: "Try every candidate licence filename at once rather than one after another. Answers a repository in a single round trip instead of up to fourteen, at the cost of more requests.",
     },
     {
       id: "openManager.licenseConcurrency",
-      name: "Open Manager: repositories read at once for licences",
+      name: "Repositories read at once for licences",
+      category: ["Open Manager", "Licences", "licenseConcurrency"],
       type: "number",
       defaultValue: 8,
       tooltip: "How many repositories are read at once when resolving licences for a listing. Clamped to 1-32.",
     },
     {
+      id: "openManager.virusTotalKey",
+      name: "VirusTotal API key (optional)",
+      category: ["Open Manager", "Scanning", "virusTotalKey"],
+      type: "text",
+      defaultValue: "",
+      tooltip: "Your own key, from virustotal.com. Nothing scanning-related appears anywhere in the panel until one is set. Only file hashes are sent, never the files. VirusTotal's public API must not be used in business workflows, commercial products or services, and allows 4 lookups a minute and 500 a day.",
+    },
+    {
+      id: "openManager.scanOnInstall",
+      name: "Scan every new install before it is finished",
+      category: ["Open Manager", "Scanning", "scanOnInstall"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a key above. Where the day's allowance is spent you are asked whether to install without scanning.",
+    },
+    {
       id: "openManager.githubToken",
-      name: "Open Manager: GitHub token for one-click starring (optional)",
+      name: "GitHub token for one-click starring (optional)",
+      category: ["Open Manager", "Accounts", "githubToken"],
       type: "text",
       defaultValue: "",
       tooltip: "A GitHub token with starring permission lets the Star button star a repository in place. Without it, Star opens the repository on GitHub.",
@@ -3065,6 +3629,20 @@ app.registerExtension({
         const packId = await askText("Registry pack id", "was-node-suite-comfyui");
         if (packId) await openPack(packId);
       },
+    },
+    // The two ids the interface dispatches at a legacy manager. The first is what the
+    // Extensions button sends; the second is its direct route to the pack browser.
+    {
+      id: "Comfy.Manager.Menu.ToggleVisibility",
+      label: "Open Manager: toggle the menu",
+      function: () => (panelSetting("openManager.classicMenu", true) === false
+        ? togglePanelWindow("registry")
+        : openManagerMenu()),
+    },
+    {
+      id: "Comfy.Manager.CustomNodesManager.ToggleVisibility",
+      label: "Open Manager: toggle the pack browser",
+      function: () => togglePanelWindow("registry"),
     },
   ],
   // ComfyUI reports the graph's missing node types here on every workflow load.
