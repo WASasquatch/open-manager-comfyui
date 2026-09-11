@@ -149,6 +149,8 @@ style.textContent = `
 .om-readme-body a { color: #539bf5; }
 .om-wf-shot { width: 56px; height: 32px; object-fit: cover; border-radius: 4px;
   flex: none; background: var(--om-surface); }
+.om-trusted { flex: none; font-size: 10px; padding: 1px 5px; border-radius: 999px;
+  color: #3fb950; border: 1px solid #3fb950; white-space: nowrap; }
 .om-repo-link {
   flex: none; text-decoration: none; color: var(--om-muted); font-size: 12px;
   padding: 0 3px; border-radius: 4px; line-height: 1;
@@ -604,7 +606,11 @@ function chooseAction(title, message, choices) {
     const backdrop = el("div", "om-backdrop");
     const box = el("div", "om-note");
     box.appendChild(el("div", "om-note-title", title));
-    if (message) box.appendChild(el("div", "om-note-body", message));
+    if (message) {
+      const body = el("div", "om-note-body", message);
+      body.style.whiteSpace = "pre-line";
+      box.appendChild(body);
+    }
     const foot = el("div", "om-note-foot");
     const cancel = el("button", "om-btn", "Cancel");
     cancel.onclick = () => { backdrop.remove(); resolve(""); };
@@ -861,6 +867,13 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
   // tracked on the row container.
   const installed = rowsRoot ? rowsRoot._installedVersion : "";
   const change = versionSwitch(installed, entry.version);
+  // Off by default: a registry pack carries a status and a scan, which a repository does
+  // not. Turned on, the same question is asked here so one answer covers both.
+  if (panelSetting("openManager.trustRegistry", false) === true) {
+    const repository = await repositoryForPack(packId, entry, rowsRoot);
+    const parts = repoOwnerName(repository);
+    if (parts && !(await confirmAuthorTrust(parts.owner, repository, "install a pack"))) return;
+  }
   if (!(await confirmInstall(packId, entry, change))) return;
 
   // Where a scan is meant to run first, the requirements are held until it has. If the
@@ -887,6 +900,139 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
 
 // Confirmation for a GitHub install: a prominent unvetted-source warning, plus the archive
 // inspection and dependency dry run loaded in place.
+//: Owners the reader has trusted, folded for comparison. Filled at startup and kept in step
+//: as decisions are made, so a row can say so without asking the server per row.
+const trustedAuthors = new Set();
+
+async function loadTrustedAuthors() {
+  try {
+    const answer = await api.fetchApi(`${API}/trust`);
+    const authors = (await answer.json()).authors || [];
+    trustedAuthors.clear();
+    for (const row of authors) trustedAuthors.add(foldId(row.owner));
+  } catch {
+    // Nothing trusted, which prompts rather than assumes.
+  }
+}
+
+// Whether a catalogue entry's repository belongs to a trusted author.
+function byTrustedAuthor(entry) {
+  const parts = repoOwnerName(entry?.repository || "");
+  return !!parts && trustedAuthors.has(foldId(parts.owner));
+}
+
+// A row's mark that its author is trusted. Absent otherwise: the badge says something
+// positive was decided, and no badge says nothing has been.
+function trustBadge(entry) {
+  if (!byTrustedAuthor(entry)) return null;
+  const parts = repoOwnerName(entry.repository);
+  const pill = el("span", "om-trusted", "✓ trusted");
+  pill.title = `You trust ${parts.owner}`;
+  return pill;
+}
+
+// A pack's repository, from whatever the caller already holds, and from the catalogue where
+// it holds nothing. Install reaches here from several places carrying different data, so the
+// lookup is done once here rather than threaded through each of them.
+async function repositoryForPack(packId, entry, rowsRoot) {
+  const known = entry?.repository || rowsRoot?._repository || installedPack(packId)?.repository;
+  if (known) return known;
+  try {
+    const answer = await api.fetchApi(`${API}/pack-for-repo?id=${encodeURIComponent(packId)}`);
+    return (await answer.json()).repository || "";
+  } catch {
+    return "";
+  }
+}
+
+// Whether this owner has been trusted before, and what is known about them. A repository
+// install has no registry status behind it, so the question that decides it is whether the
+// account is trusted -- which is about the account, not this one repository.
+async function authorStanding(owner, repo, consultList) {
+  const standing = { owner, trusted: false, stars: null, created: null, pushed: null, packs: 0 };
+  if (consultList) {
+    try {
+      const answer = await api.fetchApi(`${API}/trust?owner=${encodeURIComponent(owner)}`);
+      standing.trusted = (await answer.json()).trusted === true;
+    } catch {
+      // Treated as untrusted, which asks rather than assumes.
+    }
+    if (standing.trusted) return standing;
+  }
+  // Facts worth having before deciding. All best-effort: the prompt stands without them.
+  try {
+    const answer = await api.fetchApi(`${API}/repo-meta?repo=${encodeURIComponent(repo)}`);
+    const meta = await answer.json();
+    standing.stars = meta.stars ?? null;
+    standing.pushed = meta.pushed_at || null;
+  } catch { /* left blank */ }
+  try {
+    const answer = await api.fetchApi(`${API}/installed`);
+    const packs = (await answer.json()).packs || [];
+    standing.packs = packs.filter((pack) => {
+      const url = (pack.repository || "").toLowerCase();
+      return url.includes(`github.com/${owner.toLowerCase()}/`);
+    }).length;
+  } catch { /* left blank */ }
+  return standing;
+}
+
+// Ask before something published by a stranger is installed or loaded.
+//
+// The mode decides what an answer buys. "By author" remembers the account, so the question
+// is asked once and covers everything they publish. "By action" asks every time, naming the
+// account, and remembers nothing -- a reminder rather than a decision.
+//
+// Either way this gates the prompt, never the findings: an advisory or a scan result is
+// about the code, not who published it, and is shown regardless.
+async function confirmAuthorTrust(owner, repo, what) {
+  const byAuthor = panelSetting("openManager.trustMode", "author") !== "action";
+  const standing = await authorStanding(owner, repo, byAuthor);
+  if (byAuthor && standing.trusted) return true;
+
+  const facts = [];
+  if (standing.stars != null) facts.push(`${countText(standing.stars)} stars`);
+  if (standing.pushed) facts.push(`last pushed ${dayText(standing.pushed)}`);
+  facts.push(standing.packs
+    ? `${standing.packs} of their pack${standing.packs === 1 ? "" : "s"} already installed`
+    : "nothing of theirs installed yet");
+
+  const doing = what || "install this";
+  const choices = byAuthor
+    ? [{ key: "always", label: `Trust ${owner}`, primary: true,
+         hint: `Stops asking for anything published by ${owner}` },
+       { key: "once", label: "This time only", hint: "Nothing is remembered" }]
+    : [{ key: "once", label: "Continue", primary: true }];
+
+  const how = await chooseAction(
+    `Do you trust ${owner}?`,
+    `You are about to ${doing} published by ${owner}. Their code runs with ComfyUI's `
+    + `privileges, and their workflows and downloads run as you.
+
+`
+    + `${facts.join(" · ")}
+
+`
+    + (byAuthor
+        ? "Trusting them covers everything they publish. Findings against a pack are still shown."
+        : "You will be asked again next time. Findings against a pack are still shown."),
+    choices);
+  if (!how) return false;
+  if (how === "always") {
+    try {
+      await api.fetchApi(`${API}/trust`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner, trusted: true }),
+      });
+      trustedAuthors.add(foldId(owner));
+    } catch {
+      toast(`Could not remember ${owner}; continuing anyway.`, { kind: "warn" });
+    }
+  }
+  return true;
+}
+
 function confirmRepoInstall(pack) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
@@ -964,6 +1110,8 @@ function confirmRepoInstall(pack) {
 }
 
 async function installFromRepo(pack, control) {
+  const parts = repoOwnerName(pack.repo);
+  if (parts && !(await confirmAuthorTrust(parts.owner, pack.repo, "install a pack"))) return;
   if (!(await confirmRepoInstall(pack))) return;
   control?.setInstalling?.();
   const progress = toast(`Installing ${pack.title} from GitHub...`, { sticky: true });
@@ -1451,6 +1599,7 @@ async function paintPackBody(host, meta, source) {
   try {
     const html = await app.extensionManager.renderMarkdownToHtml(source.readme);
     view.innerHTML = typeof html === "string" ? html : "";
+    view._repository = meta.repository || "";
     linkHeadings(view);
     absolutiseLinks(view, meta.repository, source.ref || meta.default_branch);
     embedMediaLinks(view);
@@ -2079,22 +2228,34 @@ async function loadExampleWorkflow(repository, branch, path) {
   progress.remove();
 
   const workflow = data.workflow.nodes ? data.workflow : (data.workflow.workflow || data.workflow);
-  await loadWorkflowGraph(workflow, path);
+  await loadWorkflowGraph(workflow, path, `the ${repoName(repository) || "pack"} repository`,
+                          repository);
 }
 
 // Ask how a workflow should land, then land it that way. loadGraphData opens a new tab when
 // given no workflow to load into, and replaces that workflow's graph when given one, so
 // replacing is only offered where an active workflow can actually be reached.
-async function loadWorkflowGraph(workflow, label) {
+async function loadWorkflowGraph(workflow, label, origin, repository) {
+  // Loading a stranger's graph is the same question as installing their pack, so it is
+  // asked the same way and one answer in author mode covers both.
+  const parts = repoOwnerName(repository || "");
+  if (parts && !(await confirmAuthorTrust(parts.owner, repository, "load a workflow"))) return;
   const active = activeWorkflow();
   const choices = [{ key: "tab", label: "Open in new tab", primary: true }];
   if (active) choices.push({ key: "replace", label: "Replace current graph",
                              hint: "Discards unsaved changes to the open workflow" });
+  // Said plainly rather than alarmingly: drawing someone else's graph is safe, and it is
+  // running it that reaches the network and the disk. A reader deciding whether to load it
+  // is better served by which of those is which.
+  const where = origin ? `From ${origin}. ` : "";
   const how = await chooseAction(
     "Load workflow",
-    active
+    `${where}Opening only draws the graph; running it can download models and write files.
+
+`
+    + (active
       ? `"${label}" can open alongside your work or take the place of the graph you have open.`
-      : `"${label}" opens in a new tab, leaving the graph you have open untouched.`,
+      : `"${label}" opens in a new tab, leaving the graph you have open untouched.`),
     choices);
   if (!how) return;
   const name = String(label).split("/").pop();
@@ -2164,7 +2325,10 @@ function embedMediaLinks(view) {
   const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i;
 
   for (const anchor of [...view.querySelectorAll("a[href]")]) {
-    const href = anchor.getAttribute("href") || "";
+    // The scrub in absolutiseLinks has already removed any other scheme, so this is belt
+    // and braces: an extension says nothing about what a URL will do.
+    const href = safeUrl(anchor.getAttribute("href") || "");
+    if (!href) continue;
     const bare = ATTACHMENT.test(href);
     if (!bare && !VIDEO_EXT.test(href) && !IMAGE_EXT.test(href)) continue;
     // A link with its own words reads as a link, not an embed.
@@ -2217,6 +2381,10 @@ function offerPackLink(anchor, href) {
   };
 }
 
+//: Most a compressed text chunk may expand to. Comfortably above a real workflow -- the
+//: largest seen in the wild is about 110 KB -- and far below what a deflate bomb wants.
+const TEXT_CHUNK_CAP = 8 * 1024 * 1024;
+
 // A PNG's text chunks, which is where ComfyUI leaves the workflow that produced an image.
 // Read from the bytes rather than the decoded image: the chunks sit before the pixel data,
 // so this stops as soon as it reaches it.
@@ -2247,9 +2415,23 @@ async function pngText(bytes, wanted) {
         const payload = body.subarray(cursor);
         if (!compressed) return decoder.decode(payload);
         try {
-          const stream = new Blob([payload]).stream()
-            .pipeThrough(new DecompressionStream("deflate"));
-          return decoder.decode(new Uint8Array(await new Response(stream).arrayBuffer()));
+          // Read the stream rather than buffering it whole: a small deflate chunk can
+          // expand without limit, and this runs on a file from a page being browsed.
+          const reader = new Blob([payload]).stream()
+            .pipeThrough(new DecompressionStream("deflate")).getReader();
+          const parts = [];
+          let total = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.length;
+            if (total > TEXT_CHUNK_CAP) { await reader.cancel(); return ""; }
+            parts.push(value);
+          }
+          const joined = new Uint8Array(total);
+          let at = 0;
+          for (const part of parts) { joined.set(part, at); at += part.length; }
+          return decoder.decode(joined);
         } catch {
           return "";
         }
@@ -2312,7 +2494,8 @@ function offerImageWorkflows(view) {
       notify("No workflow in this image", "The file carries no workflow to load.");
       return;
     }
-    await loadWorkflowGraph(workflow, image.getAttribute("alt") || "this image");
+    await loadWorkflowGraph(workflow, image.getAttribute("alt") || "this image",
+                            "an image in this README", view._repository || "");
   });
 }
 
@@ -2587,6 +2770,8 @@ function buildResultRow(entry) {
   row._entry = entry;
   row._licPill = lic;
   meta.appendChild(lic);
+  const trusted = trustBadge(entry);
+  if (trusted) meta.appendChild(trusted);
   const link = repoLink(entry);
   if (link) meta.appendChild(link);
   text.appendChild(meta);
@@ -2625,6 +2810,8 @@ function buildResultTableRow(entry, index) {
   title.appendChild(name);
   title.title = entry.name || entry.id;
   title.onclick = () => openPack(entry.id);
+  const tableTrusted = trustBadge(entry);
+  if (tableTrusted) title.appendChild(tableTrusted);
   const tableLink = repoLink(entry);
   if (tableLink) title.appendChild(tableLink);
   row.appendChild(title);
@@ -2699,6 +2886,8 @@ function buildResultCard(entry) {
   card._entry = entry;
   card._licPill = lic;
   meta.appendChild(lic);
+  const cardTrusted = trustBadge(entry);
+  if (cardTrusted) meta.appendChild(cardTrusted);
   const cardLink = repoLink(entry);
   if (cardLink) meta.appendChild(cardLink);
   card.appendChild(meta);
@@ -2890,7 +3079,9 @@ async function sizeDrawer(root) {
 
   let saved = null;
   try { saved = parseFloat(localStorage.getItem(DRAWER_KEY)); } catch {}
-  const share = Number.isFinite(saved) && saved > 0 ? saved : DRAWER_SHARE;
+  const share = Number.isFinite(saved) && saved > 0
+    ? Math.min(90, Math.max(5, saved))
+    : DRAWER_SHARE;
   // The same shape the splitter writes, so it reads back as its own.
   panel.style.flexBasis = `calc(${share}% - 4px)`;
 
@@ -3491,6 +3682,7 @@ function renderRegistry(container) {
       ["stars", "Most stars"],
       ["name", "Name A–Z"],
       ["license", "Licence: permissive first"],
+      ["trusted", "Trusted authors first"],
     ]);
     const licSel = dropdown("om-registry-license", "all", [
       ["all", "All licences"],
@@ -3507,10 +3699,18 @@ function renderRegistry(container) {
     filterBox.checked = (localStorage.getItem("om-registry-published") ?? "1") === "1";
     filterWrap.appendChild(filterBox);
     filterWrap.appendChild(el("span", null, "Published only"));
+    const trustWrap = el("label", "om-side-filter");
+    const trustBox = el("input");
+    trustBox.type = "checkbox";
+    trustBox.checked = localStorage.getItem("om-registry-trusted") === "1";
+    trustWrap.appendChild(trustBox);
+    trustWrap.appendChild(el("span", null, "Trusted authors"));
+    trustWrap.title = "Only packs whose repository belongs to an author you have trusted";
     controls.appendChild(viewSel);
     controls.appendChild(sortSel);
     controls.appendChild(licSel);
     controls.appendChild(filterWrap);
+    controls.appendChild(trustWrap);
     container.appendChild(controls);
 
     const count = el("div", "om-side-status", "");
@@ -3539,6 +3739,7 @@ function renderRegistry(container) {
       stars: (a, b) => (b.stars - a.stars),
       name: (a, b) => (a.name || a.id).localeCompare(b.name || b.id),
       license: (a, b) => (a.license_rank - b.license_rank) || (b.downloads - a.downloads),
+      trusted: (a, b) => (byTrustedAuthor(b) - byTrustedAuthor(a)) || (b.downloads - a.downloads),
     };
     // The whole catalogue is already in memory, so nothing here waits on the network: the
     // list is windowed rather than paged, and scrolling only decides which rows to build.
@@ -3641,6 +3842,7 @@ function renderRegistry(container) {
       const query = search.value.trim().toLowerCase();
       const tier = licSel.value;
       if (filterBox.checked && !node.advertised) return false;
+      if (trustBox.checked && !byTrustedAuthor(node)) return false;
       if (tier !== "all" && node.license_tier !== tier) return false;
       if (!query) return true;
       return (node.name || "").toLowerCase().includes(query)
@@ -3696,6 +3898,10 @@ function renderRegistry(container) {
     licSel.addEventListener("change", () => { localStorage.setItem("om-registry-license", licSel.value); apply(); });
     filterBox.addEventListener("change", () => {
       localStorage.setItem("om-registry-published", filterBox.checked ? "1" : "0");
+      apply();
+    });
+    trustBox.addEventListener("change", () => {
+      localStorage.setItem("om-registry-trusted", trustBox.checked ? "1" : "0");
       apply();
     });
     apply();
@@ -4047,6 +4253,23 @@ app.registerExtension({
       tooltip: "Open the Extensions button on a menu of destinations, the way ComfyUI-Manager did, instead of going straight to the panel. Only applies where Open Manager answers as the manager; the sidebar tab is unaffected.",
     },
     {
+      id: "openManager.trustMode",
+      name: "Remember who you trust",
+      category: ["Open Manager", "Interface", "trustMode"],
+      type: "combo",
+      options: ["author", "action"],
+      defaultValue: "author",
+      tooltip: "By author: asked once per account, and anything they publish is allowed from then on. By action: asked every time, naming the account, and nothing is remembered. Findings against a pack are shown either way.",
+    },
+    {
+      id: "openManager.trustRegistry",
+      name: "Ask before installing from an untrusted author",
+      category: ["Open Manager", "Interface", "trustRegistry"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Repository installs always ask, because nothing has scanned them. Turn this on to be asked for registry packs too. Findings against a pack are shown either way.",
+    },
+    {
       id: "openManager.enrichMetadata",
       name: "Read pack README and repository metadata",
       category: ["Open Manager", "Registry", "enrichMetadata"],
@@ -4214,6 +4437,8 @@ app.registerExtension({
 
     // What is already on disk, so registry rows can say "Installed" on first paint.
     loadInstalledIndex();
+    // Who the reader trusts, so rows can be badged and filtered without asking per row.
+    loadTrustedAuthors();
 
     // Themes registered beside the built-ins, each carrying its grid background and its light
     // or dark UI mode.
