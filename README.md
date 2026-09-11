@@ -1,7 +1,8 @@
 # Open Manager for ComfyUI  ![Open Manager](https://img.shields.io/badge/Open-Manager-yellow) ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![License](https://img.shields.io/badge/License-MIT-green) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
 
 <img src="./open-manager-banner.png" width="80%" alt="Open Manager for ComfyUI">
-<video src="https://i.imgur.com/hG26zsF.mp4" width="80%" alt="Open Manager for ComfyUI" controls></video>
+
+https://github.com/user-attachments/assets/58e5d65e-ce23-464b-8c9a-2a249818a1d1
 
 ## An alternative package manager for ComfyUI. 
 
