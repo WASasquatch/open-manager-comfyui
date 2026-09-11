@@ -2,11 +2,20 @@
 
 The resolve runs ``pip install --dry-run --report -``, which reports what a requirement set
 would add and what it would replace. Nothing here installs.
+
+``--dry-run`` alone does not mean nothing runs. To learn what a source distribution requires
+pip executes its build backend, and for a ``git+`` or URL requirement it clones or downloads
+first and then does the same. That is the pack's own code, running before the reader has
+agreed to install anything, which is the opposite of what this module is for. So the resolve
+is restricted to built wheels, and only plain named requirements are handed to pip: options
+such as ``--index-url`` and anything naming a URL or a path are set aside unresolved and
+reported. ``--only-binary`` alone is not enough, because it does not cover direct references.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,11 +28,9 @@ __all__ = ["CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from"]
 #: Seconds a resolve may take before it is abandoned.
 TIMEOUT = 180
 
-#: Packages the host manager refuses to downgrade. A requirement needing one of these moved
-#: is dropped, and the install still reports success.
-HOST_PROTECTED = frozenset(
-    {"torch", "torchaudio", "torchsde", "torchvision", "transformers", "safetensors", "kornia"}
-)
+#: Held back whichever way they would move, mirroring ``installer.PIP_BLACKLIST``: these
+#: carry the build a working ComfyUI was set up with.
+HELD_BACK = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
 
 #: Packages a running ComfyUI depends on, where a replacement is reported prominently.
 CORE_PACKAGES = frozenset(
@@ -46,7 +53,7 @@ class Replacement:
         want: Version that would take its place.
         direction: ``downgrade``, ``upgrade`` or ``change``.
         is_core: Whether a running ComfyUI depends on this package.
-        host_skips: Whether the host manager would drop this requirement instead of
+        host_skips: Whether the requirement is held back rather than installed, instead of
             applying it.
         abi_break: Whether this crosses a major version of an ABI-sensitive package.
     """
@@ -69,12 +76,14 @@ class Impact:
         replacements: One :class:`Replacement` per installed distribution that would move.
         failure: Why pip could not answer, empty where it did.
         checked: Whether a resolve actually ran.
+        unresolved: Requirement lines left out because resolving them would have run code.
     """
 
     additions: tuple[str, ...] = ()
     replacements: tuple[Replacement, ...] = ()
     failure: str = ""
     checked: bool = False
+    unresolved: tuple[str, ...] = ()
 
     @property
     def is_additive(self) -> bool:
@@ -124,6 +133,19 @@ def _parse_version(text: str) -> tuple:
         parts.append(int(digits))
     return tuple(parts) if parts else (text,)
 
+
+#: A requirement naming a package and nothing else: name, extras, specifier, marker. An
+#: allowlist, because the forms that make pip fetch and build are too varied to list.
+_NAMED_REQUIREMENT = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*"        # name
+    r"(\[[A-Za-z0-9._,\s-]+\])?"          # extras
+    r"\s*(?:[<>=!~][^;]*)?"               # version specifier
+    r"\s*(?:;.*)?$"                       # environment marker
+)
+
+#: Archive suffixes. A package name may contain dots, so ``evil.tar.gz`` matches the form
+#: above while pip would read it as a file.
+_ARCHIVE_SUFFIXES = (".whl", ".zip", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".egg")
 
 #: Packages whose major version is an ABI boundary.
 _ABI_SENSITIVE = frozenset({"numpy"})
@@ -192,17 +214,14 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
         An :class:`Impact`. A resolve that fails carries its reason in ``failure`` rather
         than raising.
     """
-    wanted = [
-        line.strip()
-        for line in requirements
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    wanted, unresolved = _resolvable(requirements)
     if not wanted:
-        return Impact(checked=True)
+        return Impact(checked=True, unresolved=tuple(unresolved))
 
     interpreter = python or sys.executable
     if not interpreter:
-        return Impact(failure="no interpreter to resolve against")
+        return Impact(failure="no interpreter to resolve against",
+                      unresolved=tuple(unresolved))
 
     handle = None
     try:
@@ -216,7 +235,7 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
             Path(handle.name).unlink(missing_ok=True)
 
     if isinstance(report, str):
-        return Impact(failure=report, checked=True)
+        return Impact(failure=report, checked=True, unresolved=tuple(unresolved))
 
     present = _installed(interpreter)
     additions: list[str] = []
@@ -238,7 +257,7 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
                     want=version,
                     direction=direction,
                     is_core=folded in CORE_PACKAGES,
-                    host_skips=folded in HOST_PROTECTED and direction == "downgrade",
+                    host_skips=folded in HELD_BACK,
                     abi_break=_abi_break(name, have, version),
                 )
             )
@@ -246,7 +265,34 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
         additions=tuple(sorted(additions)),
         replacements=tuple(sorted(replacements, key=lambda item: (not item.is_core, item.name))),
         checked=True,
+        unresolved=tuple(unresolved),
     )
+
+
+def _resolvable(requirements: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Split requirement lines into the ones pip may resolve and the ones it may not.
+
+    A line is only handed to pip where it names a package. An option line can redirect the
+    index the resolve draws from, and a URL, VCS or path reference is fetched and built to
+    be read, which runs the code being assessed.
+
+    Args:
+        requirements: Requirement lines the version declares.
+
+    Returns:
+        ``(resolvable, unresolved)``.
+    """
+    resolvable: list[str] = []
+    unresolved: list[str] = []
+    for raw in requirements:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _NAMED_REQUIREMENT.match(line) and not line.lower().endswith(_ARCHIVE_SUFFIXES):
+            resolvable.append(line)
+        else:
+            unresolved.append(line)
+    return resolvable, unresolved
 
 
 def _resolve(python: str, path: str) -> list | str:
@@ -261,14 +307,17 @@ def _resolve(python: str, path: str) -> list | str:
     """
     command = [
         python, "-m", "pip", "install",
-        "--dry-run", "--no-input", "--disable-pip-version-check", "--quiet",
+        "--dry-run", "--only-binary", ":all:",
+        "--no-input", "--disable-pip-version-check", "--quiet",
         "--report", "-", "-r", path,
     ]
     try:
-        finished = subprocess.run(
-            command, capture_output=True, timeout=TIMEOUT, check=False,
-            encoding="utf-8", errors="replace",
-        )
+        # Empty, so a bare name cannot also be a directory pip would find and build.
+        with tempfile.TemporaryDirectory() as elsewhere:
+            finished = subprocess.run(
+                command, capture_output=True, timeout=TIMEOUT, check=False,
+                encoding="utf-8", errors="replace", cwd=elsewhere,
+            )
     except (OSError, subprocess.SubprocessError) as error:
         return f"pip could not be run ({type(error).__name__}: {error})"
 
@@ -292,6 +341,18 @@ def findings_from(impact: Impact) -> list[dict]:
         Finding dictionaries, most serious first, shaped for :mod:`.risk`.
     """
     found: list[dict] = []
+    if impact.unresolved:
+        found.append(
+            {
+                "severity": "caution",
+                "title": f"{len(impact.unresolved)} requirement(s) not assessed",
+                "detail": "These name a URL, a repository or a path, or set a pip option. "
+                          "Reading what they require means fetching and building them, "
+                          "which runs their code, so they were left out of this estimate. "
+                          "They are installed as written if you continue.",
+                "evidence": tuple(impact.unresolved[:8]),
+            }
+        )
     if impact.failure:
         found.append(
             {
@@ -325,13 +386,13 @@ def findings_from(impact: Impact) -> list[dict]:
     if skipped:
         found.append(
             {
-                "severity": "critical",
-                "title": f"{len(skipped)} requirement(s) would be dropped, not installed",
-                "detail": "The host manager refuses to downgrade these packages. It drops "
-                          "the requirement and reports the install as successful, so the "
-                          "pack arrives with a dependency it asked for and did not get.",
+                "severity": "caution",
+                "title": f"{len(skipped)} requirement(s) held back, not installed",
+                "detail": "These carry the build ComfyUI is running on, so they are kept as "
+                          "they are. The pack arrives without a dependency it asked for, "
+                          "which it may or may not mind.",
                 "evidence": tuple(
-                    f"{entry.name}: needs {entry.want}, install keeps {entry.have}"
+                    f"{entry.name}: asks for {entry.want}, keeping {entry.have}"
                     for entry in skipped
                 ),
             }
