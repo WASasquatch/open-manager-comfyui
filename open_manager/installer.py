@@ -694,9 +694,9 @@ def list_installed() -> list[dict]:
     """Every pack directory currently in custom_nodes.
 
     Returns:
-        One entry per pack, each ``{id, version, dir}``. ``id`` is the pack's pyproject
-        name where it declares one, otherwise the directory name. Disabled directories are
-        skipped.
+        One entry per pack, each ``{id, version, dir, disabled, from_git}``. ``id`` is the
+        pack's pyproject name where it declares one, otherwise the directory name.
+        ``from_git`` marks a working copy: a clone, or one this installed from a repository.
     """
     try:
         base = custom_nodes_dir()
@@ -707,11 +707,13 @@ def list_installed() -> list[dict]:
         if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
             continue
         pack_id = _pyproject_name(child) or child.name
+        version = _version_in(child)
         packs.append({
             "id": pack_id,
-            "version": _version_in(child),
+            "version": version,
             "dir": child.name,
             "disabled": child.name.endswith(".disabled"),
+            "from_git": (child / ".git").exists() or version.startswith("git:"),
         })
     return packs
 
