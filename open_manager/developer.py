@@ -28,7 +28,7 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         tomllib = None
 
-__all__ = ["from_pyproject", "resolve_incompatible", "scrub"]
+__all__ = ["expand", "from_pyproject", "resolve_incompatible", "scrub"]
 
 #: String fields kept from the table and shown as text.
 _STR_FIELDS = ("source", "branch", "release_note")
@@ -90,6 +90,20 @@ def from_pyproject(text: str) -> dict:
             items = [v.strip() for v in value if isinstance(v, str) and v.strip()]
             if items:
                 out[key] = items[:_LIST_CAP]
+    # The official scaffold already carries these, so a pack need not repeat them under
+    # [tool.open_manager]. Only used where the pack did not say otherwise.
+    urls = (data.get("project") or {}).get("urls") or {}
+    if isinstance(urls, dict):
+        for key, names in (("docs", ("Documentation", "documentation", "Docs", "docs")),
+                           ("funding", ("Funding", "funding", "Sponsor", "sponsor"))):
+            if out.get(key):
+                continue
+            for name in names:
+                value = urls.get(name)
+                if isinstance(value, str) and _link(value.strip()):
+                    out[key] = value.strip()[:_STR_CAP]
+                    break
+
     if "gallery" in out:
         gallery = [entry for entry in out["gallery"] if _gallery_entry(entry)]
         if gallery:
@@ -160,6 +174,101 @@ def _gallery_entry(entry: str) -> bool:
         return lowered.startswith(_URL_SCHEMES)
     # A repository path: no traversal, no absolute or Windows-style path.
     return not (".." in text or "\\" in text or text.startswith("/"))
+
+
+#: Fields whose entries may be patterns, and the extensions a bare directory expands to.
+_GLOBBABLE = {
+    "example_workflows": (".json",),
+    "themes": (".json",),
+    "gallery": (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+                ".mp4", ".webm", ".mov", ".m4v"),
+}
+
+#: Extensions a workflow's preview image may carry.
+_PREVIEW_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg", ".gif")
+
+#: Where ComfyUI's own convention puts example workflows, used when the field is absent.
+#: https://docs.comfy.org/custom-nodes/workflow_templates
+_WORKFLOW_DIRS = ("workflows", "workflow", "examples", "example", "example_workflows")
+
+
+def expand(table: dict, lister) -> dict:
+    """Resolve pattern and directory entries against a pack's actual files.
+
+    An entry containing ``*`` or ``?`` is matched as a glob; one naming a directory takes
+    every file in it with a matching extension. Plain paths are left alone, so a pack that
+    lists its files by hand is unaffected. Where ``example_workflows`` is absent the
+    conventional directories are tried, which is what ComfyUI does for templates.
+
+    Args:
+        table: A table from :func:`from_pyproject`.
+        lister: Called with a directory path, returning the repository-relative paths of the
+            files below it. Returns an empty list for anything it cannot read.
+
+    Returns:
+        The table with those fields resolved, capped as :func:`from_pyproject` caps them.
+    """
+    import fnmatch
+    import posixpath
+
+    out = dict(table or {})
+    # A lister that can see nothing has nothing to say: leave every entry as the pack wrote
+    # it rather than resolving patterns to empty and dropping what it declared.
+    if not lister("."):
+        return out
+    for field, suffixes in _GLOBBABLE.items():
+        entries = out.get(field)
+        if not isinstance(entries, list):
+            continue
+        resolved: list[str] = []
+        for entry in entries:
+            text = (entry or "").strip()
+            if not text or text.lower().startswith(_URL_SCHEMES):
+                resolved.append(text)
+                continue
+            if any(ch in text for ch in "*?"):
+                root = posixpath.dirname(text) or "."
+                matched = [f for f in lister(root)
+                           if fnmatch.fnmatch(f, text) and f.lower().endswith(suffixes)]
+                resolved.extend(sorted(matched))
+            elif text.lower().endswith(suffixes):
+                resolved.append(text)
+            else:
+                # A bare directory: everything in it this field can use.
+                found = [f for f in lister(text.rstrip("/")) if f.lower().endswith(suffixes)]
+                resolved.extend(sorted(found))
+        seen: set[str] = set()
+        deduped = [f for f in resolved if not (f in seen or seen.add(f))]
+        if deduped:
+            out[field] = deduped[:_GALLERY_CAP if field == "gallery" else _LIST_CAP]
+
+    if not out.get("example_workflows"):
+        for name in _WORKFLOW_DIRS:
+            found = sorted(f for f in lister(name) if f.lower().endswith(".json"))
+            if found:
+                out["example_workflows"] = found[:_LIST_CAP]
+                break
+
+    # ComfyUI's template convention pairs a workflow with a preview image beside it, named
+    # for the workflow with an optional index. Where one exists it is offered as a thumbnail.
+    # https://docs.comfy.org/custom-nodes/workflow_templates
+    workflows = out.get("example_workflows")
+    if isinstance(workflows, list) and workflows:
+        previews = {}
+        for entry in workflows:
+            folder = posixpath.dirname(entry)
+            stem = posixpath.splitext(posixpath.basename(entry))[0].lower()
+            for candidate in lister(folder or "."):
+                name = posixpath.basename(candidate).lower()
+                base, ext = posixpath.splitext(name)
+                if ext not in _PREVIEW_SUFFIXES:
+                    continue
+                if base == stem or base.startswith(f"{stem}-"):
+                    previews[entry] = candidate
+                    break
+        if previews:
+            out["example_workflow_previews"] = previews
+    return out
 
 
 def resolve_incompatible(specs) -> list[dict]:
