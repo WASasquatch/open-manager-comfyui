@@ -51,6 +51,35 @@ def start() -> None:
             type(error).__name__, error,
         )
     _mount_web()
+    _declare_manager_kind()
+
+
+def _declare_manager_kind() -> None:
+    """Tell the interface which kind of manager is answering.
+
+    Core claims ``extension.manager.supports_v4`` for every manager, which the interface
+    reads as a promise to serve ComfyUI-Manager's v4 endpoints. Open Manager serves its own
+    panel, so the claim is withdrawn and the interface treats this as a legacy manager,
+    keeping the Extensions button and dispatching ``Comfy.Manager.Menu.ToggleVisibility``.
+    Left alone it finds v4 promised and ``supports_csrf_post`` missing, calls the manager
+    incompatible, hides the button and warns on every load.
+    """
+    try:
+        from comfy_api import feature_flags
+    except ImportError:
+        # Older core without feature flags. The button is governed by version strings there.
+        return
+    try:
+        manager = feature_flags.SERVER_FEATURE_FLAGS.setdefault("extension", {}).setdefault(
+            "manager", {}
+        )
+        manager["supports_v4"] = False
+    except Exception as error:
+        logger.warning(
+            "the manager kind could not be declared, so the Extensions button may be hidden "
+            "(%s: %s)",
+            type(error).__name__, error,
+        )
 
 
 def _mount_web() -> None:
