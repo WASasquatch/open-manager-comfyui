@@ -22,6 +22,7 @@ __all__ = [
     "RegistryError",
     "Resolution",
     "fetch_node",
+    "fetch_status_reasons",
     "fetch_versions",
     "install_target",
     "resolve_versions",
@@ -350,6 +351,94 @@ async def fetch_versions(node_id: str, session: aiohttp.ClientSession) -> tuple[
     )
     _cache[key] = (time.monotonic(), versions)
     return versions
+
+
+#: Distinct scanner findings named in one summary before the rest are counted.
+_REASON_KINDS = 4
+
+
+def _summarise_reason(raw: str) -> str:
+    """One line explaining why a version carries the status it does.
+
+    The registry answers in three shapes: plain prose, an object carrying an admin
+    ``message``, and an array of scanner findings. All three are reduced to a sentence,
+    because the raw form runs to megabytes of code snippets and YARA matches.
+
+    Args:
+        raw: The ``status_reason`` field as the registry sent it.
+
+    Returns:
+        A short explanation, empty where there is nothing worth saying.
+    """
+    import json as _json
+
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = _json.loads(text)
+    except ValueError:
+        return text[:400]
+
+    if isinstance(parsed, dict):
+        return str(parsed.get("message") or "").strip()[:400]
+
+    if not isinstance(parsed, list):
+        return ""
+    kinds: dict[str, int] = {}
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("description") or item.get("issue_type") or "").strip()
+        if label:
+            kinds[label] = kinds.get(label, 0) + 1
+    if not kinds:
+        return ""
+    ordered = sorted(kinds.items(), key=lambda pair: (-pair[1], pair[0]))
+    named = "; ".join(
+        f"{label} (x{count})" if count > 1 else label
+        for label, count in ordered[:_REASON_KINDS]
+    )
+    total = sum(kinds.values())
+    if len(ordered) > _REASON_KINDS:
+        named += f"; and {len(ordered) - _REASON_KINDS} more"
+    return f"{total} finding(s): {named}"
+
+
+async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> dict:
+    """Why each version of a pack carries its status.
+
+    The registry only returns these when asked, and the raw answer is very large -- several
+    megabytes for one pack, most of it code snippets -- so it is summarised here and only
+    the sentence travels on.
+
+    Args:
+        node_id: Registry identifier.
+        session: Session the request runs on.
+
+    Returns:
+        ``{version: reason}``, empty where the registry offered none.
+
+    Raises:
+        RegistryError: Where the registry did not answer.
+    """
+    key = f"reasons:{node_id}"
+    hit = _cached(key)
+    if hit is not None:
+        return hit
+
+    payload = await _get(
+        session, f"{BASE_URL}/nodes/{node_id}/versions?include_status_reason=true"
+    )
+    rows = payload if isinstance(payload, list) else payload.get("versions", [])
+    reasons = {}
+    for row in rows:
+        version = row.get("version", "")
+        summary = _summarise_reason(row.get("status_reason", ""))
+        if version and summary:
+            reasons[version] = summary
+    _cache[key] = (time.monotonic(), reasons)
+    return reasons
 
 
 def resolve_versions(versions: tuple[NodeVersion, ...]) -> Resolution:
