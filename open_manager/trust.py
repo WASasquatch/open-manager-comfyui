@@ -23,7 +23,12 @@ import json
 import time
 from pathlib import Path
 
-__all__ = ["forget", "is_trusted", "listing", "path", "record"]
+__all__ = ["KINDS", "forget", "is_trusted", "listing", "path", "record"]
+
+#: What a decision covers. Trusting someone to ship code that runs with ComfyUI's
+#: privileges is a different question from trusting them for a model file, so the answers
+#: are kept apart and neither implies the other.
+KINDS = ("packs", "downloads")
 
 #: Most accounts remembered. Far above any real list; a guard against a runaway writer.
 _CAP = 500
@@ -47,16 +52,23 @@ def _fold(owner: str) -> str:
 
 
 def _read() -> dict:
-    """The stored map of owner to when it was trusted, empty where unreadable."""
+    """Every stored decision, keyed by kind then by owner.
+
+    A file written before the kinds existed held owners at the top level. Those were all
+    pack decisions, so they are read as such rather than discarded.
+    """
+    empty = {kind: {} for kind in KINDS}
     try:
         data = json.loads(path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {}
+        return empty
     if not isinstance(data, dict):
-        return {}
-    # Tolerate a nested shape, in case a build wrote one.
-    inner = data.get("authors")
-    return inner if isinstance(inner, dict) else data
+        return empty
+    if any(kind in data for kind in KINDS):
+        return {kind: data.get(kind) if isinstance(data.get(kind), dict) else {} for kind in KINDS}
+    legacy = data.get("authors")
+    empty["packs"] = legacy if isinstance(legacy, dict) else data
+    return empty
 
 
 def _write(data: dict) -> bool:
@@ -68,62 +80,75 @@ def _write(data: dict) -> bool:
         return False
 
 
-def is_trusted(owner: str) -> bool:
-    """Whether the reader has already trusted this account.
+def is_trusted(owner: str, kind: str = "packs") -> bool:
+    """Whether the reader has already trusted this account for this kind of thing.
 
     Args:
-        owner: Repository owner.
+        owner: Repository owner, or ``host/account`` for a download.
+        kind: One of :data:`KINDS`.
 
     Returns:
-        True where the owner is on the list.
+        True where the owner is on that list.
     """
     folded = _fold(owner)
-    return bool(folded) and folded in _read()
+    if not folded or kind not in KINDS:
+        return False
+    return folded in _read()[kind]
 
 
-def record(owner: str) -> bool:
-    """Add an account to the trusted list.
+def record(owner: str, kind: str = "packs") -> bool:
+    """Add an account to one of the trusted lists.
 
     Args:
-        owner: Repository owner, as GitHub spells it.
+        owner: Repository owner, or ``host/account`` for a download.
+        kind: One of :data:`KINDS`.
 
     Returns:
         Whether the list was written.
     """
     folded = _fold(owner)
-    if not folded:
+    if not folded or kind not in KINDS:
         return False
     data = _read()
-    if len(data) >= _CAP and folded not in data:
+    store = data[kind]
+    if len(store) >= _CAP and folded not in store:
         return False
-    data[folded] = {"name": (owner or "").strip(), "trusted_at": time.time()}
+    store[folded] = {"name": (owner or "").strip(), "trusted_at": time.time()}
     return _write(data)
 
 
-def forget(owner: str) -> bool:
-    """Take an account off the trusted list.
+def forget(owner: str, kind: str = "packs") -> bool:
+    """Take an account off one of the trusted lists.
 
     Args:
-        owner: Repository owner.
+        owner: Repository owner, or ``host/account`` for a download.
+        kind: One of :data:`KINDS`.
 
     Returns:
         Whether the list was written.
     """
+    if kind not in KINDS:
+        return False
     data = _read()
-    if data.pop(_fold(owner), None) is None:
+    if data[kind].pop(_fold(owner), None) is None:
         return True
     return _write(data)
 
 
-def listing() -> list[dict]:
-    """Every trusted account, newest first.
+def listing(kind: str = "packs") -> list[dict]:
+    """Every trusted account of one kind, newest first.
+
+    Args:
+        kind: One of :data:`KINDS`.
 
     Returns:
         One ``{owner, trusted_at}`` per entry.
     """
+    if kind not in KINDS:
+        return []
     rows = [
         {"owner": value.get("name") or key, "trusted_at": float(value.get("trusted_at") or 0)}
-        for key, value in _read().items()
+        for key, value in _read()[kind].items()
         if isinstance(value, dict)
     ]
     return sorted(rows, key=lambda row: -row["trusted_at"])

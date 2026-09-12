@@ -12,6 +12,7 @@ import posixpath
 import re
 import sys
 import time
+from urllib.parse import unquote
 
 import aiohttp
 from aiohttp import web
@@ -20,13 +21,19 @@ from . import (
     catalog,
     deps,
     developer,
+    downloads,
+    health as pack_health,
+    keys,
     impact,
+    library,
     virustotal,
     installer,
     license_files,
     licenses,
     log,
     metadata,
+    models as model_policy,
+    monitor,
     nodemap,
     registry,
     risk,
@@ -75,6 +82,46 @@ _registered = False
 
 #: Hosts allowed to trigger a server restart.
 _LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _model_folder_names() -> set:
+    """Every folder a download may be written to."""
+    return model_policy.folders()
+
+
+#: Characters read from a linked document. Long enough for any README's companion page,
+#: short enough that this is not a way to pull a repository through the panel.
+DOC_LIMIT = 400_000
+
+#: What a GitHub owner or repository name may contain. Used before either is put into a URL.
+_GH_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
+
+
+def _is_json(request: web.Request) -> bool:
+    """Whether a request body claims to be JSON.
+
+    A page on another site can post a body to this server without the browser asking
+    permission first, but only while it avoids a JSON content type. Requiring one means a
+    cross-origin caller has to ask, and gets to be refused. Nothing here reads a body that
+    does not say what it is.
+    """
+    kind = (request.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    return kind == "application/json"
+
+
+def _download_workers(body: dict) -> int:
+    """How many downloads to run at once, as the panel asked.
+
+    Args:
+        body: A decoded request body.
+
+    Returns:
+        A count. :func:`downloads.start` clamps it.
+    """
+    try:
+        return int((body or {}).get("workers") or downloads.DEFAULT_WORKERS)
+    except (TypeError, ValueError):
+        return downloads.DEFAULT_WORKERS
 
 
 def _github_headers(token: str) -> dict:
@@ -580,7 +627,7 @@ def register_routes() -> None:
                 )
             sig = metadata.signature(versions)
             meta = await metadata.fetch(
-                node_id, record.repository, sig, session, str(request.query.get("token") or "")
+                node_id, record.repository, sig, session, keys.secret("github")
             )
         payload = meta.to_json()
         payload["repository"] = record.repository
@@ -602,9 +649,7 @@ def register_routes() -> None:
         if not repo:
             return web.json_response({"error": "no repository named"}, status=400)
         async with aiohttp.ClientSession() as session:
-            meta = await metadata.fetch_repo(
-                repo, session, token=str(request.query.get("token") or "")
-            )
+            meta = await metadata.fetch_repo(repo, session, token=keys.secret("github"))
         payload = meta.to_json()
         payload["repository"] = repo
         info = licenses.classify(meta.license)
@@ -722,13 +767,16 @@ def register_routes() -> None:
         the part that reaches proxy and server logs. It is passed to the scan and kept
         nowhere else.
         """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
             return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         if not isinstance(body, dict):
             return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        key = str(body.get("key") or "").strip()
+        key = keys.secret("virustotal")
         pack_id = str(body.get("id") or "").strip()
         if not key:
             return web.json_response({"ok": False, "reason": "no VirusTotal key set"}, status=400)
@@ -753,6 +801,9 @@ def register_routes() -> None:
 
         Used where the requirements were deferred so the pack could be scanned first.
         """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -797,7 +848,7 @@ def register_routes() -> None:
         every pack page. A token lifts the hourly limit that otherwise applies.
         """
         repo = request.query.get("repo", "")
-        token = str(request.query.get("token") or "")
+        token = keys.secret("github")
         owner_repo = metadata._owner_repo(repo)
         if owner_repo is None:
             return web.json_response({"ok": False, "reason": "not a GitHub repository"}, status=400)
@@ -950,13 +1001,19 @@ def register_routes() -> None:
     async def trusted_authors(request: web.Request) -> web.Response:
         """Whether one owner is trusted, or the whole list where none is named."""
         owner = request.query.get("owner", "").strip()
+        kind = request.query.get("kind", "packs").strip() or "packs"
         if owner:
-            return web.json_response({"owner": owner, "trusted": trust.is_trusted(owner)})
-        return web.json_response({"authors": trust.listing()})
+            return web.json_response(
+                {"owner": owner, "kind": kind, "trusted": trust.is_trusted(owner, kind)}
+            )
+        return web.json_response({"kind": kind, "authors": trust.listing(kind)})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/trust")
     async def set_trust(request: web.Request) -> web.Response:
         """Add or remove an owner from the trusted list."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -964,9 +1021,595 @@ def register_routes() -> None:
         owner = str((body or {}).get("owner") or "").strip()
         if not owner or len(owner) > 100:
             return web.json_response({"ok": False, "reason": "owner is required"}, status=400)
+        kind = str((body or {}).get("kind") or "packs")
         wanted = _flag((body or {}).get("trusted", True))
-        ok = trust.record(owner) if wanted else trust.forget(owner)
-        return web.json_response({"ok": ok, "owner": owner, "trusted": wanted and ok})
+        ok = trust.record(owner, kind) if wanted else trust.forget(owner, kind)
+        return web.json_response(
+            {"ok": ok, "owner": owner, "kind": kind, "trusted": wanted and ok}
+        )
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/downloads")
+    async def list_downloads(_request: web.Request) -> web.Response:
+        """Every download and how far along it is."""
+        await downloads.start(downloads.DEFAULT_WORKERS)
+        return web.json_response(downloads.state())
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/downloads")
+    async def queue_download(request: web.Request) -> web.Response:
+        """Put one model on the queue, or say why it cannot go on.
+
+        The policy in :mod:`.models` decides what may be fetched and where it may land; this
+        only carries the answer back. A model already on disk is refused once, with the path
+        it is at, so the panel can ask before replacing it.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        result = downloads.add(
+            str(body.get("url") or ""),
+            str(body.get("name") or ""),
+            str(body.get("directory") or ""),
+            str(body.get("source") or ""),
+            str(body.get("hash") or ""),
+            str(body.get("hash_type") or ""),
+            _flag(body.get("overwrite", False)),
+            str(body.get("root") or ""),
+        )
+        if not result.get("ok"):
+            return web.json_response(result, status=400)
+        await downloads.start(_download_workers(body))
+        downloads.enqueue(result["id"])
+        return web.json_response(result)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/holds")
+    async def list_holds(_request: web.Request) -> web.Response:
+        """Every pack being held at its installed version."""
+        return web.json_response({"ok": True, "holds": pack_health.holds()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/hold")
+    async def set_hold(request: web.Request) -> web.Response:
+        """Hold a pack at its installed version, or stop holding it.
+
+        Nothing on disk changes either way. A hold only decides whether an update is offered.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        name = str(body.get("name") or "")
+        if _flag(body.get("off", False)):
+            return web.json_response(pack_health.release(name))
+        return web.json_response(pack_health.hold(name, str(body.get("version") or "")))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/star")
+    async def star_repo(request: web.Request) -> web.Response:
+        """Read or set whether the reader has starred a repository.
+
+        Made here rather than from the page because the token lives here. The panel used to
+        call GitHub directly, which meant the browser had to hold the token to do it.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        owner_repo = metadata._owner_repo(str(body.get("repo") or ""))
+        if owner_repo is None:
+            return web.json_response(
+                {"ok": False, "reason": "not a GitHub repository"}, status=400)
+        owner, name = owner_repo
+        # The two halves go into a URL, so they are held to what a GitHub name may contain
+        # rather than trusted because they came from a parser.
+        if not (_GH_NAME.match(owner) and _GH_NAME.match(name)):
+            return web.json_response(
+                {"ok": False, "reason": "not a GitHub repository"}, status=400)
+        token = keys.secret("github")
+        if not token:
+            return web.json_response(
+                {"ok": False, "reason": "no GitHub token set", "need_key": True}, status=400)
+
+        url = f"https://api.github.com/user/starred/{owner}/{name}"
+        headers = {"Authorization": f"Bearer {token}",
+                   "Accept": "application/vnd.github+json",
+                   "User-Agent": "open-manager"}
+        want = str(body.get("action") or "check")
+        method = {"check": "GET", "star": "PUT", "unstar": "DELETE"}.get(want)
+        if method is None:
+            return web.json_response({"ok": False, "reason": "unknown action"}, status=400)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.request(
+                    method, url, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as answer:
+                    if method == "GET":
+                        return web.json_response({"ok": True, "starred": answer.status == 204})
+                    if answer.status != 204:
+                        return web.json_response(
+                            {"ok": False, "reason": f"GitHub answered {answer.status}"},
+                            status=502)
+                    return web.json_response({"ok": True, "starred": want == "star"})
+        except (aiohttp.ClientError, TimeoutError) as error:
+            return web.json_response(
+                {"ok": False, "reason": str(error)[:120]}, status=502)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/doc")
+    async def pack_doc(request: web.Request) -> web.Response:
+        """One markdown file from a pack, for a README that links its own documentation.
+
+        Read from the installed copy where the pack is installed, and from the repository
+        where it is not. Markdown only: this is for following a link a README made, not a way
+        to read arbitrary files out of a repository.
+        """
+        path_asked = request.query.get("path", "")
+        clean = path_asked.strip().lstrip("/")
+        if (
+            not clean
+            or ".." in clean
+            or "\\" in clean
+            or len(clean) > 300
+            or not clean.lower().endswith((".md", ".markdown"))
+        ):
+            return web.json_response({"ok": False, "reason": "invalid document path"}, status=400)
+        repo = request.query.get("repo", "")
+        owner_repo = metadata._owner_repo(repo)
+        if owner_repo is None:
+            return web.json_response(
+                {"ok": False, "reason": "not a GitHub repository"}, status=400)
+        owner, name = owner_repo
+
+        text = _pack_file(repo, clean, DOC_LIMIT)
+        if not text:
+            branch = request.query.get("branch", "")
+            async with aiohttp.ClientSession() as session:
+                for candidate in (branch, "main", "Main", "master"):
+                    if not candidate:
+                        continue
+                    url = (f"https://raw.githubusercontent.com/{owner}/{name}/"
+                           f"{candidate}/{clean}")
+                    try:
+                        async with session.get(
+                            url, timeout=aiohttp.ClientTimeout(total=20)
+                        ) as answer:
+                            if answer.status == 200:
+                                text = (await answer.text())[:DOC_LIMIT]
+                                break
+                    except (aiohttp.ClientError, TimeoutError):
+                        continue
+        if not text:
+            return web.json_response(
+                {"ok": False, "reason": "no such document in the repository"}, status=404)
+        return web.json_response({"ok": True, "path": clean, "text": text})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/keys")
+    async def list_keys(_request: web.Request) -> web.Response:
+        """Which access keys are held, and what each is for.
+
+        Never the keys themselves. There is no route that returns one, because nothing a
+        reader can ask needs one: every request that uses a key is made by this server, which
+        reads it from the store directly.
+        """
+        return web.json_response(keys.listing())
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/keys")
+    async def set_key(request: web.Request) -> web.Response:
+        """Keep an access key, or forget one.
+
+        The value arrives once, in a body, and is not echoed back. What comes back is whether
+        a key is now held and the last four characters of it, which is enough to tell two
+        apart and not enough to use.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        name = str(body.get("name") or "")
+        if _flag(body.get("forget")):
+            answer = keys.forget(name)
+        else:
+            answer = keys.store(name, str(body.get("value") or ""))
+        return web.json_response(answer, status=200 if answer.get("ok") else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/collisions")
+    async def node_collisions(_request: web.Request) -> web.Response:
+        """Node names more than one installed pack registers, and which one is in use.
+
+        Off the event loop: the answer is read from memory but resolving each pack's path
+        touches the filesystem, which took the better part of a second the first time on the
+        install this was written against. ComfyUI is serving a queue on that loop.
+        """
+        return web.json_response(await asyncio.to_thread(pack_health.collisions))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/downloads/plan")
+    async def plan_downloads(request: web.Request) -> web.Response:
+        """What these downloads would ask of each drive, before any of them are queued.
+
+        Nothing is queued and nothing is written. The answer is for the panel to show, so a
+        21 GB model going onto a drive with 12 GB left is a question asked up front rather
+        than a failure part way through.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        items = body.get("items")
+        return web.json_response(await downloads.plan(items if isinstance(items, list) else []))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/downloads/action")
+    async def download_action(request: web.Request) -> web.Response:
+        """Resume, pause or cancel one download, or remove one or several from the list."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        what = str(body.get("action") or "")
+        download_id = str(body.get("id") or "")
+        if what == "remove-many":
+            ids = body.get("ids")
+            removed = downloads.remove_many(ids if isinstance(ids, list) else [])
+            return web.json_response({"ok": True, "removed": removed})
+        if what == "retry":
+            await downloads.start(_download_workers(body))
+            return web.json_response({"ok": downloads.retry(download_id)})
+        if what == "redownload":
+            await downloads.start(_download_workers(body))
+            return web.json_response({"ok": downloads.redownload(download_id)})
+        if what == "delete":
+            return web.json_response(downloads.delete_file(download_id))
+        if what == "verify":
+            return web.json_response(await downloads.verify(download_id))
+        if what == "pause":
+            return web.json_response({"ok": downloads.pause(download_id)})
+        if what == "cancel":
+            return web.json_response({"ok": downloads.cancel(download_id)})
+        if what == "remove":
+            return web.json_response({"ok": downloads.remove(download_id)})
+        return web.json_response({"ok": False, "reason": "unknown action"}, status=400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/monitor/blocks")
+    async def monitor_blocks(request: web.Request) -> web.Response:
+        """Where each part of one model's weights currently sits."""
+        try:
+            index = int(request.query.get("index", "0"))
+            cells = int(request.query.get("cells", "240"))
+        except (TypeError, ValueError):
+            index, cells = 0, 240
+        return web.json_response(await asyncio.to_thread(monitor.blocks, index, cells))
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/monitor/models")
+    async def monitor_models(_request: web.Request) -> web.Response:
+        """The models ComfyUI is holding, and where each one's weights are."""
+        return web.json_response(monitor.models())
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/monitor")
+    async def monitor_lease(request: web.Request) -> web.Response:
+        """Ask for machine readings, renew that request, or give it up.
+
+        Sampling runs only while a lease is held, and a lease that stops being renewed lapses
+        on its own. That is what keeps a closed tab from leaving the server measuring for
+        nobody.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        client = str(body.get("client") or "")
+        if _flag(body.get("release")):
+            return web.json_response({"ok": True, **monitor.release(client)})
+        try:
+            interval = float(body.get("interval") or monitor.DEFAULT_INTERVAL)
+        except (TypeError, ValueError):
+            interval = monitor.DEFAULT_INTERVAL
+        answer = monitor.lease(client, interval)
+        # The first reading rides along with the lease, so the strip has something to show
+        # before the first push arrives.
+        first = monitor.sample()
+        try:
+            first["activity"] = monitor.activity(first)
+        except Exception:  # noqa: BLE001 - a reading without the light is still a reading
+            pass
+        return web.json_response({"ok": True, "reading": first, **answer})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/monitor/free")
+    async def monitor_free(request: web.Request) -> web.Response:
+        """Ask ComfyUI to let go of what it is holding.
+
+        Handed to the prompt worker as a flag, which is how ComfyUI frees memory for itself;
+        the freeing then happens on the thread that owns the models. The worker is woken as
+        the flag is set, so this is not a wait for the next prompt.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        answer = monitor.free(vram=_flag(body.get("vram")), ram=_flag(body.get("ram")))
+        return web.json_response(answer, status=200 if answer.get("ok") else 400)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/monitor/unload")
+    async def monitor_unload(request: web.Request) -> web.Response:
+        """Unload one model ComfyUI is holding. Refused while a prompt is running."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        try:
+            model_id = int(body.get("id") or 0)
+        except (TypeError, ValueError):
+            model_id = 0
+        answer = await asyncio.to_thread(
+            monitor.unload, model_id, str(body.get("name") or ""))
+        return web.json_response(answer, status=200 if answer.get("ok") else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/startup")
+    async def startup_report(_request: web.Request) -> web.Response:
+        """How long each installed pack took to import, from ComfyUI's own log."""
+        return web.json_response(await asyncio.to_thread(pack_health.startup_times))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/pack/toggle")
+    async def pack_toggle(request: web.Request) -> web.Response:
+        """Switch a pack off, or back on, by renaming its directory.
+
+        The rename is the same one people already do by hand, so anything done here can be
+        undone there. Nothing is deleted and no setting is touched.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        result = await asyncio.to_thread(
+            pack_health.toggle, str(body.get("name") or ""), _flag(body.get("off", True)))
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/library")
+    async def library_index(request: web.Request) -> web.Response:
+        """Every model file on disk, across every folder ComfyUI registers.
+
+        Walking is done off the event loop: a folder of twenty thousand files should not stop
+        the server answering anything else while it is counted.
+        """
+        refresh = _flag(request.query.get("refresh"))
+        found = await asyncio.to_thread(library.index, refresh)
+        return web.json_response(found)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/library/duplicates")
+    async def library_duplicates(request: web.Request) -> web.Response:
+        """Files held in more than one place, checked as far as the caller asks.
+
+        ``level=names`` groups by name and size and opens nothing. ``level=quick`` adds a
+        two-megabyte signature per file, which is fast and settles only the negative case.
+        ``level=full`` reads every candidate, and is the only level that can report a file as
+        identical to another.
+        """
+        level = request.query.get("level", "names").strip().lower()
+        if level not in ("names", "quick", "full"):
+            level = "names"
+        found = await asyncio.to_thread(library.duplicates, level)
+        return web.json_response(found)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/library/storage")
+    async def library_storage(_request: web.Request) -> web.Response:
+        """What is taking up the drives, and what could be given back."""
+        return web.json_response(await asyncio.to_thread(library.storage))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/sweep")
+    async def library_sweep(request: web.Request) -> web.Response:
+        """Delete the part files left by downloads that never finished.
+
+        Only ``.part`` files, and only those the index itself found inside a registered model
+        folder. A finished model is never a candidate, and there is no route that sweeps one.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        wanted = (body or {}).get("paths")
+        removed = await asyncio.to_thread(
+            library.sweep_partials, wanted if isinstance(wanted, list) else None)
+        return web.json_response({"ok": True, **removed})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/library/references")
+    async def library_references(_request: web.Request) -> web.Response:
+        """The model filenames the saved workflows appear to ask for."""
+        found = await asyncio.to_thread(library.references)
+        return web.json_response(found)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/hash")
+    async def library_hash(request: web.Request) -> web.Response:
+        """The sha256 of one file, taken now or remembered from before."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        where = str(body.get("path") or "")
+        digest = await asyncio.to_thread(library.hash_of, where, _flag(body.get("force")))
+        if not digest:
+            return web.json_response(
+                {"ok": False, "reason": "that file could not be read"}, status=400)
+        return web.json_response({"ok": True, "path": where, "sha256": digest})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/provenance")
+    async def library_provenance(request: web.Request) -> web.Response:
+        """Where one model came from, as far as anything here recorded it.
+
+        Reads the download records, the held hashes and the saved workflows. Nothing is
+        hashed and nothing is fetched.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        found = await asyncio.to_thread(library.provenance, str(body.get("path") or ""))
+        return web.json_response(found, status=200 if found.get("ok") else 400)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/delete")
+    async def library_delete(request: web.Request) -> web.Response:
+        """Delete one model file.
+
+        One file per request. There is deliberately no route that takes a list: a sweep over
+        a folder of models is a different and much more dangerous thing than deleting a file,
+        and it should not be reachable by passing a longer array to this.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        result = await asyncio.to_thread(library.delete, str(body.get("path") or ""))
+        return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/models/folders")
+    async def model_folders(_request: web.Request) -> web.Response:
+        """The model folders this ComfyUI knows, for the folder picker."""
+        return web.json_response({
+            "folders": sorted(_model_folder_names()),
+            "formats": sorted(model_policy.SAFE_FORMATS),
+            "media_formats": sorted(model_policy.MEDIA_FORMATS),
+            "media_directory": model_policy.MEDIA_DIRECTORY,
+            "hosts": sorted(model_policy.ALLOWED_HOSTS),
+        })
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/models/roots")
+    async def model_roots(request: web.Request) -> web.Response:
+        """Every path ComfyUI registers for one model folder, with the space left on each.
+
+        This is what the location picker offers. Only these are accepted when a download is
+        queued, so a model can be sent to another drive without a path ever being typed.
+        """
+        directory = request.query.get("directory", "").strip()
+        if directory not in _model_folder_names():
+            return web.json_response({"ok": False, "roots": [], "reason": "unknown folder"})
+        return web.json_response({"ok": True, "directory": directory,
+                                  "roots": model_policy.roots(directory)})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/models/check")
+    async def check_model(request: web.Request) -> web.Response:
+        """Whether a URL may be downloaded, and what it would be saved as.
+
+        Asked before a URL is written into a node as well as before it is fetched, so a URL
+        that will never be allowed is refused while it is being typed rather than later.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        declared = str(body.get("url") or "").strip()
+        url = model_policy.normalise(declared)
+        directory = str(body.get("directory") or "")
+        name = str(body.get("name") or "") or unquote(url.split("?")[0].rsplit("/", 1)[-1])
+        # A URL can be checked before its folder is known, which is the order the panel asks
+        # in. Everything but the folder is judged against a stand-in, so a sound URL is not
+        # reported as a problem merely because the reader has not picked a folder yet.
+        # Without a folder the URL is judged against one that suits what it is, so the
+        # answer is about the link rather than about a folder not yet chosen.
+        kind = model_policy.kind_of(name)
+        default = (model_policy.MEDIA_DIRECTORY if kind == "media"
+                   else next(iter(sorted(_model_folder_names())), ""))
+        probe = directory or default
+        root = str(body.get("root") or "")
+        allowed, reason = model_policy.check(url, name, probe, root if directory else "")
+        owner = model_policy.owner_of(url)
+        return web.json_response({
+            "ok": allowed and bool(directory),
+            "reason": reason,
+            "needs_directory": allowed and not directory,
+            "url": url,
+            "name": name,
+            "directory": directory,
+            "owner": owner,
+            "trusted": trust.is_trusted(owner, "downloads"),
+            "installed": model_policy.installed_path(directory, name),
+            "rewritten": url != declared,
+            "root": root,
+            "roots": model_policy.roots(directory) if directory else [],
+            "kind": kind,
+            "suggested_directory": default if kind == "media" else "",
+        })
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/models/in-workflow")
+    async def models_in_workflow(request: web.Request) -> web.Response:
+        """The models a workflow asks for, and which of them are already on disk.
+
+        ComfyUI records these on each node as ``properties.models``. Most sit inside subgraph
+        definitions rather than the top-level node list, so the whole document is walked
+        instead of just ``nodes``.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
+        document = (body if isinstance(body, dict) else {}).get("workflow")
+        found = []
+        for item in library.declared_models(document):
+            allowed, reason = model_policy.check(item["url"], item["name"], item["directory"])
+            found.append({
+                **item,
+                "allowed": allowed,
+                "reason": reason,
+                "trusted": trust.is_trusted(item["owner"], "downloads"),
+                "installed": model_policy.installed_path(item["directory"], item["name"]),
+            })
+        return web.json_response({"ok": True, "models": found})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/pack-for-repo")
     async def pack_for_repo(request: web.Request) -> web.Response:
@@ -1078,6 +1721,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/install")
     async def do_install(request: web.Request) -> web.Response:
         """Install a specific version of a pack, from the registry, without the host manager."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1116,6 +1762,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/inspect-repo")
     async def inspect_repo(request: web.Request) -> web.Response:
         """Inspect a GitHub pack (contents, install scripts, dependency impact) without installing."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1133,6 +1782,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/install-repo")
     async def install_repo(request: web.Request) -> web.Response:
         """Install a pack from its GitHub repository, for packs not on the registry."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1154,6 +1806,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/uninstall")
     async def do_uninstall(request: web.Request) -> web.Response:
         """Remove an installed pack."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1167,7 +1822,16 @@ def register_routes() -> None:
 
     @PromptServer.instance.routes.post(f"{PREFIX}/reboot")
     async def reboot(request: web.Request) -> web.Response:
-        """Restart the ComfyUI server, so newly installed or removed packs take effect."""
+        """Restart the ComfyUI server, so newly installed or removed packs take effect.
+
+        Loopback-only is not on its own a defence against another site asking for this. A
+        request forged by a page the reader is visiting comes from the reader's own browser,
+        so its peer address is loopback too. The content type is what stops it: a cross-origin
+        caller cannot set one without asking permission first.
+        """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         peer = request.transport.get_extra_info("peername") if request.transport else None
         host = peer[0] if peer else ""
         if host not in _LOOPBACK:
@@ -1216,6 +1880,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/catalog/sync")
     async def catalog_sync(request: web.Request) -> web.Response:
         """Start a catalogue sync in the background."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1231,6 +1898,9 @@ def register_routes() -> None:
 
         A per-session guard limits this to one renewal per server run.
         """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1300,6 +1970,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/resolve-nodes")
     async def resolve_nodes(request: web.Request) -> web.Response:
         """Given node classes missing from a graph, name the packs that provide them."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1342,6 +2015,9 @@ def register_routes() -> None:
 
         Each item is ``{id, repository}``. The answer is keyed by pack id.
         """
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1391,6 +2067,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/github")
     async def github_add(request: web.Request) -> web.Response:
         """Put a GitHub repository on the user's list."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:
@@ -1401,6 +2080,9 @@ def register_routes() -> None:
     @PromptServer.instance.routes.post(f"{PREFIX}/github/remove")
     async def github_remove(request: web.Request) -> web.Response:
         """Take a repository off the list, uninstalling the pack where it is installed."""
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
         try:
             body = await request.json()
         except ValueError:

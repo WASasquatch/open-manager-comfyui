@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from aiohttp import web
 
@@ -21,9 +22,83 @@ __all__ = [
     "start",
 ]
 
+#: The log file, and the names its older copies take. ComfyUI writes no log of its own unless
+#: launched with ``--file-log``; the file usually in ``user/`` is written by ComfyUI-Manager.
+#: Taking that manager's place and not writing it would quietly remove something the reader
+#: had, including the import timings this pack reads back for "what each pack costs to load".
+LOG_NAME = "comfyui.log"
+LOG_ROTATIONS = ("comfyui.prev.log", "comfyui.prev2.log")
+
+#: Set to anything to leave the log alone. For a setup that collects its own, or one that
+#: would rather this wrote nothing.
+LOG_OFF = "OPEN_MANAGER_NO_LOG"
+
+
+def _rotate(folder) -> None:
+    """Shift the previous logs down one, so a run does not overwrite the last one's record."""
+    names = (LOG_NAME, *LOG_ROTATIONS)
+    for older, newer in zip(reversed(names[1:]), reversed(names[:-1]), strict=True):
+        source, target = folder / newer, folder / older
+        try:
+            if source.is_file():
+                target.unlink(missing_ok=True)
+                source.rename(target)
+        except OSError as error:
+            logger.debug("could not rotate %s (%s)", newer, error)
+
+
+def _start_logging() -> None:
+    """Write ComfyUI's output to the file the manager used to write.
+
+    Added to the root logger, in the format the previous file used, so anything that read it
+    keeps reading it. Failure here is reported and otherwise ignored: a missing log is not a
+    reason to stop a server from starting.
+    """
+    if os.environ.get(LOG_OFF):
+        return
+    try:
+        import folder_paths
+
+        folder = Path(folder_paths.get_user_directory())
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception as error:  # noqa: BLE001 - no user directory, so no log
+        logger.debug("no user directory for the log (%s: %s)", type(error).__name__, error)
+        return
+
+    root = logging.getLogger()
+    target = folder / LOG_NAME
+    # Nothing else is writing it: a second handler on the same file interleaves two copies
+    # of every line.
+    for handler in root.handlers:
+        existing = getattr(handler, "baseFilename", "")
+        if existing and Path(existing) == target.resolve():
+            return
+
+    _rotate(folder)
+    try:
+        handler = logging.FileHandler(target, mode="w", encoding="utf-8")
+    except OSError as error:
+        logger.warning("the log could not be opened (%s)", error.strerror or error)
+        return
+    formatter = logging.Formatter("[%(asctime)s] %(message)s")
+    # A dot rather than a comma before the milliseconds, matching what was there before.
+    formatter.default_msec_format = "%s.%03d"
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.INFO)
+    root.addHandler(handler)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
+    logging.info("[Open Manager] writing %s, as the manager it replaced did. Set %s to stop.",
+                 target, LOG_OFF)
+
 
 def prestartup() -> None:
-    """Called before custom nodes load. Nothing needs doing here."""
+    """Called before custom nodes load.
+
+    The log is opened here rather than in :func:`start`, because the import timings worth
+    keeping are written while the custom nodes load, which is after this and before that.
+    """
+    _start_logging()
     logging.info("[Open Manager] enabled in place of ComfyUI-Manager")
 
 

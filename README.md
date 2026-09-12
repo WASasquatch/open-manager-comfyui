@@ -2,9 +2,11 @@
 
 <img src="./open-manager-banner.png" width="80%" alt="Open Manager for ComfyUI">
 
+<img src="./open-manager-screenshot.png" width="80%" alt="Open Manager for ComfyUI">
+
 https://github.com/user-attachments/assets/58e5d65e-ce23-464b-8c9a-2a249818a1d1
 
-## An alternative package manager for ComfyUI. 
+## An alternative package manager for ComfyUI.
 
 Browse the Comfy Registry with ease, install from registry or GitHub, and see what
 an install would do to your environment before it runs. It warns; it never blocks.
@@ -15,31 +17,34 @@ an install would do to your environment before it runs. It warns; it never block
 
 ## Why Open Manager?
 
-ComfyUI Manager is a great package manager for ComfyUI, but it has some limitations:
-
-- It isn't transparent about the status of packages (e.g., flagged, withheld).
-- It quietly substitutes an approved version when the one you asked for is flagged, without telling you it did.
-- It installs without showing you the dependency changes an install would make to your environment.
-- It doesn't show each pack's licence, so there is no at-a-glance read on whether one fits your project.
-- It can install from a Git URL, but there is nowhere to keep those repositories: no list, no update path, no inspection.
-
-Open Manager addresses these limitations by:
+ComfyUI-Manager installs packs well. Open Manager is built around telling you what you are
+installing before it happens.
 
 | | |
 | --- | --- |
-| Full registry | Every version and its status, flagged and withheld included |
-| Warn, never block (except the banned; shame!) | Risk changes the wording of the confirmation, not whether Install works |
-| Before you install | The findings against a version and the dependency changes it would make |
-| What's in the box | A GitHub install is read first. Compiled binaries, pickle-format data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
-| Missing nodes | The packs for the node types a workflow is missing, matched against GitHub |
-| Your own list | A GitHub tab of repositories you add, kept in `user/` so it outlives an uninstall |
-| Licences | Read from each pack and shown, sortable, most permissive first |
-| Trust the author | A pack from outside the registry asks who you are trusting before it installs, once per author or every time. Findings are shown either way |
-| Any ref | Read a pack's page at another branch or recent commit, README and gallery together, and install that ref to test a change |
-| Fast sync | The whole Comfy Registry in seconds, with the concurrency yours to set |
+| Every version, with its status | Flagged and withheld included, never hidden and never silently swapped for an approved one |
+| Before you install | The findings against that version, and the dependency changes it would make to your environment |
+| What's in the box | A GitHub install is read first: compiled binaries, pickle data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
+| Licences | Read from each pack, sortable, most permissive first |
+| Your own list | Repositories you add by URL, with an update path and inspection, kept in `user/` so they outlive an uninstall |
+| Trust the author | A pack from outside the registry asks who you are trusting, once per author or every time |
+| Any ref | Read and install a pack at another branch or recent commit, README and gallery together |
+| Missing nodes | The packs supplying the node types a workflow is missing |
+| Node names claimed twice | Silent in ComfyUI, where the last pack loaded wins. Named here, with which one is in use |
+| Fast sync | The whole Comfy Registry in seconds, at a concurrency you set |
 
-The only version that cannot be installed is one the registry has banned. Set
-`OPEN_MANAGER_ALLOW_BANNED=1` to lift that too.
+A risk changes the wording of the confirmation, not whether Install works. The one exception is
+a version the registry has banned; `OPEN_MANAGER_ALLOW_BANNED=1` lifts that too.
+
+### Beyond packs
+
+Three pieces sit alongside the pack manager. None of them adds a node to your graph.
+
+| | | Default |
+| --- | --- | --- |
+| [Download Manager](DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, and picks the drive | on |
+| [Model Library](MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced, storage | off |
+| [Resource Monitor](MONITOR.md) | A compact CPU/RAM/VRAM strip, and a Memory panel behind it | off |
 
 ---
 
@@ -69,7 +74,20 @@ python main.py --enable-manager
 It takes the `comfyui_manager` name and replaces the official manager. A later install of
 `comfyui-manager`, or a desktop auto-update, puts the official one back.
 
-Nothing is downloaded or built at load time.
+In this mode it also writes `user/comfyui.log`, rotating to `comfyui.prev.log` and
+`comfyui.prev2.log`, because ComfyUI writes no log of its own unless launched with
+`--file-log` and the file usually there is written by the manager being replaced. Set
+`OPEN_MANAGER_NO_LOG` to leave it alone.
+
+Nothing is downloaded or built at load time. You decide what to install.
+
+### Access keys (Optional)
+
+| For | Variable | Get one at |
+|---|---|---|
+| Gated and private models | `HF_TOKEN` | huggingface.co/settings/tokens |
+| Starring, higher rate limit | `GITHUB_TOKEN` | github.com/settings/tokens |
+| Scanning an install | `VIRUS_TOTAL_KEY` | virustotal.com/gui/my-apikey |
 
 ---
 
@@ -91,9 +109,10 @@ and only these:
 (`Settings -> Comfy -> Use new menu -> Disabled`) it adds an **Open Manager** button there
 instead. Where it replaces the manager, the top menu's **Extensions** button opens it too.
 
-**Classic Mode.** On by default: Extensions opens a menu of destinations, the way
-ComfyUI-Manager did. Turn it off in settings to go straight to the panel. The sidebar tab
-is unaffected either way.
+**What Extensions opens.** It follows ComfyUI: the panel on the modern interface, and the
+classic menu of destinations where ComfyUI was started with `--enable-manager-legacy-ui`.
+Override it under *What the Extensions button opens*. Both carry every destination, so this
+decides the way in rather than what is reachable, and the sidebar tab is unaffected.
 
 **Trust.** Incoporated a simple trust gate for certain actions with Open Manager.
 Make sure you trust the authors.

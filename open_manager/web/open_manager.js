@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { registerThemes, watchThemeExtras } from "./themes.js";
+import { nodeTint, registerThemes, watchThemeExtras } from "./themes.js";
 
 const API = "/open_manager/v1/api";
 
@@ -140,6 +140,23 @@ style.textContent = `
 .om-readme .om-chips { margin-bottom: 8px; }
 .om-readme .om-tags { margin-bottom: 14px; }
 .om-readme-status { color: var(--om-muted); }
+/* Centred, and set down from the top rather than pinned to it: a result that is on its way
+   should look like the page is working, not like a line of text that failed to become one. */
+.om-loading { display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 48px 16px 40px; color: var(--om-muted); }
+.om-loading-spin { width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid var(--om-border); border-top-color: #539bf5;
+  animation: om-spin .8s linear infinite; }
+.om-loading-text { font-size: 13px; letter-spacing: .02em; }
+.om-loading-text::after { content: ""; animation: om-ellipsis 1.6s steps(4, end) infinite; }
+@keyframes om-spin { to { transform: rotate(360deg); } }
+@keyframes om-ellipsis { 0% { content: ""; } 25% { content: "."; }
+  50% { content: ".."; } 75% { content: "..."; } }
+/* Movement is decoration here; the words carry the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .om-loading-spin { animation: none; border-top-color: var(--om-border); }
+  .om-loading-text::after { content: "..."; animation: none; }
+}
 /* Capped for reading rather than filled to the dialog: a line that runs the whole width of
    a wide panel is hard to follow, which is the width GitHub settles on too. */
 .om-readme-body { line-height: 1.6; overflow-wrap: anywhere; max-width: 1080px; margin-inline: auto; }
@@ -147,6 +164,13 @@ style.textContent = `
 .om-readme-body pre { background: var(--om-input); padding: 10px; border-radius: 6px; overflow: auto; }
 .om-readme-body h1, .om-readme-body h2 { border-bottom: 1px solid var(--om-border); padding-bottom: 4px; }
 .om-readme-body a { color: #539bf5; }
+/* A link that opens here rather than leaving is marked as such, so the difference is visible
+   before it is clicked. */
+.om-readme-body a.om-doc-link::after { content: " \\2197"; opacity: .55; font-size: .85em; }
+.om-doc-trail { display: flex; align-items: center; gap: 10px; margin: 0 0 16px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--om-border); }
+.om-doc-back { padding: 3px 10px; font-size: 12px; }
+.om-doc-where { color: var(--om-muted); font-size: 12px; overflow-wrap: anywhere; }
 .om-wf-shot { width: 56px; height: 32px; object-fit: cover; border-radius: 4px;
   flex: none; background: var(--om-surface); }
 .om-trusted { flex: none; font-size: 10px; padding: 1px 5px; border-radius: 999px;
@@ -512,7 +536,11 @@ async function restartServer(button) {
   button.disabled = true;
   button.textContent = "Restarting...";
   try {
-    await api.fetchApi(`${API}/reboot`, { method: "POST" });
+    // The content type is what tells the server this came from its own page rather
+    // than from another site, so it is sent even though there is nothing to say.
+    await api.fetchApi(`${API}/reboot`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
   } catch (error) {
     // The connection drops as the server goes down.
   }
@@ -599,20 +627,38 @@ function confirmAction(title, message, actionLabel, danger) {
   });
 }
 
+// What a decision is about, stated as labelled values rather than described in a sentence.
+// Rows whose value is empty are dropped, so a caller can list what it might know without
+// checking each one first.
+function factList(rows) {
+  const list = el("dl", "om-facts");
+  for (const [label, value] of rows) {
+    if (!value) continue;
+    list.appendChild(el("dt", null, label));
+    list.appendChild(el("dd", null, value));
+  }
+  return list;
+}
+
 // Like confirmAction but with more than one way to say yes. Resolves the chosen action's
 // key, or an empty string where the reader backed out.
-function chooseAction(title, message, choices) {
+function chooseAction(title, message, choices, { wide = false, facts = [] } = {}) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
-    const box = el("div", "om-note");
+    // A choice that names an account carries that name on its button, which does not fit
+    // the width a plain yes/no needs.
+    const box = el("div", `om-note${wide ? " om-note-wide" : ""}`);
     box.appendChild(el("div", "om-note-title", title));
+    if (facts.length) box.appendChild(factList(facts));
     if (message) {
       const body = el("div", "om-note-body", message);
       body.style.whiteSpace = "pre-line";
       box.appendChild(body);
     }
     const foot = el("div", "om-note-foot");
-    const cancel = el("button", "om-btn", "Cancel");
+    // With nothing to choose between, this dialog is telling the reader something rather
+    // than asking them, and "Cancel" invites them to look for what they just cancelled.
+    const cancel = el("button", "om-btn", choices.length ? "Cancel" : "Close");
     cancel.onclick = () => { backdrop.remove(); resolve(""); };
     foot.appendChild(cancel);
     for (const choice of choices) {
@@ -684,7 +730,7 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
   return control;
 }
 
-function openRowMenu(anchor, { packId, entry, control, rowsRoot, items }) {
+function openRowMenu(anchor, { packId, entry, control, rowsRoot, items, align = "left" }) {
   const open = document.querySelector(".om-menu");
   if (open) { open.remove(); return; }
   const menu = el("div", "om-menu");
@@ -699,9 +745,7 @@ function openRowMenu(anchor, { packId, entry, control, rowsRoot, items }) {
   ];
   for (const it of list) item(it.label, it.danger, it.fn);
   document.body.appendChild(menu);
-  const rect = anchor.getBoundingClientRect();
-  menu.style.top = `${rect.bottom + 4}px`;
-  menu.style.left = `${Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8)}px`;
+  placeRowMenu(menu, anchor, align);
   const close = (event) => {
     if (!menu.contains(event.target) && event.target !== anchor) {
       menu.remove();
@@ -709,6 +753,22 @@ function openRowMenu(anchor, { packId, entry, control, rowsRoot, items }) {
     }
   };
   setTimeout(() => document.addEventListener("mousedown", close), 0);
+}
+
+// A menu hangs below its button, which is fine until the button is at the foot of a panel at
+// the foot of the window: there is nothing below to hang into. And a button pinned to the
+// right of a card opening a left-aligned menu throws the menu back across the card it belongs
+// to. So measure first, then flip or align as the space actually allows.
+function placeRowMenu(menu, anchor, align) {
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  const gap = 4;
+  const below = window.innerHeight - rect.bottom;
+  const flip = below < height + gap && rect.top > below;
+  const left = align === "right" ? rect.right - width : rect.left;
+  menu.style.top = `${flip ? Math.max(8, rect.top - height - gap) : rect.bottom + gap}px`;
+  menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`;
 }
 
 // --- install queue, driven by one progress toast ------------------------------------
@@ -990,33 +1050,28 @@ async function confirmAuthorTrust(owner, repo, what) {
   const standing = await authorStanding(owner, repo, byAuthor);
   if (byAuthor && standing.trusted) return true;
 
-  const facts = [];
-  if (standing.stars != null) facts.push(`${countText(standing.stars)} stars`);
-  if (standing.pushed) facts.push(`last pushed ${dayText(standing.pushed)}`);
-  facts.push(standing.packs
-    ? `${standing.packs} of their pack${standing.packs === 1 ? "" : "s"} already installed`
-    : "nothing of theirs installed yet");
-
-  const doing = what || "install this";
   const choices = byAuthor
     ? [{ key: "always", label: `Trust ${owner}`, primary: true,
          hint: `Stops asking for anything published by ${owner}` },
        { key: "once", label: "This time only", hint: "Nothing is remembered" }]
     : [{ key: "once", label: "Continue", primary: true }];
 
-  const how = await chooseAction(
-    `Do you trust ${owner}?`,
-    `You are about to ${doing} published by ${owner}. Their code runs with ComfyUI's `
-    + `privileges, and their workflows and downloads run as you.
-
-`
-    + `${facts.join(" · ")}
-
-`
-    + (byAuthor
-        ? "Trusting them covers everything they publish. Findings against a pack are still shown."
-        : "You will be asked again next time. Findings against a pack are still shown."),
-    choices);
+  const how = await chooseAction(`Do you trust ${owner}?`, "", choices, {
+    wide: true,
+    facts: [
+      ["Author", owner],
+      ["Trusted", byAuthor ? "No" : "Not tracked, asked every time"],
+      ["Action", what || "Install this"],
+      ["Runs as", "ComfyUI. Full privileges."],
+      ["Stars", standing.stars != null ? countText(standing.stars) : ""],
+      ["Last push", standing.pushed ? dayText(standing.pushed) : ""],
+      ["Installed", standing.packs
+        ? `${standing.packs} of their pack${standing.packs === 1 ? "" : "s"}`
+        : "None of theirs"],
+      ["Trust covers", byAuthor ? "All their packs, not downloads" : ""],
+      ["Findings", "Shown either way"],
+    ],
+  });
   if (!how) return false;
   if (how === "always") {
     try {
@@ -1195,37 +1250,39 @@ function makeStarButton(repository, stars) {
 }
 
 async function reflectStar(repository, button) {
-  const parts = repoOwnerName(repository);
-  const token = (app.extensionManager.setting.get("openManager.githubToken") || "").trim();
-  if (!parts || !token) return;
+  if (!repoOwnerName(repository) || !keysHeld.github) return;
   try {
-    const answer = await fetch(`https://api.github.com/user/starred/${parts.owner}/${parts.repo}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-    });
-    if (answer.status === 204) { button.classList.add("om-starred"); button.firstChild.textContent = "★ Starred"; }
-  } catch {}
+    const answer = await dlPost("/star", { repo: repository, action: "check" });
+    if (answer?.starred) {
+      button.classList.add("om-starred");
+      button.firstChild.textContent = "★ Starred";
+    }
+  } catch {
+    // No star state is not worth saying anything about.
+  }
 }
 
 async function starRepo(repository, button) {
   const parts = repoOwnerName(repository);
   if (!parts) { if (repository) openUrl(repository); return; }
-  const openRepo = () => window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener,noreferrer");
-  const token = (app.extensionManager.setting.get("openManager.githubToken") || "").trim();
-  if (!token) { openRepo(); return; }
+  const openRepo = () =>
+    window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener,noreferrer");
+  // Without a token there is nothing to star with, so the repository is opened instead and
+  // the reader can do it there.
+  if (!keysHeld.github) { openRepo(); return; }
   const starred = button.classList.contains("om-starred");
-  try {
-    const answer = await fetch(`https://api.github.com/user/starred/${parts.owner}/${parts.repo}`, {
-      method: starred ? "DELETE" : "PUT",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-    });
-    if (answer.status !== 204) throw new Error(`HTTP ${answer.status}`);
-    button.classList.toggle("om-starred");
-    button.firstChild.textContent = button.classList.contains("om-starred") ? "★ Starred" : "☆ Star";
-    toast(starred ? "Unstarred on GitHub." : "Starred on GitHub.", { kind: "ok" });
-  } catch (error) {
-    notify("Could not star", `${error.message}. Opening the repository instead.`);
+  const answer = await dlPost("/star",
+    { repo: repository, action: starred ? "unstar" : "star" }).catch((error) => ({
+      ok: false, reason: error.message,
+    }));
+  if (!answer?.ok) {
+    notify("Could not star", `${answer?.reason || "GitHub refused"}. Opening the repository instead.`);
     openRepo();
+    return;
   }
+  button.classList.toggle("om-starred", !!answer.starred);
+  button.firstChild.textContent = answer.starred ? "★ Starred" : "☆ Star";
+  toast(answer.starred ? "Starred on GitHub." : "Unstarred on GitHub.", { kind: "ok" });
 }
 
 async function openPack(packId) {
@@ -1415,7 +1472,7 @@ async function openPack(packId) {
   // README, below the version list, only when enrichment is enabled.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
     const readme = el("div", "om-readme");
-    readme.appendChild(el("div", "om-readme-status", "Reading the repository..."));
+    readme.appendChild(loadingBlock("Reading the repository"));
     body.appendChild(readme);
     appendReadme(pack.id, readme);
   }
@@ -1488,10 +1545,10 @@ function openRepoPack(pack) {
   // The README is read from GitHub behind the same enrichment setting the registry page uses.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
     const readme = el("div", "om-readme");
-    readme.appendChild(el("div", "om-readme-status", "Reading the repository..."));
+    readme.appendChild(loadingBlock("Reading the repository"));
     body.appendChild(readme);
     renderMetaInto(readme, api.fetchApi(
-      `${API}/repo-meta?repo=${encodeURIComponent(pack.repo)}&token=${encodeURIComponent(githubToken())}`));
+      `${API}/repo-meta?repo=${encodeURIComponent(pack.repo)}`));
   } else {
     body.appendChild(el("div", "om-readme-status",
       "Enable README enrichment in Open Manager settings to read the repository here."));
@@ -1509,7 +1566,7 @@ function repoName(url) {
 // server-side by version signature.
 async function appendReadme(packId, slot) {
   return renderMetaInto(slot, api.fetchApi(
-    `${API}/readme/${encodeURIComponent(packId)}?token=${encodeURIComponent(githubToken())}`));
+    `${API}/readme/${encodeURIComponent(packId)}`));
 }
 
 // Renders repository facts and the README into a slot from a metadata fetch. Shared by the
@@ -1587,6 +1644,105 @@ async function renderMetaInto(slot, fetchPromise) {
 
 // The declared table and the README as they stand at one ref. Called first with the pack's
 // own metadata, and again with whatever the picker reads.
+// Something to look at while a repository is read. Centred and set down from the top, so it
+// reads as the page thinking rather than as a line of text that failed to become a page.
+function loadingBlock(what) {
+  const box = el("div", "om-loading");
+  box.appendChild(el("div", "om-loading-spin"));
+  box.appendChild(el("div", "om-loading-text", what || "Loading"));
+  return box;
+}
+
+// Where a document sits, so a link inside it resolves against its own folder rather than
+// against the root. `docs/guide.md` linking `images.md` means `docs/images.md`.
+function docFolder(path) {
+  const cut = String(path || "").lastIndexOf("/");
+  return cut < 0 ? "" : String(path).slice(0, cut);
+}
+
+// Resolve a relative link against a folder, honouring ./ and ../ the way a path does.
+function docResolve(base, href) {
+  const parts = String(base || "").split("/").filter(Boolean);
+  for (const step of String(href || "").split("/")) {
+    if (!step || step === ".") continue;
+    if (step === "..") parts.pop();
+    else parts.push(step);
+  }
+  return parts.join("/");
+}
+
+// Render markdown into a view and wire everything that follows from it. One path, so a
+// linked document behaves exactly as the README does: same sanitising, same media, same
+// heading links, same workflow offers.
+async function renderMarkdownInto(view, text, meta, ref, base) {
+  try {
+    const html = await app.extensionManager.renderMarkdownToHtml(text);
+    view.innerHTML = typeof html === "string" ? html : "";
+    view._repository = meta.repository || "";
+    linkHeadings(view);
+    absolutiseLinks(view, meta.repository, ref, { meta, base: base || "" });
+    embedMediaLinks(view);
+    offerImageWorkflows(view);
+  } catch {
+    view.replaceChildren();
+    const pre = el("pre");
+    pre.textContent = text;
+    view.appendChild(pre);
+  }
+}
+
+// Open one of the pack's own documents in place. The README it came from is kept so the way
+// back is the document itself rather than a reload of the page.
+async function openPackDoc(view, meta, ref, path) {
+  const stack = view._docStack || (view._docStack = []);
+  stack.push({ text: view._docText, path: view._docPath });
+  view._docText = "";
+  view._docPath = path;
+  view.replaceChildren(loadingBlock(`Reading ${path.split("/").pop()}`));
+  let answer;
+  try {
+    answer = await (await api.fetchApi(
+      `${API}/doc?repo=${encodeURIComponent(meta.repository || "")}`
+      + `&branch=${encodeURIComponent(ref || "")}&path=${encodeURIComponent(path)}`)).json();
+  } catch (error) {
+    answer = { ok: false, reason: error.message };
+  }
+  if (!answer?.ok) {
+    // Nothing to show, so the reader goes back rather than being left on an empty page, and
+    // is told why the link did not open here.
+    notify("Not found in the repository", `${path}: ${answer?.reason || "it could not be read"}.`);
+    await backFromDoc(view, meta, ref);
+    return;
+  }
+  view._docText = answer.text;
+  await renderMarkdownInto(view, answer.text, meta, ref, docFolder(path));
+  const trail = el("div", "om-doc-trail");
+  const back = el("button", "om-btn om-doc-back", "Back");
+  back.onclick = () => backFromDoc(view, meta, ref);
+  trail.appendChild(back);
+  trail.appendChild(el("span", "om-doc-where", path));
+  view.insertBefore(trail, view.firstChild);
+  view.scrollIntoView({ block: "start" });
+}
+
+async function backFromDoc(view, meta, ref) {
+  const stack = view._docStack || [];
+  const previous = stack.pop() || { text: view._readme, path: "" };
+  view._docText = previous.text;
+  view._docPath = previous.path;
+  view.replaceChildren(loadingBlock("Going back"));
+  await renderMarkdownInto(view, previous.text || view._readme || "", meta, ref,
+                           docFolder(previous.path));
+  if (previous.path) {
+    const trail = el("div", "om-doc-trail");
+    const back = el("button", "om-btn om-doc-back", "Back");
+    back.onclick = () => backFromDoc(view, meta, ref);
+    trail.appendChild(back);
+    trail.appendChild(el("span", "om-doc-where", previous.path));
+    view.insertBefore(trail, view.firstChild);
+  }
+}
+
 async function paintPackBody(host, meta, source) {
   host.replaceChildren();
   appendDeveloperBlock(host, { ...meta, developer: source.developer || {} });
@@ -1596,20 +1752,11 @@ async function paintPackBody(host, meta, source) {
     return;
   }
   const view = el("div", "om-readme-body");
-  try {
-    const html = await app.extensionManager.renderMarkdownToHtml(source.readme);
-    view.innerHTML = typeof html === "string" ? html : "";
-    view._repository = meta.repository || "";
-    linkHeadings(view);
-    absolutiseLinks(view, meta.repository, source.ref || meta.default_branch);
-    embedMediaLinks(view);
-    offerImageWorkflows(view);
-  } catch {
-    const pre = el("pre");
-    pre.textContent = source.readme;
-    view.appendChild(pre);
-  }
+  view._readme = source.readme;
+  view._docText = source.readme;
+  view._docPath = "";
   host.appendChild(view);
+  await renderMarkdownInto(view, source.readme, meta, source.ref || meta.default_branch, "");
 }
 
 // A branch or commit offered for install at the top of the version list. The registry has
@@ -1672,7 +1819,7 @@ function buildRefPicker(meta, host) {
     loaded = true;
     status.textContent = "reading branches...";
     try {
-      const query = new URLSearchParams({ repo, token: githubToken() });
+      const query = new URLSearchParams({ repo });
       const data = await (await api.fetchApi(`${API}/refs?${query}`)).json();
       if (!data.ok) { status.textContent = data.reason || "refs unavailable"; return; }
       status.textContent = "";
@@ -1857,7 +2004,7 @@ function openScanDialog(packId, { onDone } = {}) {
       const answer = await api.fetchApi(`${API}/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: packId, key: vtKey() }),
+        body: JSON.stringify({ id: packId }),
       });
       const started = await answer.json();
       if (!started.ok) { status.textContent = started.reason || "could not start"; return; }
@@ -1949,7 +2096,7 @@ function appendDeveloperBlock(slot, meta) {
       item.title = `Add ${path} to your themes`;
       item.onclick = () => addPackTheme(meta.repository, meta.default_branch, path, item);
       return item;
-    }));
+    }, { note: countNote(themes.length, "theme"), remember: "om-themes-open" }));
   }
 
   if (workflows.length) {
@@ -1971,7 +2118,7 @@ function appendDeveloperBlock(slot, meta) {
       item.title = `Load ${path}`;
       item.onclick = () => loadExampleWorkflow(meta.repository, meta.default_branch, path);
       return item;
-    }));
+    }, { note: countNote(workflows.length, "workflow"), remember: "om-workflows-open" }));
   }
 
   slot.appendChild(block);
@@ -2004,25 +2151,202 @@ function panel(title, note, { open = true, remember = "" } = {}) {
   return box;
 }
 
-// A section holding a list of paths, closed unless asked otherwise. `listClass` lets a
-// caller swap the single column for another layout, which the gallery uses for its grid.
-function collapsible(title, paths, build, { listClass = "om-wf-list", open = false } = {}) {
-  const box = el("details", "om-fold");
-  box.open = open;
-  const head = el("summary", "om-dev-head");
-  head.appendChild(document.createTextNode(title));
-  head.appendChild(el("span", "om-fold-count", String(paths.length)));
-  box.appendChild(head);
+// A section holding a list of paths, in the same container the version list uses so every
+// section of a pack page reads as one stack rather than as a box and some loose headings.
+// `note` is what the header says while it is closed, so it has to be worth reading on its
+// own. `listClass` swaps the single column for another layout, which the gallery uses for
+// its grid.
+function collapsible(title, paths, build, {
+  listClass = "om-wf-list", open = false, remember = "", note = "",
+} = {}) {
+  const box = panel(title, note || String(paths.length), { open, remember });
   const list = el("div", listClass);
   for (const path of paths) list.appendChild(build(path));
-  box.appendChild(list);
+  box.body.appendChild(list);
   return box;
 }
 
-// The user's VirusTotal key. Nothing in the panel offers a scan until one is set, and the
-// key is only ever sent in a request body, never in a URL.
+// How many of a thing, said in words rather than as a bare number, because "1" beside a
+// heading leaves the reader to guess what was counted.
+function countNote(count, noun) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+//: Which keys are held. Filled at start-up and kept in step as they are set. Values never
+//: appear here, because they never leave the server: a key is read from its store by the
+//: request that needs it, so nothing has to carry one about.
+const keysHeld = { huggingface: false, github: false, virustotal: false };
+
+async function loadKeys() {
+  try {
+    const found = await (await api.fetchApi(`${API}/keys`)).json();
+    for (const [name, entry] of Object.entries(found.keys || {})) {
+      keysHeld[name] = !!entry.set;
+    }
+    return found;
+  } catch {
+    return null;
+  }
+}
+
+// A key typed into ComfyUI's settings is written to comfy.settings.json, handed back in full
+// by GET /settings, and shown in the box that set it. Anything found there is moved into the
+// store and the setting emptied, once, and the reader is told it happened rather than left to
+// notice. Nothing is moved silently.
+async function migrateKeys() {
+  const moving = [
+    ["openManager.virusTotalKey", "virustotal", "VirusTotal key"],
+    ["openManager.githubToken", "github", "GitHub token"],
+  ];
+  const moved = [];
+  for (const [id, name, label] of moving) {
+    let value = "";
+    try { value = String(app.extensionManager.setting.get(id) || "").trim(); } catch { continue; }
+    if (!value) continue;
+    const answer = await dlPost("/keys", { name, value });
+    if (!answer?.ok) continue;
+    try { await app.extensionManager.setting.set(id, ""); } catch { /* left as it was */ }
+    keysHeld[name] = true;
+    moved.push(label);
+    if (answer.warning) {
+      notify("Key stored, with a caveat", `${label}: ${answer.warning}.`);
+    }
+  }
+  if (moved.length) {
+    toast(`${moved.join(" and ")} moved out of ComfyUI's settings into Open Manager's own `
+          + `store. Set them from Open Manager > Keys from now on.`, { kind: "ok", sticky: true });
+  }
+}
+
+// The switch this replaced was a boolean that defaulted to the classic menu, which meant a
+// modern install opened the old menu unless someone turned it off. Anyone who did express a
+// preference keeps it; anyone who did not gets the flag followed instead.
+function migrateEntryMode() {
+  let old;
+  try { old = app.extensionManager.setting.get("openManager.classicMenu"); } catch { return; }
+  if (old === undefined || old === null) return;
+  try {
+    const asked = app.extensionManager.setting.get("openManager.managerEntry");
+    if (asked && asked !== "auto") return;
+    app.extensionManager.setting.set("openManager.managerEntry", old === false ? "panel" : "classic");
+    app.extensionManager.setting.set("openManager.classicMenu", null);
+  } catch {
+    // Left as it was; the flag decides in the meantime.
+  }
+}
+
+// Where a key is set, and the only place one is typed. The box is a password field, it is
+// never filled with what is already held, and what is held is described by its last four
+// characters because that is enough to tell two apart.
+async function openKeysDialog() {
+  const found = await loadKeys();
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-note-wide");
+  box.appendChild(el("div", "om-note-title", "Access keys"));
+  box.appendChild(el("div", "om-dl-note",
+    "Kept in Open Manager's own file, restricted to this account, and used only by this "
+    + "server. They are not written to ComfyUI's settings, not sent in a URL, and there is "
+    + "no route that returns one. They are not encrypted: a key this server has to use "
+    + "unattended cannot be hidden from the account it runs as, and a file that decrypts "
+    + "itself is not encryption."));
+  box.appendChild(el("div", "om-dl-note",
+    "An environment variable is used instead where one is set, for a deployment that would "
+    + "rather inject its secrets. Nothing here writes a key into the environment: this "
+    + "process loads third-party packs that can read it, and pip inherits it when a pack's "
+    + "requirements are installed."));
+  if (found?.warning) box.appendChild(el("div", "om-dl-note om-dl-bad", found.warning));
+
+  const rows = el("div", "om-keys");
+  // Every key the server knows about, described by the server. Keeping a second list here is
+  // how a key ends up settable in one place and invisible in the other.
+  for (const [name, entry] of Object.entries(found?.keys || {})) {
+    const label = entry.label || name;
+    const placeholder = entry.placeholder || "";
+    const why = entry.purpose || "";
+    const fromEnv = entry.source === "environment";
+    const row = el("div", "om-keys-row");
+    const head = el("div", "om-dl-top");
+    head.appendChild(el("span", "om-dl-name", label));
+    const state = el("span", "om-dl-src", entry.set
+      ? `${fromEnv ? "from the environment" : "held"} ${entry.hint}` : "not set");
+    if (fromEnv) state.title = `Read from ${entry.env}.`;
+    head.appendChild(state);
+    row.appendChild(head);
+    row.appendChild(el("div", "om-dl-note", why));
+    if (fromEnv) {
+      // Saving here would write a key that is never read, which is the kind of setting that
+      // looks like it worked and did not.
+      row.appendChild(el("div", "om-dl-note om-dl-bad",
+        `${entry.env} is set, so that is the key in use. `
+        + `${entry.shadowed ? "What is stored here is" : "Anything saved here is"} ignored `
+        + "until the variable is unset."));
+    }
+
+    const line = el("div", "om-keys-line");
+    const input = el("input", "om-search om-keys-input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = entry.set ? "Replace it: paste a new one" : (placeholder || "Paste it here");
+    line.appendChild(input);
+
+    const save = el("button", "om-btn om-go", "Save");
+    save.onclick = async () => {
+      const value = input.value.trim();
+      if (!value) return;
+      save.disabled = true;
+      const answer = await dlPost("/keys", { name, value });
+      // Cleared whatever the answer, so a key never sits in a field waiting to be read
+      // over someone's shoulder or picked up by a password manager.
+      input.value = "";
+      save.disabled = false;
+      if (!answer?.ok) { notify("Not saved", answer?.reason || "It could not be written."); return; }
+      keysHeld[name] = true;
+      state.textContent = fromEnv ? `from the environment ${entry.hint}` : `held ${answer.hint}`;
+      forget.style.display = "";
+      toast(`${label} key saved.`, { kind: "ok" });
+      if (answer.warning) notify("Saved, with a caveat", `${label}: ${answer.warning}.`);
+    };
+    line.appendChild(save);
+
+    const forget = el("button", "om-btn", "Forget");
+    forget.style.display = entry.set ? "" : "none";
+    forget.onclick = async () => {
+      const go = await chooseAction(`Forget the ${label} key?`,
+        "It is removed from disk. Anything that needed it stops working until another is set.",
+        [{ key: "go", label: "Forget it", primary: true }], { wide: true });
+      if (!go) return;
+      const answer = await dlPost("/keys", { name, forget: true });
+      if (!answer?.ok) { notify("Not removed", answer?.reason || "It could not be written."); return; }
+      keysHeld[name] = false;
+      state.textContent = "not set";
+      forget.style.display = "none";
+      toast(`${label} key forgotten.`, { kind: "ok" });
+    };
+    line.appendChild(forget);
+    row.appendChild(line);
+    rows.appendChild(row);
+  }
+  box.appendChild(rows);
+  if (found?.path) {
+    const where = el("div", "om-dl-note", `Stored at ${found.path}`);
+    box.appendChild(where);
+  }
+
+  const foot = el("div", "om-note-foot");
+  const close = el("button", "om-btn", "Close");
+  close.onclick = () => backdrop.remove();
+  foot.appendChild(close);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+}
+
+// Whether a VirusTotal key is held. Nothing in the panel offers a scan until one is set, and
+// the key itself is read by the server rather than carried here.
 function vtKey() {
-  return String(panelSetting("openManager.virusTotalKey", "") || "").trim();
+  return keysHeld.virustotal ? "set" : "";
 }
 
 // Whether scanning is available at all. Every entry point checks this, so the feature is
@@ -2043,9 +2367,7 @@ async function vtRemaining() {
 
 // The configured GitHub token, empty when none is set. Sent with the calls that read the
 // API so they draw on the 5,000 an hour a token allows rather than the 60 it does not.
-function githubToken() {
-  return String(panelSetting("openManager.githubToken", "") || "");
-}
+
 
 // A panel setting, with a fallback for when the settings store is not reachable.
 function panelSetting(key, fallback) {
@@ -2107,8 +2429,8 @@ function buildGallery(meta, entries) {
       cell.classList.add("om-gal-dead");
       const fold = cell.closest("details");
       const shown = fold?.querySelectorAll(".om-gal-cell:not(.om-gal-dead)").length ?? 0;
-      const badge = fold?.querySelector(".om-fold-count");
-      if (badge) badge.textContent = String(shown);
+      const said = fold?.querySelector(".om-panel-note");
+      if (said) said.textContent = countNote(shown, "image");
     };
     cell.appendChild(img);
     cell.onclick = () => {
@@ -2117,7 +2439,8 @@ function buildGallery(meta, entries) {
       openLightbox(live.map((c) => ({ url: c._url, label: c._label })), Math.max(0, live.indexOf(cell)));
     };
     return cell;
-  }, { listClass: "om-gal", open: panelSetting("openManager.galleryExpanded", false) === true });
+  }, { listClass: "om-gal", note: countNote(entries.length, "image"),
+       open: panelSetting("openManager.galleryExpanded", false) === true });
   box.querySelector(".om-gal").style.setProperty("--om-gal-thumb", `${thumb}px`);
   return box;
 }
@@ -2504,7 +2827,7 @@ function offerImageWorkflows(view) {
 }
 
 // Rewrites a README's relative paths to absolute URLs on the repository.
-function absolutiseLinks(view, repository, branch) {
+function absolutiseLinks(view, repository, branch, doc) {
   const match = /github\.com[:/]+([^/]+)\/([^/#?]+)/i.exec(repository || "");
   if (!match) return;
   const owner = match[1];
@@ -2565,7 +2888,20 @@ function absolutiseLinks(view, repository, branch) {
         target.scrollIntoView({ behavior: "smooth", block: "start" });
       };
     } else {
-      anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${relative(href)}`;
+      const path = doc ? docResolve(doc.base, relative(href)) : relative(href);
+      anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${path}`;
+      // A link to the pack's own markdown is a page of this documentation, not a trip to
+      // GitHub. The href stays, so a middle click still opens it there and a failure here
+      // has somewhere to fall back to.
+      if (doc && /\.(md|markdown)(\?|#|$)/i.test(path)) {
+        anchor.removeAttribute("target");
+        anchor.classList.add("om-doc-link");
+        anchor.onclick = (event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+          event.preventDefault();
+          openPackDoc(view, doc.meta, ref, path.replace(/[?#].*$/, ""));
+        };
+      }
     }
   }
 
@@ -2647,7 +2983,7 @@ function paintLicense(pill, entry) {
   const meaning = LICENCE_MEANING[tier];
   // Without a name the meaning stands alone, rather than repeating "no licence stated".
   if (!meaning) pill.title = `licence: ${tier}`;
-  else pill.title = entry.license ? `${entry.license} — ${meaning}` : meaning;
+  else pill.title = entry.license ? `${entry.license}: ${meaning}` : meaning;
 }
 
 function queueLicense(entry, pill) {
@@ -2798,7 +3134,7 @@ function buildResultRow(entry) {
 // The day part of the registry's ISO timestamp.
 function dayText(stamp) {
   const day = String(stamp || "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "—";
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "-";
 }
 
 // The catalogue entry as a table row. Cells never wrap, for the reason rows and cards do
@@ -2820,7 +3156,7 @@ function buildResultTableRow(entry, index) {
   if (tableLink) title.appendChild(tableLink);
   row.appendChild(title);
 
-  row.appendChild(el("div", "om-tcell om-tcell-ver", entry.advertised || "—"));
+  row.appendChild(el("div", "om-tcell om-tcell-ver", entry.advertised || "-"));
 
   const onDisk = installedPack(entry.id);
   const control = makeInstallControl({
@@ -2844,7 +3180,7 @@ function buildResultTableRow(entry, index) {
   desc.onclick = () => openPack(entry.id);
   row.appendChild(desc);
 
-  row.appendChild(el("div", "om-tcell om-tcell-auth", entry.publisher || "—"));
+  row.appendChild(el("div", "om-tcell om-tcell-auth", entry.publisher || "-"));
 
   const lic = el("div", "om-tcell om-tcell-lic");
   const pill = el("span", "om-lic");
@@ -2855,7 +3191,7 @@ function buildResultTableRow(entry, index) {
   row.appendChild(lic);
 
   row.appendChild(el("div", "om-tcell om-tcell-star",
-    entry.stars ? `★ ${countText(entry.stars)}` : "—"));
+    entry.stars ? `★ ${countText(entry.stars)}` : "-"));
   row.appendChild(el("div", "om-tcell om-tcell-date", dayText(entry.released)));
   return row;
 }
@@ -2941,6 +3277,13 @@ function viewIsCurrent(generation) {
   return generation === viewGeneration;
 }
 
+// Re-render the Installed view where it is the one being looked at.
+function refreshInstalledIfActive() {
+  const active = document.querySelector(".om-nav-btn.active");
+  const content = document.querySelector(".om-content");
+  if (active && content && active.textContent === "Installed") renderInstalled(content);
+}
+
 // Re-render the Missing view if it is the active tab. Called when a workflow loads.
 function refreshMissingIfActive() {
   const active = document.querySelector(".om-nav-btn.active");
@@ -2993,22 +3336,15 @@ function openManagerMenu() {
   const status = el("div", "om-hub-status", "Reading the registry cache...");
   body.appendChild(status);
 
+  // Every destination, from the same table the tab strip reads. The classic interface has no
+  // tab strip and no sidebar, so this menu is the only way in: anything reachable at all has
+  // to be reachable here.
   const grid = el("div", "om-hub-grid");
-  const go = (label, view, hint) => {
-    const button = el("button", "om-hub-btn", label);
-    if (hint) button.title = hint;
-    button.onclick = () => { backdrop.remove(); openPanelWindow(view); };
+  for (const one of managerDestinations()) {
+    const button = el("button", "om-hub-btn", one.label);
+    if (one.hint) button.title = one.hint;
+    button.onclick = () => { backdrop.remove(); one.open(); };
     grid.appendChild(button);
-    return button;
-  };
-  go("Custom Nodes Manager", "registry", "Browse and install from the Comfy Registry");
-  go("Install Missing Custom Nodes", "missing",
-     "The packs supplying the node types this workflow is missing");
-  go("Install via Git URL", "github", "Repositories you add by URL, kept across uninstalls");
-  go("Check for Updates", "installed", "What is installed, and what has a newer version");
-  if (vtReady()) {
-    go("Scan an Install", "installed",
-       "Each installed pack's menu offers a VirusTotal scan of the files it ships");
   }
   body.appendChild(grid);
 
@@ -3305,7 +3641,9 @@ function updateInstalled(pack, row, control) {
 async function renderInstalled(container) {
   const generation = viewGeneration;
   container.replaceChildren();
-  const status = el("div", "om-side-status", "Reading installed packs...");
+  // Left empty and given the indicator; whatever sets a count later replaces it.
+  const status = el("div", "om-side-status");
+  status.appendChild(loadingBlock("Reading installed packs"));
   const list = el("div", "om-side-list");
   container.appendChild(status);
   container.appendChild(list);
@@ -3322,11 +3660,36 @@ async function renderInstalled(container) {
   const packs = data.packs;
   indexInstalled(packs);
 
+  const [timings] = await Promise.all([loadStartupTimes(), loadHolds()]);
+  if (!viewIsCurrent(generation)) return;
+  if (timings?.ok && timings.packs?.length) {
+    const worst = timings.packs[0];
+    const line = el("div", "om-side-status om-cost-line");
+    line.textContent = (timings.stale ? "Last run: " : "")
+      + `${timings.total.toFixed(1)}s importing ${timings.packs.length} packs`
+      + (worst ? ` · slowest ${worst.name} at ${worst.seconds.toFixed(2)}s` : "");
+    // Presented as this run's figures only when they are this run's.
+    line.classList.toggle("om-cost-stale", !!timings.stale);
+    line.title = timings.stale
+      ? timings.reason
+      : "Read from ComfyUI's own log, for the run that is loaded now.";
+    container.insertBefore(line, list);
+  }
+
   const controls = el("div", "om-side-controls");
+  // The same search the registry has. With dozens of packs installed, a list with no way to
+  // find one in it is a list you scroll.
+  const search = el("input", "om-search");
+  search.type = "search";
+  search.placeholder = "Search installed packs";
+  search.spellcheck = false;
   const sortSel = dropdown("om-installed-sort", "name", [
-    ["name", "Name A–Z"],
+    ["name", "Name A-Z"],
     ["status", "Status first"],
     ["updatable", "Updatable first"],
+    ["stars", "Most stars"],
+    ["slowest", "Slowest to load"],
+    ["trusted", "Trusted authors first"],
   ]);
   const filterSel = dropdown("om-installed-filter", "all", [
     ["all", "All installed"],
@@ -3339,19 +3702,43 @@ async function renderInstalled(container) {
   ]);
   controls.appendChild(sortSel);
   controls.appendChild(filterSel);
+  const trustedOnly = el("label", "om-side-filter");
+  const trustedBox = el("input");
+  trustedBox.type = "checkbox";
+  trustedOnly.appendChild(trustedBox);
+  trustedOnly.appendChild(document.createTextNode("Trusted authors"));
+  trustedOnly.title = "Only packs whose author you have trusted.";
+  controls.appendChild(trustedOnly);
+  container.insertBefore(search, list);
   container.insertBefore(controls, list);
   const count = el("div", "om-side-status", "");
   container.insertBefore(count, list);
 
   const updatableCount = packs.filter(isInstalledUpdatable).length;
+  if (updatableCount) {
+    const all = el("button", "om-btn om-go om-side-updateall",
+                   `Update all (${updatableCount})`);
+    all.title = "Updates every pack the registry advertises a newer version of, one after "
+      + "another. Packs you are holding are left alone.";
+    all.onclick = () => updateEveryPack(packs.filter(isInstalledUpdatable));
+    controls.appendChild(all);
+  }
+
+  const cost = (pack) =>
+    (pack.disabled ? null : startupCost.get(foldId(pack.dir)))?.seconds ?? -1;
 
   const apply = () => {
     const mode = filterSel.value;
+    const wanted = search.value.trim().toLowerCase();
     const rows = packs.filter((pack) => {
-      if (mode === "updates") return isInstalledUpdatable(pack);
-      if (mode === "flagged") return ["flagged", "banned"].includes((pack.status || "").toLowerCase());
-      if (mode === "off-registry") return !pack.registry_id;
-      if (mode === "registry" || mode === "github" || mode === "disk") return pack.source === mode;
+      if (mode === "updates" && !isInstalledUpdatable(pack)) return false;
+      if (mode === "flagged" && !["flagged", "banned"].includes((pack.status || "").toLowerCase())) return false;
+      if (mode === "off-registry" && pack.registry_id) return false;
+      if (["registry", "github", "disk"].includes(mode) && pack.source !== mode) return false;
+      if (trustedBox.checked && !byTrustedAuthor(pack)) return false;
+      if (wanted && !`${pack.id} ${pack.dir} ${pack.repository || ""}`.toLowerCase().includes(wanted)) {
+        return false;
+      }
       return true;
     });
     const rank = (pack) => (pack.status === "banned" ? 0 : pack.status === "flagged" ? 1 : 2);
@@ -3359,14 +3746,25 @@ async function renderInstalled(container) {
       name: (a, b) => a.id.localeCompare(b.id),
       status: (a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id),
       updatable: (a, b) => (isInstalledUpdatable(b) - isInstalledUpdatable(a)) || a.id.localeCompare(b.id),
+      stars: (a, b) => (b.stars || 0) - (a.stars || 0) || a.id.localeCompare(b.id),
+      slowest: (a, b) => cost(b) - cost(a) || a.id.localeCompare(b.id),
+      trusted: (a, b) => (byTrustedAuthor(b) - byTrustedAuthor(a)) || a.id.localeCompare(b.id),
     };
     rows.sort(sorters[sortSel.value] || sorters.name);
     list.replaceChildren();
     for (const pack of rows) list.appendChild(buildInstalledRow(pack));
-    count.textContent = `${rows.length} shown`;
+    count.textContent = rows.length === packs.length
+      ? `${rows.length} shown`
+      : `${rows.length} of ${packs.length} shown`;
   };
   sortSel.addEventListener("change", () => { localStorage.setItem("om-installed-sort", sortSel.value); apply(); });
   filterSel.addEventListener("change", () => { localStorage.setItem("om-installed-filter", filterSel.value); apply(); });
+  trustedBox.addEventListener("change", apply);
+  const slowest = [...sortSel.options].find((one) => one.value === "slowest");
+  if (slowest) slowest.disabled = !startupCost.size;
+  if (slowest?.disabled && sortSel.value === "slowest") sortSel.value = "name";
+  let searchTimer = 0;
+  search.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(apply, 150); });
   apply();
 
   // A dismissible alert where an installed version is flagged or banned. Dismissal is
@@ -3388,16 +3786,106 @@ async function renderInstalled(container) {
   status.textContent = updatableCount
     ? `${packs.length} installed · ${updatableCount} update(s) available`
     : `${packs.length} installed`;
+
+  // Fetched rather than waited for: a collision is worth knowing but not worth holding the
+  // list for. It goes in above the list when the answer arrives, and only if this view is
+  // still the one on screen.
+  renderCollisions(container, generation).catch(() => {});
 }
 
-// Whether the registry advertises a newer version than the one installed.
+//: Packs the reader has asked to leave alone, keyed by directory name. Filled when the
+//: installed view is drawn. A hold changes nothing on disk; it decides what is offered.
+const heldVersions = new Map();
+
+async function loadHolds() {
+  heldVersions.clear();
+  try {
+    const found = await (await api.fetchApi(`${API}/holds`)).json();
+    for (const [name, held] of Object.entries(found.holds || {})) {
+      heldVersions.set(foldId(name), held);
+    }
+  } catch {
+    // Nothing held is the safe reading: an update is offered that need not have been, which
+    // the reader can decline, rather than one being hidden without their knowing.
+  }
+}
+
+// Switching a pack off renames its directory, so a hold keyed on the name as it stands
+// would stop applying the moment it was disabled and silently not come back. The name
+// without the suffix is the one that survives both states.
+function holdKey(pack) {
+  return String(pack.dir || pack.id || "").replace(/\.disabled$/, "");
+}
+
+function isHeld(pack) {
+  return heldVersions.has(foldId(holdKey(pack))) || heldVersions.has(foldId(pack.id));
+}
+
+// Hold a pack where it is, or let it move again. Takes effect in the list at once.
+async function toggleHold(pack, refresh) {
+  const off = isHeld(pack);
+  const answer = await dlPost("/hold", {
+    name: holdKey(pack), version: pack.version, off,
+  });
+  if (!answer.ok) {
+    notify("Not changed", answer.reason || "The list of held packs could not be written.");
+    return;
+  }
+  toast(off ? `${pack.id} will be offered updates again.`
+            : `${pack.id} held at ${pack.version}.`, { kind: "ok" });
+  refresh?.();
+}
+
+// Whether the registry advertises a newer version than the one installed. A pack being held
+// is not updatable in any sense the rest of the view cares about: it is left out of the
+// count, the filter, the sort and a batch update alike, which is the whole point of a hold.
 function isInstalledUpdatable(pack) {
   return !!pack.registry_id && isRelease(pack.version) && isRelease(pack.latest)
-    && compareVersions(pack.latest, pack.version) > 0;
+    && compareVersions(pack.latest, pack.version) > 0 && !isHeld(pack);
 }
 
 // One installed-pack row: version, an update badge, a status-coloured management control, and
 // a menu of Update, Reinstall and Uninstall scoped to what the pack is.
+//: Directory name -> seconds it took to import, from ComfyUI's own log. Filled when the
+//: installed view is drawn and left empty where the setting is off or the log says nothing.
+const startupCost = new Map();
+let startupTotal = 0;
+
+async function loadStartupTimes() {
+  startupCost.clear();
+  startupTotal = 0;
+  if (panelSetting("openManager.startupTimes", false) === false) return null;
+  try {
+    const found = await (await api.fetchApi(`${API}/startup`)).json();
+    if (!found.ok) return found;
+    for (const row of found.packs || []) startupCost.set(foldId(row.name), row);
+    startupTotal = found.total || 0;
+    return found;
+  } catch {
+    return null;
+  }
+}
+
+// Switch a pack off, or back on, by renaming its directory the way ComfyUI reads it.
+async function togglePack(pack, refresh) {
+  const off = !pack.disabled;
+  const shown = pack.dir.replace(/\.disabled$/, "");
+  const go = await chooseAction(off ? `Switch off ${shown}?` : `Switch on ${shown}?`, "",
+    [{ key: "go", label: off ? "Switch off" : "Switch on", primary: true }],
+    { wide: true, facts: [
+      ["Pack", shown],
+      ["Directory", off ? `${pack.dir} → ${pack.dir}.disabled` : `${pack.dir} → ${shown}`],
+      ["Files", "Kept. Nothing is deleted."],
+      ["Takes effect", "After ComfyUI restarts"],
+    ] });
+  if (!go) return;
+  const answer = await dlPost("/pack/toggle", { name: pack.dir, off });
+  if (!answer.ok) { notify("Not changed", answer.reason || "The directory could not be renamed."); return; }
+  toast(`${shown} switched ${off ? "off" : "on"}.`, { kind: "ok" });
+  if (answer.restart) remindRestart();
+  refresh?.();
+}
+
 function buildInstalledRow(pack) {
   const updatable = isInstalledUpdatable(pack);
   const row = el("div", "om-side-row");
@@ -3412,6 +3900,22 @@ function buildInstalledRow(pack) {
   const istars = starCount(pack.stars);
   if (istars) meta.appendChild(istars);
   if (pack.disabled) meta.appendChild(el("span", "om-disabled", "disabled"));
+  if (isHeld(pack)) {
+    const badge = el("span", "om-held", `held at ${pack.version}`);
+    badge.title = "No update is offered for this pack until the hold is lifted. Nothing on "
+      + "disk has been changed.";
+    meta.appendChild(badge);
+  }
+  const cost = pack.disabled ? null : startupCost.get(foldId(pack.dir));
+  if (cost) {
+    const badge = el("span", "om-cost", `${cost.seconds.toFixed(2)}s`);
+    badge.title = startupTotal
+      ? `Took ${cost.seconds.toFixed(2)}s of the ${startupTotal.toFixed(1)}s ComfyUI spent importing packs`
+      : `Took ${cost.seconds.toFixed(2)}s to import`;
+    if (startupTotal && cost.seconds >= startupTotal * 0.2) badge.classList.add("om-cost-high");
+    meta.appendChild(badge);
+  }
+  if (cost?.failed) meta.appendChild(el("span", "om-upd om-cost-failed", "import failed"));
   if (updatable) meta.appendChild(el("span", "om-upd", `update → ${pack.latest}`));
   text.appendChild(meta);
   if (pack.registry_id) text.onclick = () => openPack(pack.registry_id);
@@ -3425,6 +3929,13 @@ function buildInstalledRow(pack) {
     items.push({ label: "Reinstall", fn: () => install({ packId: pack.registry_id, entry: current, control, rowsRoot: row, overwrite: true }) });
   }
   if (vtReady()) items.push({ label: "Scan install", fn: () => openScanDialog(pack.id) });
+  if (pack.registry_id) {
+    items.push({ label: isHeld(pack) ? "Stop holding this version"
+                                     : `Hold at ${pack.version}`,
+                 fn: () => toggleHold(pack, () => refreshInstalledIfActive()) });
+  }
+  items.push({ label: pack.disabled ? "Switch on" : "Switch off",
+               fn: () => togglePack(pack, () => refreshInstalledIfActive()) });
   items.push({ label: "Uninstall", danger: true, fn: () => uninstall({
     packId: pack.id, registryId: pack.registry_id, entry: { name: pack.id }, control, rowsRoot: row }) });
 
@@ -3444,7 +3955,100 @@ function buildInstalledRow(pack) {
   return row;
 }
 
+// Update every pack that has one. The queue that already runs installs one after another
+// does the work, so a batch behaves exactly like a row asked twelve times: one progress
+// toast, one list of issues at the end, and each pack's own requirements installed as its
+// own step. What is confirmed here is the set, once, instead of a dialog per pack.
+async function updateEveryPack(packs) {
+  if (!packs.length) return;
+  const facts = packs.slice(0, 24).map((pack) => [pack.id, `${pack.version} -> ${pack.latest}`]);
+  if (packs.length > facts.length) {
+    facts.push(["And more", `${packs.length - facts.length} others`]);
+  }
+  facts.push(["One at a time", "Each finishes before the next starts."]);
+  facts.push(["Dependencies", "Each pack installs its own requirements, as it would on its "
+                              + "own. Anything that did not install cleanly is named at the end."]);
+  facts.push(["Held packs", "Left alone. Holding a pack is what keeps it out of this."]);
+  facts.push(["Takes effect", "After ComfyUI restarts"]);
+  const go = await chooseAction(`Update ${packs.length} pack${packs.length === 1 ? "" : "s"}?`,
+    "", [{ key: "go", label: "Update them", primary: true }], { wide: true, facts });
+  if (!go) return;
+
+  // The same setting the single-pack path reads. A batch does not get to skip the scan
+  // someone asked for, and it does not get to impose one either.
+  const scanFirst = vtReady() && panelSetting("openManager.scanOnInstall", false) === true
+                    && (await vtRemaining()) > 0;
+  for (const pack of packs) {
+    enqueueInstall({
+      packId: pack.registry_id,
+      entry: { version: pack.latest, status: "active", name: pack.registry_id || pack.id },
+      overwrite: true,
+      name: pack.id,
+      scanFirst,
+    });
+  }
+}
+
 const ALERTS_KEY = "openManager.installedAlertsDismissed";
+const COLLIDE_KEY = "openManager.collisionsDismissed";
+
+// Node names claimed by more than one installed pack. ComfyUI keeps one mapping for the whole
+// install, so the last pack to register a name takes it and nothing is said; a graph then
+// loads a node that is not the one it was saved with. Shown only when there is something to
+// report, and dismissed until that set changes.
+async function renderCollisions(container, generation) {
+  let found;
+  try {
+    found = await (await api.fetchApi(`${API}/collisions`)).json();
+  } catch {
+    return;
+  }
+  if (!viewIsCurrent(generation)) return;
+  const groups = found?.ok ? (found.groups || []) : [];
+  if (!groups.length) return;
+  const signature = groups.map((one) => `${one.node}:${one.packs.join(",")}`).sort().join("|");
+  let dismissed = "";
+  try { dismissed = localStorage.getItem(COLLIDE_KEY) || ""; } catch {}
+  if (dismissed === signature) return;
+
+  const banner = el("div", "om-alert");
+  const body = el("div", "om-alert-body");
+  body.appendChild(el("b", null,
+    `${groups.length} node name${groups.length === 1 ? " is" : "s are"} claimed by more than `
+    + "one pack"));
+  const names = [...new Set(groups.flatMap((one) => one.packs))];
+  body.appendChild(el("div", "om-alert-names", names.join(", ")));
+  const more = el("button", "om-btn om-dl-btn om-alert-more", "What collides");
+  more.onclick = () => showCollisions(groups);
+  body.appendChild(more);
+  banner.appendChild(body);
+  const dismiss = el("button", "om-alert-x", "×");
+  dismiss.title = "Dismiss until this changes";
+  dismiss.onclick = () => {
+    try { localStorage.setItem(COLLIDE_KEY, signature); } catch {}
+    banner.remove();
+  };
+  banner.appendChild(dismiss);
+  container.insertBefore(banner, container.firstChild);
+}
+
+// Each contested name, who claims it, and whose class is actually in use.
+function showCollisions(groups) {
+  const facts = groups.slice(0, 40).map((one) => [
+    one.node,
+    one.loaded
+      ? `${one.packs.join(", ")} - ${one.loaded} is the one in use`
+      : one.packs.join(", "),
+  ]);
+  if (groups.length > facts.length) {
+    facts.push(["And more", `${groups.length - facts.length} others`]);
+  }
+  facts.push(["Why it matters", "Only one class can hold a name. A graph saved against the "
+                                + "other one loads this one instead."]);
+  facts.push(["What to do", "Switch one of the packs off from its row here, or keep only the "
+                            + "one you use. Nothing is changed for you."]);
+  chooseAction("Node names claimed twice", "", [], { wide: true, facts });
+}
 
 // A banner naming the installed packs whose version the registry flagged or banned, with a
 // dismiss control.
@@ -3473,7 +4077,8 @@ function buildInstalledAlert(list, onDismiss) {
 // Packs that provide the node types missing from the open graph, each installable in place.
 async function renderMissing(container) {
   container.replaceChildren();
-  const status = el("div", "om-side-status", "Scanning the current graph...");
+  const status = el("div", "om-side-status");
+  status.appendChild(loadingBlock("Scanning the current graph"));
   const list = el("div", "om-side-list");
   container.appendChild(status);
   container.appendChild(list);
@@ -3573,7 +4178,7 @@ function licenseOptions() {
     race: get("openManager.licenseRace", false) === true,
     use_api: get("openManager.licenseUseApi", false) === true,
     // Reuses the token already configured for starring; it only raises the API's rate limit.
-    token: githubToken(),
+
   };
 }
 
@@ -3594,7 +4199,8 @@ function syncOptions() {
 function renderRegistry(container) {
   const generation = viewGeneration;
   container.replaceChildren();
-  const status = el("div", "om-side-status", "Loading catalogue...");
+  const status = el("div", "om-side-status");
+  status.appendChild(loadingBlock("Loading the catalogue"));
   container.appendChild(status);
 
   const showSyncPrompt = () => {
@@ -3684,7 +4290,7 @@ function renderRegistry(container) {
       ["downloads", "Most downloads"],
       ["released", "Recently released"],
       ["stars", "Most stars"],
-      ["name", "Name A–Z"],
+      ["name", "Name A-Z"],
       ["license", "Licence: permissive first"],
       ["trusted", "Trusted authors first"],
     ]);
@@ -4170,18 +4776,18 @@ sidebarStyle.textContent = `
 .om-alert-x { background: none; border: none; color: var(--om-muted); font-size: 18px; line-height: 1;
   cursor: pointer; padding: 0 2px; flex: none; }
 .om-alert-x:hover { color: var(--om-text); }
+.om-alert-more { align-self: flex-start; margin-top: 4px; }
+.om-held { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 7px;
+  color: var(--om-muted); font-size: 11px; }
+.om-side-updateall { flex: none; }
 .om-dev { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-.om-dev-head { font-size: 12px; font-weight: 600; color: var(--om-muted); text-transform: uppercase;
-  letter-spacing: .04em; }
+/* The column already spaces its children, so a panel inside it drops its own margin rather
+   than adding a second gap to the first. */
+.om-dev > .om-panel { margin: 0; }
 .om-wf-list { display: flex; flex-direction: column; gap: 6px;
   max-height: 40vh; overflow-y: auto; padding: 2px 2px 2px 0; }
-.om-fold > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
-.om-fold > summary::-webkit-details-marker { display: none; }
-.om-fold > summary::before { content: "▸"; font-size: 10px; color: var(--om-muted); }
-.om-fold[open] > summary::before { content: "▾"; }
-.om-fold > summary + .om-wf-list { margin-top: 8px; }
-.om-fold-count { font-weight: 600; color: var(--om-text-2); border: 1px solid var(--om-border);
-  border-radius: 999px; padding: 0 6px; line-height: 15px; font-size: 10px; }
+/* Inside a panel the border is drawn for it, so the list sits in from that edge. */
+.om-panel-body > .om-wf-list, .om-panel-body > .om-gal { padding: 10px 12px; }
 .om-wf-item { display: flex; align-items: baseline; gap: 10px; text-align: left;
   background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px; padding: 8px 12px;
   color: var(--om-text); cursor: pointer; font: inherit; }
@@ -4233,8 +4839,3862 @@ sidebarStyle.textContent = `
 .om-side-select { flex: 1 1 130px; min-width: 120px; padding: 5px 8px; border-radius: 6px;
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); font-size: 12px; }
 .om-side-filter { display: flex; gap: 5px; align-items: center; color: var(--om-muted); font-size: 12px; }
+
+/* Download manager. Sized to its content rather than the panel's full height, so a short
+   list is a short window. */
+.om-dl-pick { width: min(90vw, 820px); height: auto; max-height: 80vh; }
+.om-dl-pick .om-head { padding-right: 44px; }
+/* The summary gives way to the controls beside it rather than being cut mid-word: a count
+   that ends in "14 unreachab" reads as a rendering fault rather than as a shortened line. */
+.om-dl-summary { color: var(--om-muted); font-size: 13px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-dl-tools { display: flex; gap: 8px; flex: none; }
+.om-dl-body { overflow-y: auto; padding: 14px 20px; flex: 1; min-height: 0; }
+.om-dl-list, .om-dl-models { display: flex; flex-direction: column; gap: 10px; }
+.om-dl-row { border: 1px solid var(--om-border); border-radius: 8px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 6px; background: var(--om-surface); }
+.om-dl-top { display: flex; gap: 10px; align-items: baseline; }
+.om-dl-name { font-weight: 600; flex: 1; word-break: break-all; }
+.om-dl-state { text-transform: uppercase; font-size: 11px; letter-spacing: .04em;
+  color: var(--om-muted); flex: none; }
+.om-dl-downloading .om-dl-state { color: #58a6ff; }
+.om-dl-done .om-dl-state { color: #3fb950; }
+.om-dl-failed .om-dl-state { color: #f85149; }
+.om-dl-paused .om-dl-state, .om-dl-cancelled .om-dl-state { color: #d29922; }
+.om-dl-where { display: flex; gap: 8px; flex-wrap: wrap; color: var(--om-muted); font-size: 12px; }
+/* A path can be longer than the panel is wide, and a pill that cannot shrink drags the whole
+   row past the edge. The full path is on the title, so shortening the chip loses nothing. */
+.om-dl-owner, .om-dl-src { border: 1px solid var(--om-border); border-radius: 999px;
+  padding: 0 7px; max-width: 100%; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-dl-bar { height: 4px; border-radius: 2px; background: var(--om-input); overflow: hidden; }
+.om-dl-fill { height: 100%; background: #58a6ff; transition: width .3s linear; }
+.om-dl-done .om-dl-fill { background: #3fb950; }
+.om-dl-failed .om-dl-fill { background: #f85149; }
+.om-dl-foot { display: flex; gap: 10px; align-items: center; }
+.om-dl-size { color: var(--om-muted); font-size: 12px; flex: 1; }
+.om-dl-acts { display: flex; gap: 6px; flex: none; }
+.om-dl-btn { padding: 4px 10px; font-size: 12px; }
+/* Add by URL: a stacked form rather than a row, so a long URL is readable as it is pasted. */
+.om-dl-add { width: min(92vw, 560px); }
+.om-dl-field { display: flex; flex-direction: column; gap: 4px; }
+.om-dl-field > span { color: var(--om-muted); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; }
+.om-dl-note { color: var(--om-muted); font-size: 13px; }
+.om-dl-ok { color: #3fb950; }
+.om-dl-bad { color: #f85149; }
+/* A model already on disk is dimmed but still selectable, because a file that is there can
+   still be the wrong one. Refused ones cannot be picked at all. */
+.om-dl-model { display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--om-border); border-radius: 8px; padding: 10px 12px;
+  background: var(--om-surface); }
+.om-dl-model:hover { border-color: var(--om-muted); }
+/* The toolbar over a selectable list: what is selected on the left, what to do on the right. */
+.om-lib-actions { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
+.om-dl-have { opacity: .55; }
+.om-dl-have:hover { opacity: .85; }
+.om-dl-refused { opacity: .5; cursor: not-allowed; }
+.om-dl-check { margin-top: 3px; flex: none; }
+.om-dl-modeltext { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.om-dl-pickfoot { display: flex; gap: 12px; align-items: center; padding: 12px 20px;
+  border-top: 1px solid var(--om-border); }
+.om-dl-wf { flex: none; max-width: 320px; }
+/* The way in, at the right-hand end of the workflow tab strip. Sized to sit in that row
+   rather than to stand out from it. */
+.om-dl-open { display: inline-flex; align-items: center; gap: 5px; margin: 0 6px;
+  padding: 3px 9px; border-radius: 6px; border: 1px solid var(--om-border);
+  background: transparent; color: var(--om-text-2); cursor: pointer; white-space: nowrap;
+  font: 12px/1.4 system-ui, sans-serif; }
+.om-dl-open:hover { background: var(--om-hover); color: var(--om-text); }
+.om-dl-open-icon { font-size: 13px; line-height: 1; }
+/* The label goes before the button does, so a crowded tab strip keeps the icon. */
+@media (max-width: 1100px) { .om-dl-open-text { display: none; } }
+/* In the control bar there is no room for words, so the icon carries it and the name is on
+   the hover. Square rather than oblong, so the three read as a set of controls. */
+.om-dl-open-icons { margin: 0 2px; padding: 3px; width: 26px; height: 24px;
+  justify-content: center; }
+.om-dl-open-icons .om-dl-open-text { display: none; }
+.om-dl-open-icons .om-dl-open-icon { font-size: 14px; }
+/* .om-side-select carries flex:1 for the sidebar's rows; in a stacked field that
+   would stretch it down the column instead of across. */
+.om-dl-field > select, .om-dl-field > input { flex: none; }
+.om-dl-place { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.om-dl-place > span { color: var(--om-muted); font-size: 11px; flex: none; }
+.om-dl-root { font-size: 11px; padding: 3px 6px; max-width: 340px; }
+.om-dl-root option:disabled { color: var(--om-muted); }
+/* A button label that carries an account name is never broken across lines; where they do
+   not fit side by side the row wraps and each button stays whole. */
+.om-note-wide { width: min(94vw, 640px); }
+.om-note-foot { flex-wrap: wrap; }
+.om-note-foot .om-btn { white-space: nowrap; }
+/* Labelled values, label column sized to its longest label. */
+.om-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 16px; margin: 0; font-size: 12px; }
+.om-facts dt { color: var(--om-muted); }
+.om-facts dd { margin: 0; color: var(--om-text); overflow-wrap: anywhere; }
+/* Two bars: what is being asked of the downloads, then which answer is showing. */
+.om-dl-views { display: flex; gap: 4px; padding: 10px 20px 0; }
+.om-dl-view { background: none; border: none; cursor: pointer; padding: 6px 12px;
+  border-radius: 6px 6px 0 0; color: var(--om-muted); font: 600 13px/1.4 system-ui, sans-serif; }
+.om-dl-view:hover { color: var(--om-text); background: var(--om-hover); }
+.om-dl-view.om-dl-on { color: var(--om-text); background: var(--om-surface); }
+/* Six tabs do not fit a narrow panel, and a tab cannot be shortened without losing what it
+   says. So the strip scrolls on its own rather than widening the panel's contents and
+   putting a horizontal scrollbar under everything else. */
+.om-dl-tabs { display: flex; gap: 4px; padding: 0 20px; background: var(--om-surface);
+  border-bottom: 1px solid var(--om-border);
+  overflow-x: auto; scrollbar-width: thin; flex: none; }
+.om-dl-tab { display: inline-flex; gap: 7px; align-items: center; background: none;
+  border: none; border-bottom: 2px solid transparent; cursor: pointer; padding: 8px 10px;
+  color: var(--om-muted); font: 13px/1.4 system-ui, sans-serif;
+  flex: none; white-space: nowrap; }
+.om-dl-tab:hover { color: var(--om-text); }
+.om-dl-tab.om-dl-on { color: var(--om-text); border-bottom-color: #58a6ff; }
+.om-dl-tab-count { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 7px;
+  font-size: 12px; }
+/* An archived entry is a record rather than a file, so it reads quieter than a present one. */
+.om-dl-row.om-dl-gone { opacity: .62; }
+.om-dl-row.om-dl-gone:hover { opacity: 1; }
+.om-dl-hash { display: flex; gap: 8px; align-items: baseline; }
+.om-dl-hash-label { color: var(--om-muted); font-size: 11px; letter-spacing: .04em; flex: none; }
+.om-dl-hash-value { color: var(--om-muted); font: 12px/1.4 ui-monospace, monospace;
+  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-dl-hash-value:hover { color: var(--om-text); }
+/* A window rather than a dialog: it does not cover the canvas and does not take the pointer
+   away from it. Sized by the caller, moved and folded by the reader. */
+/* A remembered size belongs to the window it was chosen in. Opened on a narrower screen --
+   a laptop after a desktop, a tablet, a browser window dragged small -- it is capped to what
+   is actually there, so the right-hand controls never sit off the edge. */
+.om-float { position: fixed; display: flex; flex-direction: column;
+  max-width: calc(100vw - 16px);
+  background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border);
+  border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); overflow: hidden;
+  font: 14px/1.5 system-ui, sans-serif; }
+.om-float-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  min-height: var(--om-hdr, 44px);
+  border-bottom: 1px solid var(--om-border); background: var(--om-surface);
+  cursor: move; user-select: none; flex: none;
+  /* Pointer events only reach a drag on touch if the browser is told not to treat the
+     gesture as a scroll first. Without this a panel cannot be moved on a tablet. */
+  touch-action: none; }
+.om-float-folded .om-float-bar { border-bottom: none; }
+/* Folded to its bar, a panel is a label rather than a control. Its own tools go: Rescan,
+   Verify fully and the filter act on a list nobody can see, and a button that acts on
+   something out of sight is a button pressed by accident. What stays is what can be read at
+   a glance -- the title, the summary, the activity light -- and the two controls that act on
+   the window itself rather than on its contents. */
+.om-float-folded .om-float-tools { display: none; }
+/* Still shortens before the close button does, because a summary can be long. */
+.om-float-title { font-size: calc(var(--om-hdr, 44px) * 0.36); font-weight: 600;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-float-badge { color: var(--om-muted); font-size: 13px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On a narrow window the tools are the one part that cannot shrink -- a button is as wide
+   as its word. So the strip scrolls rather than shouldering the close button off the end,
+   and every control stays reachable at any width. */
+/* A row of its own under the title. Fixed height whatever the header is set to, because a
+   button does not get easier to press by being taller, and scrolls sideways on a narrow
+   panel rather than pushing anything off the end. */
+.om-float-tools { display: flex; align-items: center; gap: 8px; flex: none;
+  min-height: 38px; height: 38px; padding: 0 10px;
+  border-bottom: 1px solid var(--om-border); background: var(--om-surface);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.om-float-tools:empty { display: none; }
+.om-float-tools > * { flex: none; }
+/* Both controls get the same hit area, so the fold is as easy to land on as the close. */
+.om-float-fold, .om-float-close { background: none; border: none; color: var(--om-muted);
+  cursor: pointer; line-height: 1; flex: none; display: inline-flex;
+  align-items: center; justify-content: center; width: 24px; height: 24px;
+  border-radius: 5px; padding: 0; }
+.om-float-fold { font-size: 16px; }
+.om-float-close { font-size: 20px; }
+.om-float-fold:hover, .om-float-close:hover { background: var(--om-hover); }
+.om-float-fold:hover, .om-float-close:hover { color: var(--om-text); }
+/* The height set here is the height that renders. Growing this instead would zero its
+   flex-basis, throwing that height away and sizing the window to whatever it happens to hold. */
+.om-float-body { display: flex; flex-direction: column; overflow: hidden;
+  flex: 0 0 auto; min-height: 0;
+  max-height: calc(100vh - var(--om-hdr, 44px) - 24px); }
+.om-float-folded .om-float-body { display: none; }
+/* A panel that does not float: the bar is a title rather than a handle. */
+.om-float-fixed .om-float-bar { cursor: default; }
+.om-float-grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+  cursor: nwse-resize; touch-action: none; }
+.om-float-grip::after { content: ""; position: absolute; right: 3px; bottom: 3px;
+  width: 7px; height: 7px; border-right: 2px solid var(--om-muted);
+  border-bottom: 2px solid var(--om-muted); opacity: .6; }
+.om-float-folded .om-float-grip { display: none; }
+.om-lib-row { border: 1px solid var(--om-border); border-radius: 8px; padding: 9px 12px;
+  display: flex; flex-direction: column; gap: 5px; background: var(--om-surface); }
+.om-lib-size { color: var(--om-muted); font-size: 12px; flex: none; }
+.om-lib-lead { color: var(--om-muted); font-size: 13px; padding: 2px 2px 8px; }
+.om-lib-group { border: 1px solid var(--om-border); border-radius: 8px; padding: 10px;
+  display: flex; flex-direction: column; gap: 8px; background: var(--om-input); }
+.om-lib-group-head { display: flex; gap: 10px; align-items: baseline; }
+.om-lib-group-head .om-dl-name { flex: 1; }
+.om-lib-group .om-lib-row { background: var(--om-surface); }
+.om-lib-filter { flex: none; width: 200px; padding: 4px 8px; font-size: 12px; }
+.om-cost { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 6px;
+  color: var(--om-muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
+/* A pack taking a fifth of the whole start-up is worth noticing without reading the numbers. */
+.om-cost-high { color: #d29922; border-color: #d29922; }
+.om-cost-failed { background: #a5261d; }
+.om-cost-line { color: var(--om-muted); }
+/* Figures from a run that is not this one are marked rather than quietly presented. */
+.om-cost-stale { color: #d29922; }
+/* Sized to sit in the tab strip beside the buttons, not to draw the eye away from the canvas. */
+.om-mon { display: inline-flex; align-items: center; gap: 10px; margin: 0 8px;
+  font: 10px/1.2 system-ui, sans-serif; color: var(--om-muted); white-space: nowrap; }
+.om-mon-cell { display: inline-flex; align-items: center; gap: 4px; }
+.om-mon-label { letter-spacing: .04em; }
+/* The track a figure fills, one shape per axis. */
+.om-mon-bar { display: inline-block; width: 34px; height: 4px; border-radius: 2px;
+  background: var(--om-input); overflow: hidden; position: relative; }
+.om-mon-tube { display: inline-block; width: 5px; height: 14px; border-radius: 2px;
+  background: var(--om-input); overflow: hidden; position: relative; }
+/* What fills it. The colour says what is being measured -- blue for a share of a total, and
+   a temperature paints its own from the scale -- while the axis says which way it grows. So
+   a meter drawn as a column is still blue, rather than inheriting a thermometer's green. */
+.om-mon-fill { display: block; background: #58a6ff;
+  transition: width .4s linear, height .4s linear, background .4s linear; }
+.om-mon-h .om-mon-fill { height: 100%; width: 0; }
+.om-mon-v .om-mon-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; }
+.om-mon-hot { background: #f85149; }
+.om-mon-value { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.om-mon-dynamic { display: inline-flex; align-items: center; gap: 10px; }
+.om-mon-degrees { min-width: 24px; }
+/* The run bar. Where rgthree and Crystools put theirs, so it is a replacement rather than a
+   second one, and hidden entirely when nothing is running. */
+.om-prog { height: 14px; display: none; pointer-events: none; overflow: hidden;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.06); }
+/* In the layout, above the header, sharing the strip the other packs use. */
+.om-prog-flow { position: relative; width: 100%; }
+/* Pinned, for a layout with no such strip to join. */
+.om-prog-pinned { position: fixed; top: 0; left: 0; right: 0; z-index: 10001; }
+.om-prog-on { display: block; }
+.om-prog-track { position: absolute; inset: 0; background: #16161d; overflow: hidden; }
+/* Every colour here comes from the palette in use, set on the element as it paints. The
+   fallbacks are the pack's own, for a palette that has only grey to offer. */
+.om-prog { --om-prog-from: #4f688a; --om-prog-to: #84bbe7; --om-prog-cap: #d7ecff;
+  --om-prog-glow: rgba(132,187,231,.85); --om-prog-halo: rgba(132,187,231,.45);
+  --om-prog-sub: #6b5312; }
+/* The node's own progress, in the node's own colour: a quieter fill in the space that node
+   will occupy. No glow, so it never competes with the graph's progress for attention. */
+.om-prog-sub { position: absolute; top: 0; bottom: 0; width: 0;
+  background: var(--om-prog-sub);
+  transition: width .15s linear, left .3s ease, background .3s ease; }
+/* The graph's progress. Painted after the node's, so a finished node's block is taken over
+   rather than left beside it. */
+.om-prog-main { position: absolute; top: 0; bottom: 0; left: 0; width: 0;
+  background: linear-gradient(90deg, var(--om-prog-from) 0%, var(--om-prog-to) 100%);
+  transition: width .3s ease; }
+/* The leading edge, which is the part worth looking at. */
+.om-prog-main::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0;
+  width: 2px; background: var(--om-prog-cap);
+  box-shadow: 0 0 6px 2px var(--om-prog-glow), 0 0 14px 4px var(--om-prog-halo); }
+.om-prog-error .om-prog-main { background: linear-gradient(90deg, #8d2a24 0%, #f85149 100%); }
+.om-prog-error .om-prog-main::after { background: #ffb4b0;
+  box-shadow: 0 0 6px 2px rgba(248,81,73,.85); }
+.om-prog-text { position: absolute; inset: 0; display: flex; align-items: center;
+  padding: 0 8px; color: #fff; font: 600 9px/1 system-ui, sans-serif; letter-spacing: .02em;
+  text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9); white-space: nowrap;
+  overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .om-prog-sub, .om-prog-main { transition: none; }
+}
+/* The light in a panel header. A colour alone is something to worry about, so the reasoning
+   is on the hover; this is only the colour, and the glow that makes it readable at a glance
+   against a dark bar. */
+.om-orb { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-right: 2px;
+  background: var(--om-muted); cursor: help; }
+.om-orb-idle { background: #6e7681; box-shadow: 0 0 4px 1px rgba(110,118,129,.45); }
+.om-orb-working { background: #3fb950; box-shadow: 0 0 8px 2px rgba(63,185,80,.55);
+  animation: om-orb-breathe 2.4s ease-in-out infinite; }
+.om-orb-stalling { background: #d29922; box-shadow: 0 0 8px 2px rgba(210,153,34,.55); }
+/* Confirmed rather than suspected, so it asks to be looked at rather than sitting there. */
+.om-orb-stalled { background: #d29922; box-shadow: 0 0 10px 3px rgba(210,153,34,.7);
+  animation: om-orb-throb 1s ease-in-out infinite; }
+.om-orb-oom { background: #f85149; box-shadow: 0 0 10px 3px rgba(248,81,73,.65); }
+@keyframes om-orb-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes om-orb-throb { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+/* Anyone who has asked for less movement gets the colour and none of the animation. */
+@media (prefers-reduced-motion: reduce) {
+  .om-orb-working, .om-orb-stalled { animation: none; }
+}
+.om-mem-drop { padding: 2px 8px; font-size: 11px; flex: none; }
+.om-keys { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
+.om-keys-row { border: 1px solid var(--om-border); border-radius: 8px; padding: 10px 12px;
+  background: var(--om-surface); display: flex; flex-direction: column; gap: 6px; }
+.om-keys-line { display: flex; gap: 8px; align-items: center; }
+.om-keys-input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; }
+/* Six styles, two shapes: which one a cell gets is all that changes between them. */
+.om-mon-v { align-items: center; }
+/* Compact: the label and the figure sit together over a bar or under a column, so a cell is
+   two elements deep instead of three wide. */
+.om-mon-both { display: inline-flex; gap: 4px; align-items: baseline; }
+.om-mon-compact { position: relative; }
+.om-mon-compact .om-mon-value { min-width: 0; }
+.om-mon-compact.om-mon-h { display: inline-grid; }
+.om-mon-compact.om-mon-h > * { grid-area: 1 / 1; align-self: center; }
+.om-mon-compact.om-mon-h .om-mon-bar { width: 62px; height: 13px; border-radius: 3px; }
+/* The track is positioned, so it paints above anything that is not, however late the text
+   comes in the markup. Positioning the text too is what puts it back on top.
+   The text crosses both the empty track and the fill behind it, and the fill can be blue,
+   green or red, so it is set white and given a dark outline rather than tinted to suit any
+   one of them. */
+.om-mon-compact.om-mon-h .om-mon-both { justify-self: center; padding: 0 4px;
+  position: relative; z-index: 1; color: #fff; font-weight: 600;
+  text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9); }
+.om-mon-compact.om-mon-v { flex-direction: column; gap: 2px; }
+.om-mon-compact.om-mon-v .om-mon-tube { height: 16px; }
+@media (max-width: 1500px) { .om-mon-label { display: none; } }
+@media (max-width: 1200px) { .om-mon { display: none; } }
+.om-mon { cursor: pointer; border-radius: 6px; padding: 2px 4px; }
+.om-mon:hover { background: var(--om-hover); }
+/* No padding on the body: the graphs run the full width of the window and the bars are what
+   divide them, so nothing needs an inset or a frame. */
+/* The graphs share whatever height the window has, so making the panel taller makes them
+   taller rather than leaving them a fixed strip with space below. Only the model list scrolls. */
+.om-mem-body { display: flex; flex-direction: column; padding: 0; gap: 0;
+  flex: 1; min-height: 0; overflow-y: auto; }
+/* No minimum height is set here on purpose. Naming one overrides the automatic minimum, which
+   is the block's own content, and a figure smaller than the bar and the caption together lets
+   the box shrink under them and clip the caption. Letting it be automatic means only the
+   graph gives way, and the panel scrolls once even that has nothing left to give. */
+.om-mem-graph { display: flex; flex-direction: column; flex: 1 1 auto;
+  max-height: calc(var(--om-hdr, 44px) + 170px); }
+/* The section bars are the panel's structure, so they are sized to be read at a glance from
+   wherever the screen happens to be, and they follow the same setting the title bar does. */
+.om-mem-bar { display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  min-height: var(--om-hdr, 44px);
+  background: var(--om-surface); border-top: 1px solid var(--om-border);
+  border-bottom: 1px solid var(--om-border); flex: none; }
+.om-mem-body > :first-child .om-mem-bar, .om-mem-body > .om-mem-bar:first-child {
+  border-top: none; }
+.om-mem-bar-toggle { cursor: pointer; user-select: none; }
+.om-mem-bar-toggle:hover { background: var(--om-hover); }
+.om-mem-bar-fold { font-size: calc(var(--om-hdr, 44px) * 0.24); color: var(--om-muted);
+  flex: none; width: calc(var(--om-hdr, 44px) * 0.3); }
+/* Folded, a graph is just its bar, and the height it was using goes to the others. */
+.om-mem-folded { flex: none; min-height: 0; }
+.om-mem-folded .om-mem-canvas, .om-mem-folded .om-mem-graph-detail { display: none; }
+.om-mem-bar-label { font-size: calc(var(--om-hdr, 44px) * 0.29); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--om-muted); flex: 1; }
+.om-mem-bar-value { font-size: calc(var(--om-hdr, 44px) * 0.36); font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--om-text); }
+/* The graph is the only part that gives way when the window is short.
+   The basis is nought rather than automatic: drawing sets the canvas height attribute, which
+   is also its intrinsic size, so an automatic basis would feed each drawing back into the
+   layout and the graph would grow without end. */
+/* Capped as well as floored. A graph is read by its shape, which a taller box does not
+   improve, so past this the room goes to the list of models instead of to more empty chart. */
+.om-mem-canvas { width: 100%; flex: 1 1 0; min-height: 34px; max-height: 140px;
+  display: block; background: var(--om-input); }
+.om-mem-graph-detail { color: var(--om-muted); font-size: 12px; padding: 0 14px;
+  flex: none; height: 30px; min-height: 30px; max-height: 30px; box-sizing: border-box;
+  display: flex; align-items: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.om-mem-graph-detail:empty { height: 0; min-height: 0; }
+.om-mem-graph-detail:empty { padding: 0; }
+.om-mem-models { padding: 10px 14px; flex: 2 1 auto; min-height: 90px; overflow-y: auto; }
+.om-mem-model { border: 1px solid var(--om-border); border-radius: 8px; padding: 9px 11px;
+  display: flex; flex-direction: column; gap: 6px; background: var(--om-surface); }
+/* Nothing held is an ordinary state, not a problem, so it is said quietly and centred. */
+.om-mem-empty { text-align: center; color: var(--om-muted); opacity: .55;
+  padding: 26px 14px; font-size: 14px; }
+/* How much of a model is on the device, against how much of it there is. */
+.om-mem-split { height: 5px; border-radius: 3px; background: var(--om-input); overflow: hidden; }
+.om-mem-resident { height: 100%; background: #a371f7; }
+.om-mem-stream { border-color: #58a6ff; color: #58a6ff; }
+.om-mem-map-slot:empty { display: none; }
+.om-mem-map { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
+/* One square per stretch of the model, sized so the columns divide the width exactly. The
+   frame holds the border and padding; the canvas holds neither, so what it measures is what
+   it draws into. */
+.om-mem-grid-frame { background: var(--om-input); border: 1px solid var(--om-border);
+  border-radius: 5px; padding: 4px; }
+.om-mem-grid { display: block; width: 100%; }
+.om-mem-key { display: flex; flex-wrap: wrap; gap: 10px; color: var(--om-muted);
+  font-size: 11px; align-items: center; }
+.om-mem-key-item { display: inline-flex; align-items: center; gap: 5px; }
+.om-mem-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.om-mem-key-note { margin-left: auto; }
+/* In the control bar the strip is one of several groups on a crowded row, so it gives up its
+   outer margin and leans on the row's own spacing. */
+.actionbar-container .om-mon { margin: 0 2px; }
+.om-lib-sweep { border-color: #d29922; }
+.om-mem-bar-label + .om-lib-row { margin-top: 2px; }
 `;
 document.head.appendChild(sidebarStyle);
+
+// --- floating panels ------------------------------------------------------------------------
+
+//: Where floating panels sit. ComfyUI uses 8888, 9999 and 10000 for its overlays and tops out
+//: at 99999; our own modals are at 10000. This band is above the canvas and ordinary chrome and
+//: below every dialog on either side, so a settings window is never trapped underneath one.
+const FLOAT_Z = 8000;
+const FLOAT_Z_TOP = 8099;
+
+//: Room a panel needs around it before dragging it means anything. A window almost as wide
+//: as the screen has nowhere to go, and letting it be dragged there is only a way to lose
+//: the controls off an edge. With less than this to spare, a panel is presented centred and
+//: fixed however the setting is set -- and goes back to floating the moment there is room.
+const FLOAT_SLACK_X = 120;
+const FLOAT_SLACK_Y = 80;
+
+//: Open panels, by key. One panel per key, so a second call raises rather than duplicates.
+const floatPanels = new Map();
+
+let floatTop = FLOAT_Z;
+
+//: Height of a panel's header bars. Read from the settings rather than fixed, because how
+//: large a bar has to be to read comfortably depends on the screen it is on.
+const HEADER_DEFAULT = 44;
+
+function headerHeight() {
+  const asked = Number(panelSetting("openManager.panelHeaders", HEADER_DEFAULT));
+  return Number.isFinite(asked) ? Math.max(24, Math.min(80, Math.round(asked))) : HEADER_DEFAULT;
+}
+
+// Applied to every open panel, so changing the setting is visible at once rather than on the
+// next time a panel happens to be opened.
+function applyHeaderHeight() {
+  const height = `${headerHeight()}px`;
+  for (const panel of document.querySelectorAll(".om-float")) {
+    panel.style.setProperty("--om-hdr", height);
+  }
+}
+
+function floatRecall(key, fallback) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(`om-float-${key}`) || "null");
+    return saved && typeof saved === "object" ? saved : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function floatRemember(key, state) {
+  try { localStorage.setItem(`om-float-${key}`, JSON.stringify(state)); } catch { /* private */ }
+}
+
+// A window the reader can move, size and fold away, that does not block the canvas underneath.
+//
+// Returns a handle rather than an element: the caller fills `body` and leaves placement,
+// persistence and stacking to this.
+function createFloatingPanel({ key, title, width = 820, height = 520, onClose } = {}) {
+  const open = floatingPanel(key);
+  if (open) { open.raise(); return open; }
+
+  const saved = floatRecall(key, {});
+  // What the screen can actually take. A size remembered from a larger window is brought
+  // back into range rather than restored as a panel that hangs off the edge.
+  const fits = (asked, floor, room) => Math.max(floor, Math.min(asked, room));
+  // Presentation only. A panel that does not float still opens, folds, resizes to the size
+  // it is given and closes the same way; it simply always appears in the middle and cannot
+  // be dragged off somewhere and lost.
+  const wantsFloat = panelSetting("openManager.floatingPanels", true) !== false;
+  const panel = el("div", "om-float");
+  // Asked for every time rather than settled at open, so a window resized down to a laptop
+  // or a tablet stops being draggable there and then, and a window opened up again goes
+  // back to floating without being closed and reopened.
+  const floating = () => wantsFloat
+    && window.innerWidth - panel.offsetWidth >= FLOAT_SLACK_X
+    && window.innerHeight - panel.offsetHeight >= FLOAT_SLACK_Y;
+  //: Where the panel was floating before the window got too small for it. Centring
+  //: overwrites the position, so without this a shrink and a grow leaves the panel wherever
+  //: being centred put it rather than where the reader had it.
+  let parked = null;
+  const applyMode = () => {
+    const now = floating();
+    if (!now && !panel.classList.contains("om-float-fixed") && panel.style.left) {
+      parked = { left: parseInt(panel.style.left, 10) || 0,
+                 top: parseInt(panel.style.top, 10) || 0 };
+    }
+    panel.classList.toggle("om-float-fixed", !now);
+  };
+  panel.style.width = `${fits(saved.width || width, 280, window.innerWidth - 16)}px`;
+  panel.style.setProperty("--om-hdr", `${headerHeight()}px`);
+
+  const bar = el("div", "om-float-bar");
+  const fold = el("button", "om-float-fold", "▾");
+  fold.title = "Collapse";
+  bar.appendChild(fold);
+  const heading = el("div", "om-float-title", title);
+  bar.appendChild(heading);
+  const badge = el("div", "om-float-badge");
+  bar.appendChild(badge);
+  const close = el("button", "om-float-close", "×");
+  close.title = "Close";
+  bar.appendChild(close);
+  panel.appendChild(bar);
+
+  // The controls sit under the title rather than in it. A title bar carrying a filter box,
+  // three buttons and a summary has no room left to be a title, and the row scales with the
+  // header height setting, which is a size chosen for reading a title rather than for
+  // pressing a button. This row is a fixed height for that reason.
+  const tools = el("div", "om-float-tools");
+  panel.appendChild(tools);
+
+  const body = el("div", "om-float-body");
+  body.style.height =
+    `${fits(saved.height || height, 80, window.innerHeight - headerHeight() - 24)}px`;
+  panel.appendChild(body);
+
+  const grip = el("div", "om-float-grip");
+  grip.title = "Resize";
+  panel.appendChild(grip);
+
+  document.body.appendChild(panel);
+
+  // Placement, clamped into the viewport. A position saved on a monitor that is no longer
+  // attached would otherwise restore a panel nobody can reach.
+  //
+  // Mid-drag the rule is loose: a corner stays reachable and the rest may hang off, because
+  // parking a panel at the edge is a thing people do on purpose.
+  const place = (left, top) => {
+    const rect = panel.getBoundingClientRect();
+    const x = Math.min(Math.max(left, 8 - rect.width + 120), window.innerWidth - 120);
+    const y = Math.min(Math.max(top, 0), window.innerHeight - 36);
+    panel.style.left = `${Math.round(x)}px`;
+    panel.style.top = `${Math.round(y)}px`;
+  };
+
+  // Opening, and recovering from a window resize, are not a drag: nobody chose this
+  // position now. So where the panel fits, all of it goes on screen -- a position remembered
+  // from a wide monitor otherwise reopens on a laptop or a tablet with the close button past
+  // the right-hand edge. Where the panel is larger than the window, the loose rule is all
+  // that is available, and at least it can be dragged.
+  const settle = (left, top) => {
+    const rect = panel.getBoundingClientRect();
+    if (rect.width + 16 <= window.innerWidth) {
+      left = Math.min(Math.max(left, 8), window.innerWidth - rect.width - 8);
+    }
+    if (rect.height + 16 <= window.innerHeight) {
+      top = Math.min(Math.max(top, 8), window.innerHeight - rect.height - 8);
+    }
+    place(left, top);
+  };
+  // Truly centred, with only the margin the border needs as a floor. A larger floor wins
+  // over the centring on a window barely wider than the panel, which is exactly the case
+  // this is for, and leaves it sitting against one edge.
+  const centre = () => place(
+    Math.max(8, (window.innerWidth - panel.offsetWidth) / 2),
+    Math.max(8, (window.innerHeight - panel.offsetHeight) / 2),
+  );
+  applyMode();
+  if (floating()) {
+    settle(
+      saved.left ?? Math.max(16, (window.innerWidth - panel.offsetWidth) / 2),
+      saved.top ?? Math.max(56, window.innerHeight * 0.18),
+    );
+  } else {
+    centre();
+  }
+
+  const state = () => ({
+    left: parseInt(panel.style.left, 10) || 0,
+    top: parseInt(panel.style.top, 10) || 0,
+    width: panel.offsetWidth,
+    height: parseInt(body.style.height, 10) || height,
+    folded: panel.classList.contains("om-float-folded"),
+  });
+  const remember = () => {
+    const now = state();
+    // A centred panel has no position of its own to keep. Writing one away would move the
+    // panel the moment there was room to float again, or the setting was turned back on --
+    // to a place the reader never chose, on a screen they may not be using any more.
+    if (!floating()) { delete now.left; delete now.top; }
+    floatRemember(key, { ...floatRecall(key, {}), ...now });
+  };
+
+  const raise = () => {
+    if (Number(panel.style.zIndex) === floatTop && floatTop > FLOAT_Z) return;
+    floatTop = floatTop >= FLOAT_Z_TOP ? FLOAT_Z : floatTop + 1;
+    panel.style.zIndex = String(floatTop);
+  };
+  panel.style.zIndex = String(FLOAT_Z);
+  raise();
+  panel.addEventListener("pointerdown", raise, true);
+
+  const setFolded = (folded) => {
+    panel.classList.toggle("om-float-folded", folded);
+    // Unfolding grows the panel downwards, which can push it past the bottom of a short
+    // window; folding shrinks it and may leave it floating oddly low. Either way it is not
+    // a drag, so the same settling applies.
+    requestAnimationFrame(() => {
+      applyMode();
+      if (floating()) {
+        settle(parseInt(panel.style.left, 10) || 0, parseInt(panel.style.top, 10) || 0);
+      } else {
+        centre();
+      }
+    });
+    fold.textContent = folded ? "▸" : "▾";
+    fold.title = folded ? "Expand" : "Collapse";
+    remember();
+  };
+  if (saved.folded) setFolded(true);
+  fold.onclick = (event) => { event.stopPropagation(); setFolded(!panel.classList.contains("om-float-folded")); };
+  bar.addEventListener("dblclick", (event) => {
+    if (event.target.closest("button")) return;
+    setFolded(!panel.classList.contains("om-float-folded"));
+  });
+
+  // Dragging and resizing move the element directly and only write the result away on release,
+  // so a drag is not a storm of layout and localStorage writes.
+  const drag = (handle, onMove, allowed = () => true) => {
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target.closest("button") || !allowed()) return;
+      event.preventDefault();
+      const start = { x: event.clientX, y: event.clientY,
+                      left: parseInt(panel.style.left, 10) || 0,
+                      top: parseInt(panel.style.top, 10) || 0,
+                      width: panel.offsetWidth,
+                      height: parseInt(body.style.height, 10) || height };
+      handle.setPointerCapture(event.pointerId);
+      const move = (moved) => onMove(start, moved.clientX - start.x, moved.clientY - start.y);
+      const done = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", done);
+        handle.removeEventListener("pointercancel", done);
+        remember();
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", done);
+      handle.addEventListener("pointercancel", done);
+    });
+  };
+
+  drag(bar, (start, dx, dy) => place(start.left + dx, start.top + dy), floating);
+  drag(grip, (start, dx, dy) => {
+    if (panel.classList.contains("om-float-folded")) return;
+    panel.style.width = `${Math.max(280, start.width + dx)}px`;
+    body.style.height = `${Math.max(80, start.height + dy)}px`;
+    applyMode();
+    if (!floating()) centre();
+    // Anything drawn rather than laid out has to be told the size changed.
+    panel.dispatchEvent(new CustomEvent("om-float-resize"));
+  });
+
+  const destroy = () => {
+    remember();
+    panel.remove();
+    floatPanels.delete(key);
+    onClose?.();
+  };
+  close.onclick = destroy;
+
+  // A window left half off-screen after the browser is resized is brought back.
+  const onResize = () => {
+    if (!panel.isConnected) { window.removeEventListener("resize", onResize); return; }
+    applyMode();
+    if (!floating()) { centre(); return; }
+    const back = parked;
+    parked = null;
+    settle(back?.left ?? (parseInt(panel.style.left, 10) || 0),
+           back?.top ?? (parseInt(panel.style.top, 10) || 0));
+  };
+  window.addEventListener("resize", onResize);
+
+  const handle = {
+    el: panel, body, bar, tools, key,
+    raise, destroy,
+    setTitle: (text) => { heading.textContent = text; },
+    setBadge: (text) => { badge.textContent = text || ""; },
+    isFolded: () => panel.classList.contains("om-float-folded"),
+  };
+  floatPanels.set(key, handle);
+  return handle;
+}
+
+// The open panel for a key, or nothing.
+//
+// A handle whose element has left the document is not an open panel. Anything can remove a
+// node -- another extension tidying up, a defensive sweep of our own -- and a handle left
+// behind in the map would answer "already open" forever, with no way to get the window back.
+function floatingPanel(key) {
+  const found = floatPanels.get(key);
+  if (found && found.el.isConnected) return found;
+  if (found) floatPanels.delete(key);
+  return null;
+}
+
+function closeFloatingPanel(key) {
+  floatingPanel(key)?.destroy();
+}
+
+// --- download manager ---------------------------------------------------------------
+
+//: Polled while the panel is open: often while something is moving, rarely when nothing is.
+const DL_POLL_BUSY = 900;
+const DL_POLL_IDLE = 4000;
+
+let dlTimer = 0;
+let dlFolders = null;
+
+function dlWorkers() {
+  const asked = Number(panelSetting("openManager.downloadWorkers", 2));
+  return Number.isFinite(asked) ? Math.max(1, Math.min(8, Math.round(asked))) : 2;
+}
+
+async function dlPost(path, body) {
+  const answer = await api.fetchApi(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  return answer.json();
+}
+
+// The model folders this ComfyUI has, read once. The picker needs them because a URL says
+// what a file is called, never where it belongs.
+async function modelFolders() {
+  if (dlFolders) return dlFolders;
+  try {
+    dlFolders = await (await api.fetchApi(`${API}/models/folders`)).json();
+  } catch {
+    dlFolders = { folders: [], formats: [], media_formats: [], hosts: [] };
+  }
+  return dlFolders;
+}
+
+//: Registered paths per model folder, read once each. ComfyUI's own list, never a typed one.
+const dlRoots = new Map();
+
+async function modelRoots(directory) {
+  if (!directory) return [];
+  if (!dlRoots.has(directory)) {
+    try {
+      const answer = await (await api.fetchApi(
+        `${API}/models/roots?directory=${encodeURIComponent(directory)}`)).json();
+      dlRoots.set(directory, answer.roots || []);
+    } catch {
+      dlRoots.set(directory, []);
+    }
+  }
+  return dlRoots.get(directory);
+}
+
+// Whether a model can actually be written here. A path on a drive that is not mounted is
+// still registered, and still listed, but it cannot be chosen.
+function rootUsable(root) {
+  return !!root && root.writable && root.total > 0;
+}
+
+// Which location a new download starts on. ComfyUI's own default leads unless the reader
+// has asked for whichever drive has the most room, which is the point of the setting on a
+// machine whose default drive is the small one.
+function preferredRoot(roots) {
+  const usable = (roots || []).filter(rootUsable);
+  if (!usable.length) return "";
+  if (panelSetting("openManager.downloadLocation", "default") !== "most-free") return "";
+  return usable.reduce((best, one) => (one.free > best.free ? one : best)).path;
+}
+
+// A long path with its middle dropped, so the drive and the folder both stay readable.
+function shortPath(text, cap = 48) {
+  const value = String(text || "");
+  if (value.length <= cap) return value;
+  const head = Math.ceil((cap - 3) * 0.42);
+  return `${value.slice(0, head)}...${value.slice(value.length - (cap - 3 - head))}`;
+}
+
+function rootLabel(root, isDefault) {
+  const space = root.total ? `${bytesText(root.free)} free` : "drive not available";
+  return `${shortPath(root.path)} - ${space}${isDefault ? " (default)" : ""}`;
+}
+
+// The location picker. Every registered path is listed so the reader can see what ComfyUI
+// knows; the ones that cannot be written are shown greyed rather than hidden, because their
+// absence would otherwise look like a missing drive had been forgotten.
+function rootSelect(roots, chosen) {
+  const select = el("select", "om-side-select om-dl-root");
+  roots.forEach((root, index) => {
+    const option = el("option", null, rootLabel(root, index === 0));
+    option.value = root.path;
+    option.title = root.path;
+    option.disabled = !rootUsable(root);
+    select.appendChild(option);
+  });
+  const wanted = chosen || preferredRoot(roots);
+  if (wanted && roots.some((root) => root.path === wanted && rootUsable(root))) {
+    select.value = wanted;
+  } else {
+    const first = roots.find(rootUsable);
+    if (first) select.value = first.path;
+  }
+  return select;
+}
+
+function bytesText(value) {
+  const count = Number(value) || 0;
+  if (count < 1024) return `${count} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = count / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
+}
+
+// The distinct extensions among some files, in the order they first appear.
+function formatsOf(names) {
+  const seen = [];
+  for (const name of names) {
+    const text = String(name || "");
+    const cut = text.lastIndexOf(".");
+    const suffix = cut > 0 ? text.slice(cut).toLowerCase() : "";
+    if (suffix && !seen.includes(suffix)) seen.push(suffix);
+  }
+  return seen;
+}
+
+// Ask before fetching from an account the reader has not trusted. The same two modes as
+// packs, kept on a list of their own: trusting someone to ship code that runs with ComfyUI's
+// privileges is a different question from trusting a file they host, so neither answers the
+// other.
+async function confirmDownloadTrust(owner, what, plural = false, formats = []) {
+  if (!owner) return true;
+  const byAuthor = panelSetting("openManager.trustMode", "author") !== "action";
+  if (byAuthor) {
+    try {
+      const answer = await api.fetchApi(
+        `${API}/trust?kind=downloads&owner=${encodeURIComponent(owner)}`);
+      if ((await answer.json()).trusted === true) return true;
+    } catch {
+      // Treated as untrusted, which asks rather than assumes.
+    }
+  }
+  const host = owner.split("/")[0];
+  const account = owner.slice(host.length + 1) || host;
+  const choices = byAuthor
+    ? [{ key: "always", label: `Trust ${owner}`, primary: true,
+         hint: `Stops asking for anything ${account} hosts` },
+       { key: "once", label: "This time only", hint: "Nothing is remembered" }]
+    : [{ key: "once", label: "Download", primary: true }];
+
+  const how = await chooseAction(`Download from ${owner}?`, "", choices, {
+    wide: true,
+    facts: [
+      ["Host", host],
+      ["Account", account],
+      // Reaching this prompt in author mode means the list was consulted and did not have
+      // them; in action mode the list is never consulted, which is a different answer.
+      ["Trusted", byAuthor ? "No" : "Not tracked, asked every time"],
+      [plural ? "Files" : "File", what],
+      [formats.length === 1 ? "Format" : "Formats", formats.join(", ")],
+      ["Trust covers", byAuthor ? "Downloads only, not packs" : ""],
+    ],
+  });
+  if (!how) return false;
+  if (how === "always") {
+    try {
+      await dlPost("/trust", { owner, kind: "downloads", trusted: true });
+    } catch {
+      toast(`Could not remember ${owner}; continuing anyway.`, { kind: "warn" });
+    }
+  }
+  return true;
+}
+
+// What a batch would ask of each drive, asked before any of it is queued. The server
+// measures each file at its host and adds what is already promised to that drive, because
+// three downloads that each fit on their own can still not fit together.
+//
+// The answer is a question, not a refusal. Someone about to clear space, or who knows the
+// figure is an over-count because two of the files replace what is already there, is better
+// served by the numbers than by being stopped. Returns whether to go ahead.
+async function confirmDiskRoom(items) {
+  if (!items.length) return true;
+  let report;
+  try {
+    report = await dlPost("/downloads/plan", {
+      items: items.map((one) => ({
+        url: one.url, name: one.name, directory: one.directory, root: one.root || "",
+      })),
+    });
+  } catch {
+    return true;
+  }
+  const short = (report?.drives || []).filter((drive) => drive.short);
+  if (!short.length) return true;
+  const facts = [];
+  for (const drive of short) {
+    facts.push([drive.path, `${bytesText(drive.free)} free of ${bytesText(drive.total)}`]);
+    facts.push(["Downloading",
+                `${bytesText(drive.adding)} in ${drive.files} file${drive.files === 1 ? "" : "s"}`]);
+    if (drive.queued) {
+      facts.push(["Already queued", `${bytesText(drive.queued)} still to arrive`]);
+    }
+    facts.push(["Short by", bytesText(Math.max(0, drive.needed - drive.free))]);
+  }
+  if (report.unknown) {
+    facts.push(["Not measured",
+                `${report.unknown} file${report.unknown === 1 ? "" : "s"} the host gave no size `
+                + "for, so the real figure is higher"]);
+  }
+  facts.push(["If you go ahead", "Each download stops when the drive fills, keeping what "
+                                 + "arrived. Nothing already on disk is touched."]);
+  const go = await chooseAction(
+    short.length === 1 ? `There is not room on ${short[0].path}`
+                       : "Not enough room on these drives",
+    "", [{ key: "go", label: "Queue anyway", primary: true }], { wide: true, facts });
+  return !!go;
+}
+
+// Whether two paths name the same file, allowing for separator and case differences.
+function samePlace(left, right) {
+  const fold = (value) => String(value || "").replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+  return !!left && fold(left) === fold(right);
+}
+
+// Put one model on the queue, asking about the account first and about replacing a file that
+// is already there. Returns whether it was queued.
+async function queueModel(model, { source = "", askTrust = true } = {}) {
+  if (askTrust && !(await confirmDownloadTrust(
+      model.owner, model.name || "This model", false, formatsOf([model.name])))) {
+    return false;
+  }
+  const body = {
+    url: model.url, name: model.name, directory: model.directory, source,
+    hash: model.hash || "", hash_type: model.hash_type || "",
+    workers: dlWorkers(), overwrite: !!model.overwrite, root: model.root || "",
+  };
+  let result = await dlPost("/downloads", body);
+  if (!result.ok && result.installed && !model.overwrite) {
+    // Storing it somewhere else leaves the copy that is already there, which is a different
+    // thing from replacing it and is worth saying plainly before it happens.
+    const elsewhere = model.root
+      && !samePlace(result.installed, `${model.root}\\${model.name}`)
+      && !samePlace(result.installed, `${model.root}/${model.name}`);
+    const replace = await chooseAction(
+      elsewhere ? `Store a second copy of ${model.name}?` : `Replace ${model.name}?`,
+      "",
+      [{ key: "go", label: elsewhere ? "Download anyway" : "Download again", primary: true }],
+      { wide: true,
+        facts: [
+          ["On disk", result.installed],
+          ["Downloading to", elsewhere ? `${model.root}` : result.installed],
+          ["Result", elsewhere
+            ? "Second copy. The one on disk stays."
+            : "Replaced once the new file arrives whole."],
+        ] });
+    if (!replace) return false;
+    result = await dlPost("/downloads", { ...body, overwrite: true });
+  }
+  if (!result.ok) {
+    notify("Not downloaded", result.reason || "The download was refused.");
+    return false;
+  }
+  return true;
+}
+
+// --- the panel ----------------------------------------------------------------------
+
+function dlStatusText(row) {
+  if (row.status === "downloading") {
+    return row.total ? `${bytesText(row.bytes)} of ${bytesText(row.total)}` : bytesText(row.bytes);
+  }
+  if (row.status === "pausing") return "Stopping...";
+  if (row.status === "done") {
+    const size = bytesText(row.bytes || row.total);
+    return row.on_disk === false ? `${size} - no longer on disk` : size;
+  }
+  if (row.status === "failed") return row.error || "Failed";
+  if (row.status === "paused") {
+    return row.total ? `Paused at ${bytesText(row.bytes)} of ${bytesText(row.total)}`
+                     : "Paused";
+  }
+  if (row.status === "cancelled") return "Cancelled";
+  return "Waiting";
+}
+
+//: How the list is divided. Two questions are asked of the same downloads: what a transfer
+//: is doing, and whether its file is there. A finished transfer therefore appears under both
+//: Transfers and Downloaded, because those answer different things.
+//:
+//: Every tab is shown whether or not it holds anything. The list is a record, and a tab that
+//: vanishes when empty cannot be consulted to find out that nothing is in it.
+const DL_VIEWS = [
+  {
+    key: "transfers",
+    title: "Transfers",
+    tabs: [
+      // A transfer in flight is stopped per row rather than swept up, so this tab offers
+      // nothing to clear.
+      { key: "downloading", title: "Downloading",
+        holds: (row) => ["queued", "downloading", "pausing"].includes(row.status),
+        empty: "Nothing is transferring.", clearable: false },
+      { key: "suspended", title: "Suspended",
+        holds: (row) => ["paused", "failed", "cancelled"].includes(row.status),
+        empty: "Nothing is paused or waiting to be retried." },
+      { key: "finished", title: "Finished",
+        holds: (row) => row.status === "done",
+        empty: "No transfer has completed yet." },
+    ],
+  },
+  {
+    key: "downloaded",
+    title: "Downloaded",
+    tabs: [
+      // These rows are files rather than records, so each is managed from its own menu.
+      // A single action over all of them would mean deleting every model at once.
+      { key: "on-disk", title: "On Disk",
+        holds: (row) => row.on_disk === true,
+        empty: "No downloaded file is on disk.", clearable: false },
+      { key: "archive", title: "Archive",
+        holds: (row) => row.on_disk === false,
+        empty: "Nothing downloaded here has been deleted." },
+    ],
+  },
+];
+
+//: Which tab the panel opens on, kept so it returns where it was left.
+const DL_VIEW_KEY = "om-dl-view";
+
+function dlRemember(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* private browsing */ }
+}
+
+function dlRecall(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+
+function buildDownloadRow(row, refresh) {
+  const item = el("div",
+    `om-dl-row om-dl-${row.status}${row.on_disk === false ? " om-dl-gone" : ""}`);
+
+  const top = el("div", "om-dl-top");
+  top.appendChild(el("span", "om-dl-name", row.name || "(unnamed)"));
+  top.appendChild(el("span", "om-dl-state", row.status));
+  item.appendChild(top);
+
+  const where = el("div", "om-dl-where");
+  where.appendChild(el("span", null, row.directory || "?"));
+  if (row.owner) {
+    const from = el("span", "om-dl-owner", row.owner);
+    from.title = row.url;
+    where.appendChild(from);
+  }
+  if (row.source) where.appendChild(el("span", "om-dl-src", row.source));
+  if (row.path) {
+    const at = el("span", "om-dl-src", dirOf(row.path));
+    at.title = row.path;
+    where.appendChild(at);
+  }
+  item.appendChild(where);
+
+  const bar = el("div", "om-dl-bar");
+  const fill = el("div", "om-dl-fill");
+  const share = row.total ? Math.min(100, (row.bytes / row.total) * 100) : 0;
+  fill.style.width = `${row.status === "done" ? 100 : share}%`;
+  bar.appendChild(fill);
+  item.appendChild(bar);
+
+  // The hash belongs to the file, so it reads with the path above it -- and it goes before
+  // the action row rather than after, so the Manage menu always hangs from the corner of the
+  // card instead of from the middle of one that happens to carry a hash.
+  const digest = row.sha256 || row.declared_hash || row.hash || row.sha256_observed;
+  if (digest) {
+    const line = el("div", "om-dl-hash");
+    line.appendChild(el("span", "om-dl-hash-label", "SHA256"));
+    const value = el("code", "om-dl-hash-value", digest);
+    value.title = `${digest}\nClick to copy`;
+    value.onclick = () => {
+      navigator.clipboard?.writeText(digest)
+        .then(() => toast("Hash copied.", { kind: "ok" }))
+        .catch(() => notify("Not copied", "The clipboard is not available here."));
+    };
+    line.appendChild(value);
+    item.appendChild(line);
+  }
+
+  const foot = el("div", "om-dl-foot");
+  foot.appendChild(el("span", "om-dl-size", dlStatusText(row)));
+  const acts = el("span", "om-dl-acts");
+  const act = (label, action, { primary = false, hint = "" } = {}) => {
+    const button = el("button", `om-btn om-dl-btn${primary ? " om-go" : ""}`, label);
+    if (hint) button.title = hint;
+    button.onclick = async () => {
+      button.disabled = true;
+      await dlPost("/downloads/action", { action, id: row.id, workers: dlWorkers() });
+      refresh();
+    };
+    acts.appendChild(button);
+  };
+  const moving = row.status === "queued" || row.status === "downloading";
+  if (moving) {
+    act("Pause", "pause", { hint: "Stops here. The bytes already fetched are kept." });
+    act("Cancel", "cancel");
+  }
+  if (row.status === "paused") {
+    act("Resume", "retry", { primary: true, hint: "Carries on from where it stopped" });
+  }
+  if (row.status === "failed" || row.status === "cancelled") act("Retry", "retry", { primary: true });
+  if (row.on_disk === false) {
+    act("Download again", "retry", { primary: true, hint: "The file is no longer on disk" });
+  }
+  if (row.on_disk === true) {
+    const manage = el("button", "om-btn om-dl-btn om-caret", "Manage ▾");
+    manage.onclick = (event) => {
+      event.stopPropagation();
+      openRowMenu(manage, { items: fileMenu(row, refresh), align: "right" });
+    };
+    acts.appendChild(manage);
+  } else if (!moving && row.status !== "pausing") {
+    act("Remove", "remove", { hint: "Removes this entry. Any file on disk is left alone." });
+  }
+  foot.appendChild(acts);
+  item.appendChild(foot);
+
+  if (row.error && row.status === "failed") item.title = row.error;
+  return item;
+}
+
+// The actions a file already on disk offers. Deleting removes the file and keeps the record,
+// so the entry moves to Archive and can be fetched again from there.
+function fileMenu(row, refresh) {
+  const send = async (action) => {
+    const answer = await dlPost("/downloads/action", { action, id: row.id, workers: dlWorkers() });
+    refresh();
+    return answer;
+  };
+  return [
+    { label: "Verify hash", fn: async () => {
+        const note = toast(`Hashing ${row.name}...`, { sticky: true });
+        const answer = await send("verify");
+        note.remove();
+        if (!answer.ok) { notify("Not verified", answer.reason || "The file could not be read."); return; }
+        const facts = [
+          ["File", row.name],
+          ["On disk now", answer.sha256],
+          ["Expected", answer.expected || "Nothing to compare against"],
+          ["Expected from", answer.expected_from || ""],
+          ["Match", answer.matches === null ? "Cannot say" : answer.matches ? "Yes" : "No"],
+        ];
+        await chooseAction(answer.matches === false ? "Hash does not match" : "Hash checked",
+                           "", [], { wide: true, facts });
+      } },
+    { label: "Re-download", fn: async () => {
+        const go = await chooseAction(`Re-download ${row.name}?`, "",
+          [{ key: "go", label: "Re-download", primary: true }],
+          { wide: true, facts: [
+            ["File", row.path || row.name],
+            ["Source", row.owner],
+            ["Result", "Replaced once the new file has arrived whole"],
+          ] });
+        if (go) await send("redownload");
+      } },
+    { label: "Copy URL", fn: () => {
+        navigator.clipboard?.writeText(row.url)
+          .then(() => toast("URL copied.", { kind: "ok" }))
+          .catch(() => notify("Not copied", "The clipboard is not available here."));
+      } },
+    { label: "Remove from list", fn: async () => {
+        const go = await chooseAction(`Remove ${row.name} from the list?`, "",
+          [{ key: "go", label: "Remove entry", primary: true }],
+          { wide: true, facts: [["Entry", "Removed"], ["File on disk", "Kept"]] });
+        if (go) await send("remove");
+      } },
+    { label: "Delete file", danger: true, fn: async () => {
+        const go = await chooseAction(`Delete ${row.name}?`, "",
+          [{ key: "go", label: "Delete file", primary: true }],
+          { wide: true, facts: [
+            ["File", row.path || row.name],
+            ["Size", bytesText(row.bytes || row.total)],
+            ["Kept", "The record, so it can be fetched again from Archive"],
+          ] });
+        if (!go) return;
+        const answer = await send("delete");
+        if (answer.ok) toast(`${row.name} deleted.`, { kind: "ok" });
+        else notify("Not deleted", answer.reason || "The file could not be deleted.");
+      } },
+  ];
+}
+
+// The Download Manager: what has been fetched, what is on the way, and a way to add more.
+function openDownloadManager() {
+  if (floatingPanel("downloads")) { closeFloatingPanel("downloads"); return null; }
+
+  const panel = createFloatingPanel({
+    key: "downloads", title: "Download Manager", width: 820, height: 460,
+    onClose: stopDownloadPolling,
+  });
+  const dialog = panel.el;
+  const summary = el("div", "om-dl-summary", "Reading...");
+  panel.bar.querySelector(".om-float-badge").appendChild(summary);
+  const tools = panel.tools;
+  const add = el("button", "om-btn om-go", "+ Add a download");
+  add.onclick = () => addModel(refresh);
+  tools.appendChild(add);
+  const clear = el("button", "om-btn", "Clear");
+  //: The rows the clear button would act on: whatever the open tab is showing.
+  let showing = [];
+  clear.onclick = async () => {
+    if (!showing.length) return;
+    const count = showing.length;
+    const go = await chooseAction(`Clear ${tab.title}?`, "",
+      [{ key: "go", label: `Remove ${count} entr${count === 1 ? "y" : "ies"}`, primary: true }],
+      { wide: true,
+        facts: [
+          ["Tab", `${view.title} / ${tab.title}`],
+          ["Entries", String(count)],
+          ["Files on disk", "Not touched"],
+        ] });
+    if (!go) return;
+    await dlPost("/downloads/action", { action: "remove-many", ids: showing.map((row) => row.id) });
+    refresh();
+  };
+  tools.appendChild(clear);
+
+  // Which view and tab are showing. Restored from last time, and checked against the
+  // definitions so a renamed tab falls back rather than showing nothing.
+  let view = DL_VIEWS.find((one) => one.key === dlRecall(DL_VIEW_KEY, "")) || DL_VIEWS[0];
+  let tab = view.tabs.find((one) => one.key === dlRecall(`${DL_VIEW_KEY}-${view.key}`, "")) || view.tabs[0];
+
+  const viewBar = el("div", "om-dl-views");
+  const tabBar = el("div", "om-dl-tabs");
+  panel.body.appendChild(viewBar);
+  panel.body.appendChild(tabBar);
+
+  const body = el("div", "om-dl-body");
+  const list = el("div", "om-dl-list");
+  body.appendChild(list);
+  panel.body.appendChild(body);
+
+  //: tab key -> the badge showing how many it holds, so counts update without rebuilding.
+  const badges = new Map();
+
+  const buildViewBar = () => {
+    viewBar.replaceChildren(...DL_VIEWS.map((one) => {
+      const button = el("button", `om-dl-view${one === view ? " om-dl-on" : ""}`, one.title);
+      button.onclick = () => {
+        if (one === view) return;
+        view = one;
+        tab = view.tabs.find((each) => each.key === dlRecall(`${DL_VIEW_KEY}-${view.key}`, ""))
+              || view.tabs[0];
+        dlRemember(DL_VIEW_KEY, view.key);
+        buildViewBar();
+        buildTabBar();
+        refresh();
+      };
+      return button;
+    }));
+  };
+
+  const buildTabBar = () => {
+    badges.clear();
+    tabBar.replaceChildren(...view.tabs.map((one) => {
+      const button = el("button", `om-dl-tab${one === tab ? " om-dl-on" : ""}`);
+      button.appendChild(el("span", null, one.title));
+      const badge = el("span", "om-dl-tab-count", "0");
+      badges.set(one.key, badge);
+      button.appendChild(badge);
+      button.onclick = () => {
+        if (one === tab) return;
+        tab = one;
+        dlRemember(`${DL_VIEW_KEY}-${view.key}`, tab.key);
+        buildTabBar();
+        refresh();
+      };
+      return button;
+    }));
+  };
+
+  buildViewBar();
+  buildTabBar();
+
+  const refresh = async () => {
+    if (!dialog.isConnected) { stopDownloadPolling(); return; }
+    let state;
+    try {
+      state = await (await api.fetchApi(`${API}/downloads`)).json();
+    } catch {
+      summary.textContent = "The download list could not be read";
+      return;
+    }
+    if (!dialog.isConnected) { stopDownloadPolling(); return; }
+    const rows = state.downloads || [];
+    const busy = (state.running || 0) + (state.queued || 0);
+    summary.textContent = busy
+      ? `${state.running} running, ${state.queued} queued`
+      : (rows.length ? `${rows.length} download${rows.length === 1 ? "" : "s"}` : "");
+    // Counted across everything, not just what is showing, so an idle tab still says how
+    // much is waiting in the others.
+    for (const one of view.tabs) {
+      const badge = badges.get(one.key);
+      if (badge) badge.textContent = String(rows.filter(one.holds).length);
+    }
+    const mine = rows.filter(tab.holds);
+    showing = mine;
+    // Named for the tab it would empty, so it never reads as an action on the whole list.
+    clear.textContent = `Clear ${tab.title}`;
+    clear.title = `Removes the ${tab.title} entries from this list. Files on disk are left alone.`;
+    clear.disabled = tab.clearable === false || !mine.length;
+    clear.style.display = tab.clearable === false ? "none" : "";
+    if (mine.length) {
+      list.replaceChildren(...mine.map((row) => buildDownloadRow(row, refresh)));
+    } else {
+      const box = el("div", "om-empty");
+      box.appendChild(el("div", "om-empty-title", tab.empty));
+      if (!rows.length) box.appendChild(el("div", null, "Add one by URL, or from a workflow."));
+      list.replaceChildren(box);
+    }
+    clearTimeout(dlTimer);
+    const settling = rows.some((row) => row.status === "pausing");
+    dlTimer = setTimeout(refresh, busy || settling ? DL_POLL_BUSY : DL_POLL_IDLE);
+  };
+
+  refresh();
+  return panel;
+}
+
+function stopDownloadPolling() {
+  clearTimeout(dlTimer);
+  dlTimer = 0;
+}
+
+// --- adding ---------------------------------------------------------------------------
+
+async function addModel(refresh) {
+  const how = await chooseAction("Add a download", "",
+    [{ key: "workflow", label: "From a workflow", primary: true,
+       hint: "Lists the models an open workflow names" },
+     { key: "url", label: "From a URL", hint: "Paste a Hugging Face or GitHub link" }]);
+  if (how === "url") await addModelByUrl(refresh);
+  if (how === "workflow") await addModelsFromWorkflow(refresh);
+}
+
+// Paste a URL, say where it goes, and queue it. Checked as it is typed, so a URL that will
+// never be allowed says so here rather than as a download that fails later.
+async function addModelByUrl(refresh) {
+  const { folders } = await modelFolders();
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-dl-add");
+  box.appendChild(el("div", "om-note-title", "Add by URL"));
+
+  const field = (label, node) => {
+    const wrap = el("label", "om-dl-field");
+    wrap.appendChild(el("span", null, label));
+    wrap.appendChild(node);
+    box.appendChild(wrap);
+    return node;
+  };
+
+  const url = field("URL", el("input", "om-search"));
+  url.spellcheck = false;
+  url.placeholder = "https://huggingface.co/account/repo/resolve/main/file.safetensors";
+  const name = field("Save as", el("input", "om-search"));
+  name.spellcheck = false;
+  const folder = field("Folder", el("select", "om-side-select"));
+  const blank = el("option", null, "Choose a folder");
+  blank.value = "";
+  folder.appendChild(blank);
+  for (const key of folders) {
+    const option = el("option", null, key);
+    option.value = key;
+    folder.appendChild(option);
+  }
+  // Offered only where the folder has more than one registered path, so the common case of
+  // a single models directory is not given a choice that does not exist.
+  const where = el("label", "om-dl-field om-dl-where-field");
+  where.appendChild(el("span", null, "Store in"));
+  where.style.display = "none";
+  box.appendChild(where);
+  let placeSelect = null;
+  const showLocations = async () => {
+    const roots = await modelRoots(folder.value);
+    where.replaceChildren(el("span", null, "Store in"));
+    placeSelect = null;
+    if (roots.length < 2) { where.style.display = "none"; return; }
+    placeSelect = rootSelect(roots);
+    placeSelect.addEventListener("change", recheck);
+    where.appendChild(placeSelect);
+    where.style.display = "";
+  };
+
+  const idle = "Hugging Face and GitHub.";
+  const note = el("div", "om-dl-note", idle);
+  box.appendChild(note);
+
+  const foot = el("div", "om-note-foot");
+  const cancel = el("button", "om-btn", "Cancel");
+  const ok = el("button", "om-btn om-go", "Download");
+  cancel.onclick = () => backdrop.remove();
+  foot.appendChild(cancel);
+  foot.appendChild(ok);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+  url.focus();
+
+  let checked = null;
+  let latest = 0;
+  let debounce = 0;
+  // The name follows the URL until the reader types one of their own, after which it is
+  // theirs and a new URL leaves it alone.
+  let ownName = false;
+  const recheck = async () => {
+    const typed = url.value.trim();
+    if (!typed) {
+      note.textContent = idle;
+      note.className = "om-dl-note";
+      checked = null;
+      return;
+    }
+    const mine = ++latest;
+    const answer = await dlPost("/models/check", {
+      url: typed, name: ownName ? name.value.trim() : "", directory: folder.value,
+      root: placeSelect?.value || "",
+    });
+    if (mine !== latest || !backdrop.isConnected) return;
+    checked = answer;
+    if (!ownName && answer.name) name.value = answer.name;
+    // A link that is plainly an image, video or audio file has one place it belongs, so the
+    // folder is filled in rather than left for the reader to find.
+    if (!folder.value && answer.suggested_directory) {
+      folder.value = answer.suggested_directory;
+      await showLocations();
+      return recheck();
+    }
+    const from = answer.rewritten
+      ? `From ${answer.owner}. That was a link to the page, so the file behind it is used.`
+      : `From ${answer.owner}.`;
+    if (answer.ok) {
+      note.textContent = answer.installed ? `${from} Already on disk; downloading replaces it.` : from;
+      note.className = "om-dl-note om-dl-ok";
+    } else if (answer.needs_directory) {
+      // The URL is sound and only the folder is outstanding, which is not a refusal.
+      note.textContent = `${from} Choose the folder it belongs in.`;
+      note.className = "om-dl-note";
+    } else {
+      note.textContent = answer.reason || "That URL cannot be downloaded.";
+      note.className = "om-dl-note om-dl-bad";
+    }
+  };
+  url.addEventListener("input", () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(recheck, 350);
+  });
+  name.addEventListener("input", () => { ownName = true; });
+  name.addEventListener("change", recheck);
+  folder.addEventListener("change", async () => { await showLocations(); recheck(); });
+
+  ok.onclick = async () => {
+    if (!url.value.trim()) { url.focus(); return; }
+    if (!folder.value) {
+      note.textContent = "Choose the folder it belongs in.";
+      note.className = "om-dl-note om-dl-bad";
+      folder.focus();
+      return;
+    }
+    ok.disabled = true;
+    clearTimeout(debounce);
+    await recheck();
+    ok.disabled = false;
+    if (!checked?.ok) return;
+    backdrop.remove();
+    const model = { url: checked.url, name: checked.name, directory: folder.value,
+                    owner: checked.owner, root: placeSelect?.value || "" };
+    // Trust first, then the drive. Measuring the file means asking the host for it, and that
+    // is not done until the reader has said this is an account they want a file from.
+    if (!(await confirmDownloadTrust(model.owner, model.name, false, formatsOf([model.name])))) {
+      return;
+    }
+    if (!(await confirmDiskRoom([model]))) return;
+    const queued = await queueModel(model, { source: "added by URL", askTrust: false });
+    if (queued) { toast(`Queued ${checked.name}.`, { kind: "ok" }); refresh?.(); }
+  };
+}
+
+// Every workflow the reader has open, with the one in front marked.
+function openWorkflowChoices() {
+  try {
+    const store = app.extensionManager?.workflow;
+    const open = store?.openWorkflows || [];
+    const active = store?.activeWorkflow;
+    return open.map((workflow) => ({
+      workflow,
+      label: workflow.filename || workflow.key || workflow.path,
+      active: workflow === active,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// One workflow's document. The tab in front is read from the live graph so unsaved edits
+// count; a tab that has been opened carries its own copy; one that has not been loaded yet
+// is read back from where it is saved.
+async function workflowDocument(choice) {
+  if (choice.active) {
+    try {
+      const live = app.graph.serialize();
+      if (live) return live;
+    } catch {
+      // Fall through to what is stored.
+    }
+  }
+  const content = choice.workflow?.content || choice.workflow?.originalContent;
+  if (content) {
+    try { return JSON.parse(content); } catch { /* fall through */ }
+  }
+  const path = choice.workflow?.path;
+  if (!path) return null;
+  try {
+    const answer = await api.fetchApi(`/userdata/${encodeURIComponent(path)}`);
+    return answer.ok ? await answer.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function addModelsFromWorkflow(refresh) {
+  const choices = openWorkflowChoices();
+  if (!choices.length) {
+    notify("No workflows open", "Open a workflow and try again.");
+    return;
+  }
+
+  const backdrop = el("div", "om-backdrop");
+  const dialog = el("div", "om-dialog om-dl-pick");
+  const close = el("button", "om-x", "×");
+  close.title = "Close";
+  close.onclick = () => backdrop.remove();
+  dialog.appendChild(close);
+
+  const head = el("div", "om-head");
+  head.appendChild(el("div", "om-title", "Models in a workflow"));
+  const picker = el("select", "om-side-select om-dl-wf");
+  choices.forEach((choice, index) => {
+    const option = el("option", null, choice.active ? `${choice.label} (open)` : choice.label);
+    option.value = String(index);
+    picker.appendChild(option);
+  });
+  const activeIndex = choices.findIndex((choice) => choice.active);
+  picker.value = String(activeIndex >= 0 ? activeIndex : 0);
+  head.appendChild(picker);
+  dialog.appendChild(head);
+
+  const body = el("div", "om-body om-dl-body");
+  const list = el("div", "om-dl-models");
+  body.appendChild(list);
+  dialog.appendChild(body);
+
+  const foot = el("div", "om-dl-pickfoot");
+  const summary = el("span", "om-dl-summary", "");
+  const download = el("button", "om-btn om-go", "Download selected");
+  foot.appendChild(summary);
+  foot.appendChild(download);
+  dialog.appendChild(foot);
+
+  backdrop.appendChild(dialog);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+
+  let rows = [];
+  const boxes = new Map();
+  //: index -> the location that row will be stored in, where its folder offers a choice.
+  const chosen = new Map();
+
+  const selected = () => [...boxes.entries()]
+    .filter(([, box]) => box.checked)
+    .map(([index]) => ({ ...rows[index], root: chosen.get(index) || "" }));
+  const updateSummary = () => {
+    const picked = selected().length;
+    const have = rows.filter((row) => row.installed).length;
+    summary.textContent = rows.length
+      ? `${picked} of ${rows.length} selected` + (have ? ` · ${have} already on disk` : "")
+      : "";
+    download.disabled = picked === 0;
+  };
+
+  const load = async () => {
+    list.replaceChildren(el("div", "om-empty", "Reading the workflow..."));
+    boxes.clear();
+    rows = [];
+    const choice = choices[Number(picker.value)] || choices[0];
+    const doc = await workflowDocument(choice);
+    if (!backdrop.isConnected) return;
+    if (!doc) {
+      list.replaceChildren(el("div", "om-empty", "That workflow could not be read."));
+      updateSummary();
+      return;
+    }
+    let answer;
+    try {
+      answer = await dlPost("/models/in-workflow", { workflow: doc });
+    } catch {
+      list.replaceChildren(el("div", "om-empty", "The workflow could not be scanned."));
+      updateSummary();
+      return;
+    }
+    if (!backdrop.isConnected) return;
+    rows = answer.models || [];
+    if (!rows.length) {
+      list.replaceChildren(el("div", "om-empty", "This workflow does not name any model downloads."));
+    } else {
+      // Each row is offered the paths its own folder registers; a workflow can pull from
+      // several folders and they do not share a list.
+      const places = await Promise.all(rows.map((model) => modelRoots(model.directory)));
+      if (!backdrop.isConnected) return;
+      list.replaceChildren(...rows.map((model, index) =>
+        buildModelRow(model, index, boxes, updateSummary, places[index], chosen)));
+    }
+    updateSummary();
+  };
+
+  picker.onchange = load;
+
+  download.onclick = async () => {
+    const picked = selected();
+    backdrop.remove();
+    // One question per account, counting only what that account is being asked about, and
+    // a refusal covers the rest of their files rather than asking again for each.
+    const perOwner = new Map();
+    for (const model of picked) {
+      if (!perOwner.has(model.owner)) perOwner.set(model.owner, []);
+      perOwner.get(model.owner).push(model.name);
+    }
+    const answered = new Map();
+    const ready = [];
+    for (const model of picked) {
+      if (!answered.has(model.owner)) {
+        const names = perOwner.get(model.owner) || [model.name];
+        answered.set(model.owner, await confirmDownloadTrust(
+          model.owner,
+          names.length === 1 ? `${model.name} in this workflow`
+                             : `${names.length} models in this workflow`,
+          names.length !== 1,
+          formatsOf(names)));
+      }
+      if (!answered.get(model.owner)) continue;
+      ready.push({ ...model, overwrite: !!model.installed, root: model.root || "" });
+    }
+    // The drive is asked about once for the batch rather than once per file, so a workflow
+    // naming nine models is one question and not nine.
+    if (!ready.length || !(await confirmDiskRoom(ready))) { refresh?.(); return; }
+    let queued = 0;
+    for (const model of ready) {
+      if (await queueModel(model, { source: "from a workflow", askTrust: false })) queued += 1;
+    }
+    if (queued) toast(`Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    refresh?.();
+  };
+
+  load();
+}
+
+// One model a workflow asks for. An installed one is dimmed but still selectable: a file on
+// disk can be truncated or the wrong weights, and fetching it again is how that gets fixed.
+function dirOf(path) {
+  const value = String(path || "");
+  const cut = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
+  return cut > 0 ? value.slice(0, cut) : "";
+}
+
+function buildModelRow(model, index, boxes, onChange, roots, chosen) {
+  const row = el("label",
+    `om-dl-model${model.installed ? " om-dl-have" : ""}${model.allowed ? "" : " om-dl-refused"}`);
+  const box = el("input", "om-dl-check");
+  box.type = "checkbox";
+  box.disabled = !model.allowed;
+  box.checked = model.allowed && !model.installed;
+  box.onchange = onChange;
+  boxes.set(index, box);
+  row.appendChild(box);
+
+  const text = el("div", "om-dl-modeltext");
+  text.appendChild(el("div", "om-dl-name", model.name || model.url));
+  const meta = el("div", "om-dl-where");
+  meta.appendChild(el("span", null, model.directory || "?"));
+  if (model.owner) meta.appendChild(el("span", "om-dl-owner", model.owner));
+  if (model.node) meta.appendChild(el("span", "om-dl-src", model.node));
+  text.appendChild(meta);
+  if (!model.allowed) {
+    text.appendChild(el("div", "om-dl-note om-dl-bad", model.reason || "Not allowed."));
+  } else if (model.installed) {
+    const have = el("div", "om-dl-note", "On disk. Select to replace.");
+    have.title = model.installed;
+    text.appendChild(have);
+  }
+  if (model.allowed && (roots || []).length > 1) {
+    const place = el("div", "om-dl-place");
+    place.appendChild(el("span", null, "Store in"));
+    const select = rootSelect(roots, model.installed ? dirOf(model.installed) : "");
+    // The label wraps the row, so a click on the select would toggle the checkbox too.
+    select.onclick = (event) => event.preventDefault();
+    select.onchange = () => chosen.set(index, select.value);
+    chosen.set(index, select.value);
+    place.appendChild(select);
+    text.appendChild(place);
+  }
+  row.appendChild(text);
+  return row;
+}
+
+// --- the button -----------------------------------------------------------------------
+
+// A way in at the right-hand end of the workflow tab strip. ComfyUI builds that strip after
+// the extension loads, so this waits for it rather than assuming it is there.
+// The slot at the right-hand end of the workflow tab strip, or nothing where ComfyUI has not
+// drawn it yet.
+function topbarSlot() {
+  const strip = document.querySelector(".workflow-tabs-container.pointer-events-auto")?.firstElementChild;
+  return strip
+    ? [...strip.children].find((child) => !String(child.className).includes("workflow-tabs-container"))
+    : null;
+}
+
+//: Set once the interface has been set up, so a setting changed during start-up does not send
+//: the mount into a retry loop before there is anywhere to mount to.
+let topbarReady = false;
+
+// Where the buttons live. The tab strip carries them with their words; the control bar is
+// tight on width and carries them as icons, which is why the two go together rather than
+// being separate settings. Where a build has no control bar, the tab strip is the remaining
+// place, same as the monitor strip does.
+function buttonHost(slot) {
+  if (panelSetting("openManager.buttonPlacement", "topbar") === "control") {
+    const bar = document.querySelector(".actionbar-container");
+    if (bar) {
+      const group = bar.querySelector(".flex.gap-2") || bar.firstElementChild || bar;
+      return { host: group, before: group.firstChild, icons: true };
+    }
+  }
+  return slot ? { host: slot, before: slot.firstChild, icons: false } : null;
+}
+
+// Each control is decided on its own. They were once nested, which meant switching off the
+// downloads button also took away the library button and the monitor -- three features behind
+// one switch, and no way to tell from the settings that it would happen.
+// Everywhere Open Manager can be reached, in one place.
+//
+// The tab strip renders the entries marked for it; the legacy menu renders all of them. It is
+// one table because it used to be two lists, and the second one fell behind: the Model Library
+// and the Memory panel were reachable from the tab strip for weeks while the legacy menu, which
+// is the only way in for anyone on the classic interface, had never heard of them. A reskin
+// cannot accumulate coverage gaps; a second list can, and did.
+//
+// `available` is whether the feature exists at all. `button` is whether it earns a place in the
+// tab strip, which is a separate question with its own setting.
+//: Whether ComfyUI was started with its legacy manager interface. Read once from the
+//: arguments the server reports, because it is a launch flag and cannot change while running.
+//: Unknown until that read returns, and unknown means modern: an install that never asked for
+//: the old interface should not be given it.
+let legacyUi = false;
+
+async function readLegacyUi() {
+  try {
+    const stats = await (await api.fetchApi("/system_stats")).json();
+    const argv = stats?.system?.argv || [];
+    legacyUi = argv.some((one) => String(one).includes("enable-manager-legacy-ui"));
+  } catch {
+    legacyUi = false;
+  }
+  return legacyUi;
+}
+
+// Which way the Extensions button goes. `auto` follows ComfyUI, which is what almost everyone
+// wants: the classic menu exists to serve the classic interface, and offering it on the modern
+// one puts a second, smaller manager in front of the real one.
+function managerEntry() {
+  const asked = String(panelSetting("openManager.managerEntry", "auto") || "auto");
+  if (asked === "classic" || asked === "panel") return asked;
+  return legacyUi ? "classic" : "panel";
+}
+
+function managerDestinations() {
+  return [
+    { key: "registry", label: "Custom Nodes Manager", icon: "\u25a4",
+      hint: "Browse and install from the Comfy Registry",
+      open: () => openPanelWindow("registry") },
+    { key: "missing", label: "Install Missing Custom Nodes", icon: "\u26a0",
+      hint: "The packs supplying the node types this workflow is missing",
+      open: () => openPanelWindow("missing") },
+    { key: "github", label: "Install via Git URL", icon: "\u2325",
+      hint: "Repositories you add by URL, kept across uninstalls",
+      open: () => openPanelWindow("github") },
+    { key: "installed", label: "Check for Updates", icon: "\u21bb",
+      hint: "What is installed, and what has a newer version",
+      open: () => openPanelWindow("installed") },
+    { key: "downloads", label: "Download Manager", short: "Downloads", icon: "\u2b73",
+      cls: "om-dl-downloads",
+      hint: "Download Manager: fetch the models a workflow needs",
+      open: openDownloadManager,
+      button: () => panelSetting("openManager.downloadButton", true) !== false },
+    { key: "library", label: "Model Library", short: "Models", icon: "\u25a4",
+      cls: "om-lib-open",
+      hint: "Model Library: what is on disk, and what is there twice",
+      open: openModelLibrary,
+      available: () => panelSetting("openManager.modelLibrary", false) !== false,
+      button: () => panelSetting("openManager.modelLibrary", false) !== false },
+    { key: "memory", label: "Memory", short: "Memory", icon: "\u25a6",
+      cls: "om-mem-open",
+      hint: "Memory: what is loaded, what it weighs, and where it sits",
+      open: openMemoryPanel,
+      button: () => panelSetting("openManager.memoryButton", true) !== false },
+    { key: "scan", label: "Scan an Install", icon: "\u2691",
+      hint: "Each installed pack's menu offers a VirusTotal scan of the files it ships",
+      open: () => openPanelWindow("installed"),
+      available: vtReady },
+    { key: "keys", label: "Access keys", icon: "\u26bf",
+      hint: "Hugging Face, GitHub and VirusTotal keys. Kept out of ComfyUI's settings, and "
+            + "never shown back.",
+      open: openKeysDialog },
+  ].filter((one) => !one.available || one.available());
+}
+
+function mountTopbar(attempt = 0) {
+  const slot = topbarSlot();
+  if (!slot) {
+    if (attempt < 40) setTimeout(() => mountTopbar(attempt + 1), 500);
+    return false;
+  }
+  const where = buttonHost(slot);
+  const make = (cls, icon, label, title, onclick) => {
+    if (document.querySelector(`.${cls}`)) return null;
+    const button = el("button", `om-dl-open ${cls}${where.icons ? " om-dl-open-icons" : ""}`);
+    button.title = title;
+    button.appendChild(el("span", "om-dl-open-icon", icon));
+    button.appendChild(el("span", "om-dl-open-text", label));
+    button.onclick = onclick;
+    return button;
+  };
+
+  // Only the entries that ask for a place here, in the table's order.
+  const wanted = managerDestinations()
+    .filter((one) => one.cls && one.button && one.button())
+    .map((one) => make(one.cls, one.icon, one.short || one.label, one.hint, one.open));
+  // Inserted against one reference point, so they read left to right in the table's order
+  // rather than in the reverse of it.
+  for (const button of wanted) {
+    if (button) where.host.insertBefore(button, where.before);
+  }
+  mountMonitor(slot);
+  mountRunBar();
+  return true;
+}
+
+// Rebuild the controls from the settings as they stand now. A switch that does nothing until
+// the page is reloaded reads as a switch that does not work.
+function remountTopbar() {
+  if (!topbarReady) return;
+  stopMonitor();
+  monitorStrip = null;
+  document.querySelectorAll(".om-dl-open, .om-mon, .om-prog").forEach((node) => node.remove());
+  runBar.el = null;
+  mountTopbar();
+}
+
+// --- node properties --------------------------------------------------------------------
+
+// The model URLs a node declares. ComfyUI writes these itself when a template is loaded;
+// this is how one is added by hand, so a graph can be shared with its weights named.
+function nodeModels(node) {
+  const declared = node?.properties?.models;
+  return Array.isArray(declared) ? declared : [];
+}
+
+async function addModelUrlToNode(node) {
+  const { folders } = await modelFolders();
+  if (!folders.length) {
+    notify("No model folders", "ComfyUI did not report any model folders to save into.");
+    return;
+  }
+  const typed = await askText("Model URL for this node", "", "Check");
+  if (!typed) return;
+  const answer = await dlPost("/models/check", { url: typed, directory: "" });
+  // Everything but the folder is judged first, so a URL that can never work is refused
+  // before the reader is asked anything else about it.
+  if (!answer.needs_directory) {
+    notify("Not added", answer.reason || "That is not a URL this can use.");
+    return;
+  }
+  // The folder is the one thing a URL cannot say, so it is asked rather than guessed.
+  const folder = await pickFolder(folders, answer.name);
+  if (!folder) return;
+  const confirmed = await dlPost("/models/check", {
+    url: answer.url, name: answer.name, directory: folder,
+  });
+  if (!confirmed.ok) {
+    notify("Not added", confirmed.reason || "That URL cannot be used.");
+    return;
+  }
+  node.properties = node.properties || {};
+  const models = nodeModels(node).filter((item) => item?.url !== confirmed.url);
+  models.push({ name: confirmed.name, url: confirmed.url, directory: folder });
+  node.properties.models = models;
+  app.graph.setDirtyCanvas(true, true);
+  toast(`${confirmed.name} added to this node.`, { kind: "ok" });
+}
+
+// A folder chosen from the ones this ComfyUI has. Presented as a list rather than typed,
+// so the answer is always one the server will accept.
+function pickFolder(folders, name) {
+  return new Promise((resolve) => {
+    const backdrop = el("div", "om-backdrop");
+    const box = el("div", "om-note");
+    box.appendChild(el("div", "om-note-title", "Which folder?"));
+    box.appendChild(factList([["Model", name || "This model"],
+                              ["Loaded from", "A ComfyUI model folder"]]));
+    const select = el("select", "om-side-select");
+    for (const key of folders) {
+      const option = el("option", null, key);
+      option.value = key;
+      select.appendChild(option);
+    }
+    if (folders.includes("checkpoints")) select.value = "checkpoints";
+    box.appendChild(select);
+    const foot = el("div", "om-note-foot");
+    const cancel = el("button", "om-btn", "Cancel");
+    const ok = el("button", "om-btn om-go", "Use this folder");
+    cancel.onclick = () => { backdrop.remove(); resolve(""); };
+    ok.onclick = () => { const value = select.value; backdrop.remove(); resolve(value); };
+    foot.appendChild(cancel);
+    foot.appendChild(ok);
+    box.appendChild(foot);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+    closeOn(backdrop);
+  });
+}
+
+async function downloadNodeModels(node) {
+  const models = nodeModels(node);
+  if (!models.length) return;
+  const answered = new Map();
+  const ready = [];
+  for (const declared of models) {
+    const answer = await dlPost("/models/check", {
+      url: declared.url || "", name: declared.name || "", directory: declared.directory || "",
+    });
+    if (!answer.ok) {
+      notify(`Skipped ${declared.name || declared.url}`, answer.reason || "Not allowed.");
+      continue;
+    }
+    if (!answered.has(answer.owner)) {
+      answered.set(answer.owner, await confirmDownloadTrust(
+        answer.owner, answer.name, false, formatsOf([answer.name])));
+    }
+    if (!answered.get(answer.owner)) continue;
+    ready.push({
+      url: answer.url, name: answer.name, directory: declared.directory, owner: answer.owner,
+      hash: declared.hash, hash_type: declared.hash_type, overwrite: !!answer.installed,
+    });
+  }
+  if (!ready.length || !(await confirmDiskRoom(ready))) return;
+  let queued = 0;
+  for (const model of ready) {
+    if (await queueModel(model, { source: `node ${node.type || ""}`.trim(), askTrust: false })) {
+      queued += 1;
+    }
+  }
+  if (queued) {
+    toast(`Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    if (!floatingPanel("downloads")) openDownloadManager();
+  }
+}
+
+// --- resource monitor ---------------------------------------------------------------------
+
+//: This viewer, so renewing a lease replaces it rather than stacking another.
+const MONITOR_CLIENT = `om-${Math.random().toString(36).slice(2, 10)}`;
+
+let monitorStrip = null;
+let monitorTimer = 0;
+let monitorListening = false;
+
+function monitorInterval() {
+  const asked = Number(panelSetting("openManager.monitorInterval", 2));
+  return Number.isFinite(asked) ? Math.max(1, Math.min(10, asked)) : 2;
+}
+
+function monitorWants(key) {
+  return panelSetting(`openManager.monitor${key}`, true) !== false;
+}
+
+function meterText(used, total) {
+  if (!total) return "-";
+  return `${Math.round((used / total) * 100)}%`;
+}
+
+//: Where a temperature sits on the scale a thermostat draws. Below the floor everything looks
+//: identical; above the ceiling a card is in trouble whatever the exact figure.
+const TEMP_FLOOR = 30;
+const TEMP_CEILING = 95;
+
+function tempShare(degrees) {
+  const span = TEMP_CEILING - TEMP_FLOOR;
+  return Math.max(0, Math.min(100, ((degrees - TEMP_FLOOR) / span) * 100));
+}
+
+function tempColour(degrees) {
+  if (degrees >= 84) return "#f85149";
+  if (degrees >= 70) return "#d29922";
+  return "#3fb950";
+}
+
+//: How the strip is drawn. `mixed` is the default and the reason the others exist: a share of
+//: a total reads naturally as a bar left to right, a temperature reads as a column, and most
+//: people want both read the way they read. The single-axis styles are for anyone who would
+//: rather have one shape than the right one, and the compact ones trade the separate label
+//: for the text sitting on the bar.
+const MONITOR_STYLES = [
+  "mixed", "mixed-compact", "horizontal", "horizontal-compact", "vertical", "vertical-compact",
+];
+
+function monitorStyle() {
+  const asked = String(panelSetting("openManager.monitorStyle", "mixed") || "mixed");
+  return MONITOR_STYLES.includes(asked) ? asked : "mixed";
+}
+
+// How one cell of a given kind should be drawn under the chosen style. `meter` is a share of
+// a total, `thermo` is a temperature.
+function monitorShape(kind) {
+  const style = monitorStyle();
+  const compact = style.endsWith("-compact");
+  const base = compact ? style.slice(0, -"-compact".length) : style;
+  const axis = base === "mixed" ? (kind === "thermo" ? "v" : "h") : base[0];
+  return { axis, compact };
+}
+
+// One cell. The parts are the same whichever way round it is drawn -- a track, something that
+// fills it, a label and a figure -- so the shape is a matter of class names and which way the
+// fill grows, not of four separate builders.
+function monitorCell(kind, key, label, title) {
+  const { axis, compact } = monitorShape(kind);
+  const box = el("span",
+    `om-mon-cell om-mon-${key} om-mon-${axis}${compact ? " om-mon-compact" : ""}`);
+  box.title = title;
+  const track = el("span", axis === "v" ? "om-mon-tube" : "om-mon-bar");
+  const fill = el("span", "om-mon-fill");
+  track.appendChild(fill);
+  const name = el("span", "om-mon-label", label);
+  const value = el("span", `om-mon-value${kind === "thermo" ? " om-mon-degrees" : ""}`, "-");
+
+  if (compact) {
+    // The label and the figure read as one phrase, over the bar or under the column. One
+    // element instead of three is the whole point of the compact styles.
+    const both = el("span", "om-mon-both");
+    both.appendChild(name);
+    both.appendChild(value);
+    if (axis === "v") { box.appendChild(track); box.appendChild(both); }
+    else { box.appendChild(track); box.appendChild(both); }
+  } else {
+    box.appendChild(name);
+    box.appendChild(track);
+    box.appendChild(value);
+  }
+  return { box, fill, value, axis };
+}
+
+// A meter: a share of something with a known total.
+function monitorMeter(key, label, title) {
+  return monitorCell("meter", key, label, title);
+}
+
+// A temperature. Drawn as a column by default, because that is how a thermometer reads and
+// because it tells the two kinds of figure apart at a glance.
+function monitorThermo(label, title) {
+  const parts = monitorCell("thermo", "thermo", label, title);
+  return { ...parts, mercury: parts.fill };
+}
+
+function buildMonitorStrip() {
+  const strip = el("div", `om-mon om-mon-style-${monitorStyle()}`);
+  strip.title = "Open the Memory panel";
+  strip.onclick = () => openMemoryPanel();
+  strip._cells = {
+    cpu: monitorMeter("cpu", "CPU", "Processor load since the last reading"),
+    ram: monitorMeter("ram", "RAM", "System memory in use"),
+  };
+  strip.appendChild(strip._cells.cpu.box);
+  strip.appendChild(strip._cells.ram.box);
+  if (!monitorWants("Cpu")) strip._cells.cpu.box.style.display = "none";
+  if (!monitorWants("Ram")) strip._cells.ram.box.style.display = "none";
+  //: Built from the reading, because how many processors and cards there are is not something
+  //: to assume. Rebuilt only when that set changes, not on every tick.
+  strip._dynamic = el("span", "om-mon-dynamic");
+  strip.appendChild(strip._dynamic);
+  strip._shape = "";
+  strip._parts = [];
+  return strip;
+}
+
+// Lay the strip out for the devices this reading describes. One machine has a card, another
+// has four and a pair of sockets; the strip is built to match rather than to a fixed guess.
+function syncMonitorDevices(reading) {
+  const devices = monitorWants("Vram") ? (reading.devices || []) : [];
+  const temps = monitorWants("Temp") ? (reading.cpu_temps || []) : [];
+  const wantThermo = monitorWants("Temp");
+  const shape = JSON.stringify([
+    devices.map((one) => [one.index, one.name, "temp" in one]),
+    temps.map((one) => one.label),
+    wantThermo,
+  ]);
+  if (monitorStrip._shape === shape) return;
+  monitorStrip._shape = shape;
+  monitorStrip._parts = [];
+  monitorStrip._dynamic.replaceChildren();
+
+  for (const one of temps) {
+    const thermo = monitorThermo(one.label.slice(0, 8), `${one.label} temperature`);
+    monitorStrip._dynamic.appendChild(thermo.box);
+    monitorStrip._parts.push({ kind: "cpu-temp", label: one.label, thermo });
+  }
+  for (const device of devices) {
+    const many = devices.length > 1;
+    const label = many ? `VRAM${device.index}` : "VRAM";
+    const meter = monitorMeter("vram", label, device.name);
+    monitorStrip._dynamic.appendChild(meter.box);
+    monitorStrip._parts.push({ kind: "vram", index: device.index, meter });
+    if (wantThermo && "temp" in device) {
+      const thermo = monitorThermo(many ? `GPU${device.index}` : "GPU",
+                                   `${device.name} temperature`);
+      monitorStrip._dynamic.appendChild(thermo.box);
+      monitorStrip._parts.push({ kind: "gpu-temp", index: device.index, thermo });
+    }
+  }
+}
+
+
+function paintMonitor(reading) {
+  recordReading(reading);
+  if (!monitorStrip?.isConnected) return;
+  syncMonitorDevices(reading);
+  const cells = monitorStrip._cells;
+  const fillTo = (parts, share) => {
+    const held = `${Math.max(0, Math.min(100, share))}%`;
+    if (parts.axis === "v") { parts.fill.style.height = held; parts.fill.style.width = ""; }
+    else { parts.fill.style.width = held; parts.fill.style.height = ""; }
+  };
+  const setMeter = (parts, share, text, title) => {
+    parts.value.textContent = text;
+    fillTo(parts, share);
+    parts.fill.classList.toggle("om-mon-hot", share >= 90);
+    if (title) parts.box.title = title;
+  };
+  const setThermo = (parts, degrees, title) => {
+    parts.value.textContent = `${Math.round(degrees)}°`;
+    fillTo(parts, tempShare(degrees));
+    parts.fill.style.background = tempColour(degrees);
+    if (title) parts.box.title = title;
+  };
+
+  if (typeof reading.cpu === "number") {
+    setMeter(cells.cpu, reading.cpu, `${Math.round(reading.cpu)}%`,
+             reading.cores?.length
+               ? `${Math.round(reading.cpu)}% across ${reading.cores.length} logical processors`
+               : "");
+  }
+  if (reading.ram?.total) {
+    const share = (reading.ram.used / reading.ram.total) * 100;
+    setMeter(cells.ram, share, meterText(reading.ram.used, reading.ram.total),
+             `${bytesText(reading.ram.used)} of ${bytesText(reading.ram.total)} system memory`);
+  }
+
+  const byIndex = new Map((reading.devices || []).map((one) => [one.index, one]));
+  for (const part of monitorStrip._parts) {
+    if (part.kind === "vram") {
+      const device = byIndex.get(part.index);
+      if (!device?.total) continue;
+      const share = (device.used / device.total) * 100;
+      const busy = typeof device.util === "number" ? ` · ${device.util}% busy` : "";
+      setMeter(part.meter, share, meterText(device.used, device.total),
+               `${bytesText(device.used)} of ${bytesText(device.total)} on ${device.name}${busy}`);
+    } else if (part.kind === "gpu-temp") {
+      const device = byIndex.get(part.index);
+      if (device && typeof device.temp === "number") {
+        setThermo(part.thermo, device.temp, `${device.name} at ${device.temp}°C`);
+      }
+    } else if (part.kind === "cpu-temp") {
+      const found = (reading.cpu_temps || []).find((one) => one.label === part.label);
+      if (found) setThermo(part.thermo, found.temp, `${found.label} at ${found.temp}°C`);
+    }
+  }
+}
+
+async function renewMonitorLease() {
+  if (!monitorStrip?.isConnected) return;
+  // A hidden tab is not being read, so it stops asking and the server stops sampling.
+  if (document.hidden) return;
+  try {
+    const answer = await dlPost("/monitor", {
+      client: MONITOR_CLIENT, interval: monitorInterval(),
+    });
+    if (answer?.reading) paintMonitor(answer.reading);
+  } catch {
+    // The server will drop the lease on its own.
+  }
+}
+
+function startMonitor() {
+  if (!monitorListening) {
+    // Registering the type is what makes ComfyUI dispatch it rather than report it as an
+    // unknown message, so this goes on before the first push can arrive.
+    api.addEventListener("open_manager.monitor", (event) => paintMonitor(event.detail || {}));
+    monitorListening = true;
+  }
+  clearInterval(monitorTimer);
+  // Renewed at a third of the lease's life, so one missed call does not drop it.
+  monitorTimer = setInterval(renewMonitorLease, Math.max(1000, monitorInterval() * 1000));
+  renewMonitorLease();
+}
+
+function stopMonitor() {
+  clearInterval(monitorTimer);
+  monitorTimer = 0;
+  dlPost("/monitor", { client: MONITOR_CLIENT, release: true }).catch(() => {});
+}
+
+// Where the readout goes, and what it goes in front of.
+//
+// The control bar is the default because that is where ComfyUI already gathers this sort of
+// thing, and where another monitor would be if one were installed -- so the two sit beside
+// each other rather than in different corners of the window.
+function monitorHost(fallback) {
+  if (panelSetting("openManager.monitorPlacement", "control") !== "topbar") {
+    // Beside whatever else the control bar is carrying, if anything.
+    const beside = document.getElementById("crystools-monitors-root");
+    if (beside?.parentElement) return { host: beside.parentElement, before: beside };
+    const bar = document.querySelector(".actionbar-container");
+    if (bar) {
+      const group = bar.querySelector(".flex.gap-2") || bar.firstElementChild || bar;
+      return { host: group, before: group.firstChild };
+    }
+    // No control bar on this interface; the tab strip is the remaining place.
+  }
+  // Ahead of the account control rather than after it: that button is the end of the strip
+  // and nothing should read as sitting past it.
+  const tabs = document.querySelector(".workflow-tabs-container.pointer-events-auto");
+  const trailing = tabs?.querySelector(".ml-auto");
+  if (trailing) return { host: trailing, before: trailing.firstChild };
+  return fallback ? { host: fallback, before: fallback.firstChild } : null;
+}
+
+// A compact readout, shown when it is switched on and not otherwise.
+function mountMonitor(slot) {
+  if (panelSetting("openManager.monitor", false) === false) return false;
+  if (document.querySelector(".om-mon")) return true;
+  const where = monitorHost(slot);
+  if (!where) return false;
+  monitorStrip = buildMonitorStrip();
+  where.host.insertBefore(monitorStrip, where.before);
+  startMonitor();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopMonitor();
+    else if (monitorStrip?.isConnected) startMonitor();
+  });
+  window.addEventListener("pagehide", stopMonitor);
+  return true;
+}
+
+// --- the run bar --------------------------------------------------------------------------------
+
+//: One run, as it is understood so far. ComfyUI never broadcasts how many nodes a prompt has,
+//: so the total is read from the queue once and allowed to grow: an expanding node -- a loop,
+//: a subgraph -- creates nodes that were never in the prompt that was submitted.
+const runBar = {
+  el: null,
+  promptId: "",
+  total: 0,
+  submitted: 0,
+  done: new Set(),
+  seen: new Set(),
+  active: null,
+  iteration: 0,
+  loopAnchor: null,
+  expanded: false,
+  error: "",
+  //: node id -> class name, read from the queued prompt. The graph can name its own nodes;
+  //: a run submitted from the API or another tab is not in this graph at all, and "node 5"
+  //: tells the reader nothing.
+  types: new Map(),
+};
+
+//: The pack's own colours, for a palette that offers nothing but grey. From the project's
+//: own mark: blue leads, yellow answers.
+const BRAND_BLUE = "#84bbe7";
+const BRAND_YELLOW = "#f9f276";
+
+//: A colour at or below this saturation is grey, whatever its hue claims. ComfyUI's stock
+//: node colour is a dark grey, and a grey progress bar reads as a disabled one.
+const GREY_AT = 22;
+
+function runHex(colour) {
+  const text = String(colour || "").trim();
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(text);
+  if (short) return [1, 2, 3].map((i) => parseInt(short[i] + short[i], 16));
+  const full = /^#([0-9a-f]{6})$/i.exec(text);
+  if (full) {
+    const value = parseInt(full[1], 16);
+    return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  }
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(text);
+  if (rgb) {
+    const parts = rgb[1].split(",").map((one) => parseFloat(one));
+    if (parts.length >= 3 && parts.every((one) => Number.isFinite(one))) return parts.slice(0, 3);
+  }
+  return null;
+}
+
+function runIsGrey(colour) {
+  const rgb = runHex(colour);
+  if (!rgb) return true;
+  return Math.max(...rgb) - Math.min(...rgb) <= GREY_AT;
+}
+
+// Lighter for a positive amount, darker for a negative one.
+function runShade(colour, amount) {
+  const rgb = runHex(colour) || runHex(BRAND_BLUE);
+  const moved = rgb.map((one) => (amount >= 0
+    ? one + (255 - one) * amount
+    : one * (1 + amount)));
+  return `rgb(${moved.map((one) => Math.round(Math.max(0, Math.min(255, one)))).join(", ")})`;
+}
+
+function runAlpha(colour, alpha) {
+  const rgb = runHex(colour) || runHex(BRAND_BLUE);
+  return `rgba(${rgb.map((one) => Math.round(one)).join(", ")}, ${alpha})`;
+}
+
+// The graph's progress takes the colour a node's header wears in the palette in use, so the
+// bar belongs to the theme rather than to us. Where that is grey, the pack's own blue stands
+// in: a grey bar reads as one that is not doing anything.
+function runMainColour() {
+  const header = String(window.LiteGraph?.NODE_DEFAULT_COLOR || "");
+  return !runIsGrey(header) ? header : BRAND_BLUE;
+}
+
+// The running node's own colour, by the same rules the canvas draws it with, so the block
+// filling in is the colour of the node you can see filling it. A run submitted from
+// elsewhere is not in this graph, so its class is looked up for a category instead.
+function runNodeColour(nodeId, type) {
+  let node = null;
+  try {
+    node = app.graph?.getNodeById?.(Number(nodeId)) || null;
+  } catch {
+    node = null;
+  }
+  if (!node && type) {
+    const category = window.LiteGraph?.registered_node_types?.[type]?.category || "";
+    node = { type, category };
+  }
+  const tint = node ? nodeTint(node) : "";
+  return tint && !runIsGrey(tint) ? tint : BRAND_YELLOW;
+}
+
+function buildRunBar() {
+  const bar = el("div", "om-prog");
+  const track = el("div", "om-prog-track");
+  // The node's own progress goes in first, so the graph's progress paints over it rather
+  // than beside it: a finished node's block belongs to the graph.
+  const sub = el("div", "om-prog-sub");
+  const main = el("div", "om-prog-main");
+  track.appendChild(sub);
+  track.appendChild(main);
+  bar.appendChild(track);
+  const text = el("div", "om-prog-text", "");
+  bar.appendChild(text);
+  bar.parts = { track, sub, main, text };
+  return bar;
+}
+
+// What a node is called, for the readout. The graph knows; the progress message only carries
+// ids, and an id on its own tells the reader nothing.
+function runNodeLabel(nodeId) {
+  const id = String(nodeId);
+  try {
+    const node = app.graph?.getNodeById?.(Number(id));
+    if (node?.title || node?.type) return node.title || node.type;
+  } catch {
+    // Not in this graph, which is normal for a run submitted from somewhere else.
+  }
+  return runBar.types.get(id) || `node ${id}`;
+}
+
+// How many nodes the prompt has. Read from the queue rather than from this tab's own submit,
+// so a run started from the API or another tab is measured too instead of reading "??%".
+async function runTotalFor(promptId) {
+  try {
+    const queue = await (await api.fetchApi("/queue")).json();
+    const running = (queue.queue_running || []).find((item) => item?.[1] === promptId);
+    const prompt = running?.[2];
+    if (!prompt || typeof prompt !== "object") return 0;
+    // The same read gives every node's class, which is what the readout should say.
+    runBar.types = new Map(Object.entries(prompt)
+      .map(([id, node]) => [String(id), String(node?.class_type || "")])
+      .filter(([, type]) => type));
+    return Object.keys(prompt).length;
+  } catch {
+    return 0;
+  }
+}
+
+function runBarReset(promptId) {
+  runBar.promptId = promptId || "";
+  runBar.total = 0;
+  runBar.submitted = 0;
+  runBar.done.clear();
+  runBar.seen.clear();
+  runBar.active = null;
+  runBar.iteration = 0;
+  runBar.loopAnchor = null;
+  runBar.expanded = false;
+  runBar.error = "";
+  runBar.types = new Map();
+}
+
+function paintRunBar() {
+  const bar = runBar.el;
+  if (!bar?.isConnected) return;
+  const { sub, main, text } = bar.parts;
+  const total = Math.max(runBar.total, runBar.done.size, 1);
+  const finished = Math.min(runBar.done.size, total);
+  const share = (finished / total) * 100;
+  const slice = 100 / total;
+
+  // Recoloured as it paints rather than fixed when it was built, so switching palette during
+  // a run is followed rather than waited out.
+  if (!runBar.error) {
+    const lead = runMainColour();
+    bar.style.setProperty("--om-prog-from", runShade(lead, -0.4));
+    bar.style.setProperty("--om-prog-to", lead);
+    bar.style.setProperty("--om-prog-cap", runShade(lead, 0.6));
+    bar.style.setProperty("--om-prog-glow", runAlpha(lead, 0.85));
+    bar.style.setProperty("--om-prog-halo", runAlpha(lead, 0.45));
+    // The node's block is the node's own colour, held back a little so the graph's progress
+    // stays the brighter of the two and keeps the glow to itself.
+    const tint = runBar.active
+      ? runNodeColour(runBar.active.id, runBar.types.get(String(runBar.active.id)))
+      : BRAND_YELLOW;
+    bar.style.setProperty("--om-prog-sub", runShade(tint, -0.42));
+  }
+
+  main.style.width = `${share}%`;
+  // The node's progress occupies the block it is working through, and no more: a node that
+  // is a fifth of the graph cannot advance the bar by more than a fifth however many steps
+  // it takes.
+  const node = runBar.active;
+  const within = node && node.max > 0 ? Math.min(1, node.value / node.max) : 0;
+  sub.style.left = `${share}%`;
+  sub.style.width = `${node ? Math.min(slice * within, 100 - share) : 0}%`;
+
+  bar.classList.toggle("om-prog-error", !!runBar.error);
+  const percent = Math.min(100, Math.round(((finished + within) / total) * 100));
+  const parts = [`${percent}%`, `${finished}/${total} nodes`];
+  if (runBar.expanded) parts[1] += "+";
+  if (runBar.iteration > 1) parts.push(`iteration ${runBar.iteration}`);
+  if (node) {
+    parts.push(node.max > 1
+      ? `${node.label} ${node.value}/${node.max}`
+      : node.label);
+  }
+  if (runBar.error) parts.push(runBar.error);
+  text.textContent = parts.join(" · ");
+  bar.title = runBar.expanded
+    ? "A node expanded into more nodes than the prompt held, so the total grew. The + says so."
+    : "Graph progress over the running node's own.";
+}
+
+function runBarShow(on) {
+  const bar = runBar.el;
+  if (!bar) return;
+  bar.classList.toggle("om-prog-on", on);
+}
+
+// Every reading comes from ComfyUI's own progress messages. `progress_state` carries one
+// entry per non-pending node, which is what makes a per-node bar possible at all; the older
+// `progress` message only ever describes whichever node happens to be running.
+function onProgressState(detail) {
+  if (!runBar.el) return;
+  const nodes = detail?.nodes || {};
+  if (detail?.prompt_id && detail.prompt_id !== runBar.promptId) runBarReset(detail.prompt_id);
+
+  let active = null;
+  for (const [id, entry] of Object.entries(nodes)) {
+    const state = entry?.state;
+    // A node that runs again having already finished is a loop coming round. The first such
+    // node anchors the cycle, so the count follows the loop rather than every node in it.
+    if (state === "running" && runBar.done.has(id)) {
+      runBar.done.delete(id);
+      if (runBar.loopAnchor === null) {
+        runBar.loopAnchor = id;
+        runBar.iteration = 2;
+      } else if (id === runBar.loopAnchor) {
+        runBar.iteration += 1;
+      }
+    }
+    runBar.seen.add(id);
+    if (state === "finished") runBar.done.add(id);
+    if (state === "error") runBar.error = `error in ${runNodeLabel(entry.display_node_id || id)}`;
+    if (state === "running") {
+      active = {
+        id,
+        value: Number(entry.value) || 0,
+        max: Number(entry.max) || 0,
+        label: runNodeLabel(entry.display_node_id || entry.real_node_id || id),
+      };
+    }
+  }
+  runBar.active = active;
+  // Expansion: more nodes have been seen than the prompt was submitted with.
+  if (runBar.submitted && runBar.seen.size > runBar.submitted) {
+    runBar.expanded = true;
+    runBar.total = Math.max(runBar.total, runBar.seen.size);
+  }
+  paintRunBar();
+}
+
+// Where the bar goes. ComfyUI's current layout puts a strip above the header in
+// `comfyui-body-top`, and that container carries its own stacking context, so a bar pinned
+// to the window behind it is invisible however high its own z-index is. Mounting into the
+// container is the only way to share that space rather than fight it. Older layouts have no
+// such container, so the bar pins itself to the top of the window there instead.
+function runBarHost() {
+  const top = document.querySelector(".comfyui-body-top");
+  if (top) return { host: top, before: top.firstChild, flow: true };
+  return { host: document.body, before: null, flow: false };
+}
+
+function mountRunBar() {
+  if (panelSetting("openManager.runBar", false) === false) return false;
+  if (document.querySelector(".om-prog")) return true;
+  const where = runBarHost();
+  runBar.el = buildRunBar();
+  runBar.el.classList.add(where.flow ? "om-prog-flow" : "om-prog-pinned");
+  where.host.insertBefore(runBar.el, where.before);
+  paintRunBar();
+  return true;
+}
+
+function wireRunBar() {
+  api.addEventListener("execution_start", async (event) => {
+    if (!runBar.el) return;
+    runBarReset(event.detail?.prompt_id || "");
+    runBarShow(true);
+    paintRunBar();
+    const total = await runTotalFor(runBar.promptId);
+    if (total) {
+      runBar.submitted = total;
+      runBar.total = Math.max(runBar.total, total);
+      paintRunBar();
+    }
+  });
+  // Cached nodes are done before they start. They never reach `progress_state`, so without
+  // this a run that reuses most of its graph would sit at nothing until the one new node ran.
+  api.addEventListener("execution_cached", (event) => {
+    if (!runBar.el) return;
+    for (const id of event.detail?.nodes || []) {
+      runBar.done.add(String(id));
+      runBar.seen.add(String(id));
+    }
+    paintRunBar();
+  });
+  api.addEventListener("progress_state", (event) => onProgressState(event.detail));
+  api.addEventListener("execution_error", (event) => {
+    if (!runBar.el) return;
+    runBar.error = String(event.detail?.exception_type || "failed").split(".").pop();
+    runBar.active = null;
+    paintRunBar();
+    setTimeout(() => runBarShow(false), 6000);
+  });
+  api.addEventListener("execution_success", () => {
+    if (!runBar.el) return;
+    runBar.active = null;
+    if (runBar.total) runBar.done = new Set([...runBar.seen]);
+    paintRunBar();
+    setTimeout(() => { if (!runBar.active) runBarShow(false); }, 1400);
+  });
+  // Anything that ends a run without saying so, including an interrupt.
+  api.addEventListener("executing", (event) => {
+    if (!runBar.el) return;
+    if (event.detail?.node == null && event.detail !== null) return;
+    if (event.detail === null || event.detail?.node === null) {
+      runBar.active = null;
+      paintRunBar();
+      setTimeout(() => { if (!runBar.active) runBarShow(false); }, 1400);
+    }
+  });
+}
+
+// --- memory panel ------------------------------------------------------------------------------
+
+//: Readings kept for the graphs. At one a second this is four minutes of history, which is
+//: enough to see a model load and not enough to be worth storing anywhere.
+const MEMORY_HISTORY = 240;
+
+//: Kept whether or not the panel is open, so opening it shows a graph rather than a blank
+//: box waiting to fill.
+const memoryHistory = { cpu: [], ram: [], vram: [] };
+
+//: The panel asks for readings on its own lease, so it can have them faster than the strip
+//: without changing what the strip asked for.
+const MEMORY_CLIENT = `${MONITOR_CLIENT}-panel`;
+
+function recordReading(reading) {
+  const push = (key, value) => {
+    if (typeof value !== "number" || Number.isNaN(value)) return;
+    const series = memoryHistory[key];
+    series.push(value);
+    if (series.length > MEMORY_HISTORY) series.shift();
+  };
+  push("cpu", reading.cpu);
+  if (reading.ram?.total) push("ram", (reading.ram.used / reading.ram.total) * 100);
+  if (reading.vram?.total) push("vram", (reading.vram.used / reading.vram.total) * 100);
+}
+
+// A filled line of recent history, drawn the way a resource monitor draws one: newest at the
+// right, the scale fixed at nought to a hundred so two graphs can be compared by eye.
+function drawGraph(canvas, series, colour) {
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || 260;
+  const height = canvas.clientHeight || 54;
+  if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+  }
+  const pen = canvas.getContext("2d");
+  pen.setTransform(ratio, 0, 0, ratio, 0, 0);
+  pen.clearRect(0, 0, width, height);
+
+  const style = getComputedStyle(canvas);
+  pen.strokeStyle = style.getPropertyValue("--om-border") || "#30363d";
+  pen.lineWidth = 1;
+  for (let line = 1; line < 4; line += 1) {
+    const y = (height / 4) * line;
+    pen.beginPath();
+    pen.moveTo(0, y + 0.5);
+    pen.lineTo(width, y + 0.5);
+    pen.stroke();
+  }
+  if (!series.length) return;
+
+  const step = width / (MEMORY_HISTORY - 1);
+  const at = (index) => ({
+    x: width - (series.length - 1 - index) * step,
+    y: height - (Math.max(0, Math.min(100, series[index])) / 100) * height,
+  });
+  pen.beginPath();
+  pen.moveTo(at(0).x, height);
+  for (let index = 0; index < series.length; index += 1) {
+    const point = at(index);
+    pen.lineTo(point.x, point.y);
+  }
+  pen.lineTo(at(series.length - 1).x, height);
+  pen.closePath();
+  pen.fillStyle = `${colour}33`;
+  pen.fill();
+
+  pen.beginPath();
+  for (let index = 0; index < series.length; index += 1) {
+    const point = at(index);
+    if (index === 0) pen.moveTo(point.x, point.y);
+    else pen.lineTo(point.x, point.y);
+  }
+  pen.strokeStyle = colour;
+  pen.lineWidth = 1.5;
+  pen.stroke();
+}
+
+// A header bar, a graph that runs the full width beneath it, and a line of figures. The bars
+// are what separate one reading from the next, so the graphs need no frame of their own.
+function memoryBar(label) {
+  const bar = el("div", "om-mem-bar");
+  bar.appendChild(el("span", "om-mem-bar-label", label));
+  const value = el("span", "om-mem-bar-value", "");
+  bar.appendChild(value);
+  return { bar, value };
+}
+
+function buildGraphBlock(key, label, colour) {
+  const box = el("div", "om-mem-graph");
+  const head = memoryBar(label);
+  head.value.textContent = "-";
+  // The bar is the control: a graph nobody is watching folds away and gives its height to the
+  // ones that are, and the reading stays on the bar so it is still legible while folded.
+  head.bar.classList.add("om-mem-bar-toggle");
+  const chevron = el("span", "om-mem-bar-fold", "▾");
+  head.bar.insertBefore(chevron, head.bar.firstChild);
+  box.appendChild(head.bar);
+  const canvas = el("canvas", "om-mem-canvas");
+  box.appendChild(canvas);
+  const detail = el("div", "om-mem-graph-detail", "");
+  box.appendChild(detail);
+
+  const setFolded = (folded) => {
+    box.classList.toggle("om-mem-folded", folded);
+    chevron.textContent = folded ? "▸" : "▾";
+    head.bar.title = folded ? `Show the ${label} graph` : `Hide the ${label} graph`;
+    dlRemember(`om-mem-fold-${key}`, folded ? "1" : "0");
+  };
+  head.bar.onclick = () => setFolded(!box.classList.contains("om-mem-folded"));
+  setFolded(dlRecall(`om-mem-fold-${key}`, "0") === "1");
+
+  return { box, canvas, value: head.value, detail, key, colour,
+           folded: () => box.classList.contains("om-mem-folded") };
+}
+
+//: Colours for the map, in the order the devices are reported: the one holding most of the
+//: model first. A device is a colour rather than a label so a long resident stretch reads as
+//: one band.
+const BLOCK_COLOURS = ["#a371f7", "#3fb950", "#58a6ff", "#d29922", "#db61a2", "#39c5cf"];
+
+function keyItem(device, seat) {
+  const item = el("span", "om-mem-key-item");
+  const swatch = el("span", "om-mem-swatch");
+  swatch.style.background = blockColour(seat);
+  item.appendChild(swatch);
+  item.appendChild(el("span", null, `${device.device} · ${bytesText(device.bytes)}`));
+  return item;
+}
+
+function blockColour(seat) {
+  return seat < 0 ? "transparent" : BLOCK_COLOURS[seat % BLOCK_COLOURS.length];
+}
+
+//: How large a square wants to be, and the space between them. The real size is worked out
+//: from these so the squares divide the width exactly.
+const BLOCK_CELL = 7;
+const BLOCK_GAP = 1;
+
+// Squares laid out to fill the width exactly, rather than wrapped and left ragged.
+//
+// Drawn rather than built from elements. Flex wrapping divides a row by whole squares and
+// leaves whatever does not fit as a gap at the end, so every row ends in a different place
+// and the map looks like it has holes in it. Working out the size from the width instead
+// means the columns always come out even, and a map costs one node rather than hundreds.
+function paintBlockMap(canvas, cells) {
+  const width = canvas.clientWidth;
+  if (!width || !cells.length) return;
+  const columns = Math.max(1, Math.floor((width + BLOCK_GAP) / (BLOCK_CELL + BLOCK_GAP)));
+  const size = (width - (columns - 1) * BLOCK_GAP) / columns;
+  const rows = Math.ceil(cells.length / columns);
+  const height = Math.round(rows * size + (rows - 1) * BLOCK_GAP);
+
+  const ratio = window.devicePixelRatio || 1;
+  canvas.style.height = `${height}px`;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  const pen = canvas.getContext("2d");
+  pen.setTransform(ratio, 0, 0, ratio, 0, 0);
+  pen.clearRect(0, 0, width, height);
+
+  cells.forEach((seat, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    pen.fillStyle = blockColour(seat);
+    pen.fillRect(column * (size + BLOCK_GAP), row * (size + BLOCK_GAP), size, size);
+  });
+}
+
+// Where each part of a model sits, drawn the way a disk map is drawn: one square per stretch
+// of the model, in the order the model is written, coloured by the device holding it.
+function buildBlockMap(map) {
+  const box = el("div", "om-mem-map");
+  // The frame carries the border and the padding. A canvas measured with padding on it
+  // reports a width it does not draw into, and the map comes out stretched.
+  const frame = el("div", "om-mem-grid-frame");
+  const canvas = el("canvas", "om-mem-grid");
+  frame.appendChild(canvas);
+  box.appendChild(frame);
+  let cells = map.cells || [];
+  const draw = () => paintBlockMap(canvas, cells);
+  // Its width is not settled when it is built and changes with the window, so the element is
+  // watched rather than the drawing being timed to guesses about layout.
+  const watcher = new ResizeObserver(draw);
+  watcher.observe(canvas);
+  box._redraw = draw;
+
+  const key = el("div", "om-mem-key");
+  for (const [seat, device] of (map.devices || []).entries()) {
+    key.appendChild(keyItem(device, seat));
+  }
+  // Named for what was actually counted. The page figures are coarser than the byte figure on
+  // the row above, and saying which is which stops the two looking like a contradiction.
+  const note = el("span", "om-mem-key-note", `${map.modules} ${map.unit || "blocks"}`);
+  note.title = map.source === "pages"
+    ? "Read from the streaming library, a page at a time, so the shares here step in whole "
+      + "pages and differ slightly from the byte figure above."
+    : "Read from the model's own modules.";
+  key.appendChild(note);
+  box.appendChild(key);
+
+  // Repainting the same canvas and rewriting the key is what keeps a map that changes every
+  // few seconds from flashing.
+  return {
+    el: box,
+    update: (next) => {
+      cells = next.cells || [];
+      draw();
+      note.textContent = `${next.modules} ${next.unit || "blocks"}`;
+      const items = [...key.querySelectorAll(".om-mem-key-item")];
+      const devices = next.devices || [];
+      if (items.length !== devices.length) {
+        key.replaceChildren(...devices.map((device, seat) => keyItem(device, seat)), note);
+      } else {
+        devices.forEach((device, seat) => {
+          items[seat].lastChild.textContent = `${device.device} · ${bytesText(device.bytes)}`;
+          items[seat].firstChild.style.background = blockColour(seat);
+        });
+      }
+    },
+  };
+}
+
+// Every map in the panel, redrawn at the width it now has.
+function repaintBlockMaps(root) {
+  for (const map of root.querySelectorAll(".om-mem-map")) map._redraw?.();
+}
+
+// A model ComfyUI is holding, and where its weights are.
+// A model ComfyUI is holding. Built once and then kept up to date: these figures change every
+// few seconds, and a row rebuilt on every reading is a row that blinks.
+function buildMemoryModelRow(model, refresh) {
+  const row = el("div", "om-mem-model");
+
+  const top = el("div", "om-dl-top");
+  const name = el("span", "om-dl-name", model.name);
+  const size = el("span", "om-lib-size", bytesText(model.total));
+  top.appendChild(name);
+  top.appendChild(size);
+  // One model at a time, and only while the queue is idle -- the server refuses otherwise
+  // rather than pulling weights out from under a sampler.
+  const drop = el("button", "om-btn om-mem-drop", "Unload");
+  drop.title = "Unload this model and its clones. ComfyUI loads it again when a prompt needs "
+    + "it. Refused while a prompt is running.";
+  drop.onclick = async () => {
+    // Asked for the same reason the two freeing buttons are: this hands memory back without
+    // looking at what is holding it. The one guard that does exist is named rather than
+    // relied on silently.
+    const go = await chooseAction(`Unload ${row._name}?`,
+      `This unloads ${row._name} regardless of what is holding it.`,
+      [{ key: "go", label: "Unload", primary: true }],
+      { wide: true, facts: [
+        ["Frees", bytesText(row._total || 0)],
+        ["Also unloads", "Any clone of this model, meaning a second copy made for another device"],
+        ["Costs", "The next prompt that needs it loads it again"],
+        ["While a prompt is running", "Refused, rather than pulling weights out from under it"],
+      ] });
+    if (!go) return;
+    drop.disabled = true;
+    let answer;
+    try {
+      answer = await dlPost("/monitor/unload", { id: row._id, name: row._name });
+    } catch (error) {
+      answer = { ok: false, reason: error.message };
+    }
+    drop.disabled = false;
+    if (!answer?.ok) {
+      notify("Not unloaded", answer?.reason || "ComfyUI would not unload it.");
+      return;
+    }
+    toast(`${answer.name || row._name} unloaded${answer.freed ? `, ${bytesText(answer.freed)} freed` : ""}.`,
+          { kind: "ok" });
+    refresh?.();
+  };
+  top.appendChild(drop);
+  row.appendChild(top);
+
+  const bar = el("div", "om-mem-split");
+  const resident = el("div", "om-mem-resident");
+  bar.appendChild(resident);
+  row.appendChild(bar);
+
+  const meta = el("div", "om-dl-where");
+  row.appendChild(meta);
+
+  const slot = el("div", "om-mem-map-slot");
+  row.appendChild(slot);
+
+  //: The map is drawn into the same canvas each time, so it changes rather than flashing.
+  let drawn = null;
+
+  const tell = (model) => {
+    name.textContent = model.name;
+    size.textContent = bytesText(model.total);
+    // Identity rather than position: the list is sorted by size and shifts as models come
+    // and go, so the button has to say which model it meant.
+    row._id = model.id;
+    row._name = model.name;
+    row._total = model.total;
+    resident.style.width = `${Math.max(0, Math.min(100, model.share))}%`;
+    resident.title = `${bytesText(model.resident)} on ${model.device}`;
+
+    // The tags are a short list that changes shape, so they are rewritten; the parts that
+    // move continuously are not.
+    const tags = [model.device, `${bytesText(model.resident)} resident`];
+    if (model.offloaded) tags.push(`${bytesText(model.offloaded)} offloaded`);
+    if (model.in_use) tags.push("in use");
+    if (model.pins?.pinned_bytes) tags.push(`${bytesText(model.pins.pinned_bytes)} pinned`);
+    const parts = tags.map((text, index) =>
+      el("span", index ? "om-dl-src" : null, text));
+    if (model.streaming) {
+      // "Streaming" on its own says nothing. What streams is the model's own weights, block
+      // by block, so the tag says that and the map below shows which blocks are where.
+      const tag = el("span", "om-dl-src om-mem-stream", "weights stream in blocks");
+      tag.title = "This model's weights move between host and device while it runs, a block "
+        + "at a time, so what is resident changes as it works.";
+      parts.splice(model.offloaded ? 3 : 2, 0, tag);
+    }
+    if (model.pins?.failed) parts.push(el("span", "om-dl-src om-dl-bad", "pinning failed"));
+    meta.replaceChildren(...parts);
+
+    // Asked for per model, because walking one is cheap and walking every one is not.
+    libGet(`/monitor/blocks?index=${model.index}&cells=240`)
+      .then((found) => {
+        if (!slot.isConnected) return;
+        if (!found?.ok) {
+          drawn = null;
+          slot.replaceChildren(el("div", "om-dl-note", found?.reason || "No block map."));
+          return;
+        }
+        if (drawn) drawn.update(found);
+        else {
+          drawn = buildBlockMap(found);
+          slot.replaceChildren(drawn.el);
+        }
+      })
+      .catch(() => {});
+  };
+
+  tell(model);
+  row._update = tell;
+  return row;
+}
+
+// What the machine is doing, at more length than the strip can show.
+//: What the light can say, and how it says it. The wording is the server's, because the
+//: server is what can tell a slow node from a stalled one; this only decides the colour.
+const ACTIVITY_LOOK = {
+  working: { title: "Working" },
+  stalling: { title: "Potential memory stall" },
+  stalled: { title: "Memory stalled" },
+  oom: { title: "Out of memory" },
+  idle: { title: "Idle" },
+};
+
+// A light in the panel's header. Green while there is work going through, amber where the
+// card has gone quiet with memory full, red after an out-of-memory failure, grey when
+// nothing is running. The reasoning is on the hover, because a colour on its own is a
+// thing to worry about rather than something to act on.
+function buildActivityOrb() {
+  const orb = el("span", "om-orb om-orb-idle");
+  orb.setAttribute("role", "img");
+  orb.tell = (activity) => {
+    const state = ACTIVITY_LOOK[activity?.state] ? activity.state : "idle";
+    if (orb._state !== state) {
+      orb._state = state;
+      orb.className = `om-orb om-orb-${state}`;
+    }
+    const label = activity?.label || ACTIVITY_LOOK[state].title;
+    const detail = activity?.detail || "";
+    orb.title = detail ? `${label}\n${detail}` : label;
+    orb.setAttribute("aria-label", label);
+  };
+  orb.tell(null);
+  return orb;
+}
+
+function openMemoryPanel() {
+  if (floatingPanel("memory")) { closeFloatingPanel("memory"); return null; }
+
+  //: The most recent reading, read by the toolbar and the light as well as the graphs.
+  let latest = null;
+  const panel = createFloatingPanel({
+    key: "memory", title: "Memory", width: 640, height: 560,
+    onClose: () => {
+      clearInterval(panel._tick);
+      dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
+    },
+  });
+  const summary = el("div", "om-dl-summary", "");
+  panel.bar.querySelector(".om-float-badge").appendChild(summary);
+
+  // The light sits at the right of the bar, just inside the close button.
+  const orb = buildActivityOrb();
+  panel.bar.insertBefore(orb, panel.bar.querySelector(".om-float-close"));
+
+  // Freeing memory is ComfyUI's own operation, handed to the thread that owns the models.
+  // Always asked about, because it does not check what is using the memory first: there is
+  // no version of this that is safe to fire by accident, and a button that usually asks is
+  // a button whose confirmation stops being read.
+  const freeing = async (what) => {
+    const running = latest?.activity?.state && latest.activity.state !== "idle";
+    const facts = [...what.facts];
+    if (running) {
+      facts.push(["Running right now", latest.activity.detail || "A prompt is going through."]);
+    }
+    const go = await chooseAction(what.ask, what.warning,
+      [{ key: "go", label: what.action, primary: true }], { wide: true, facts });
+    if (!go) return;
+    const answer = await dlPost("/monitor/free", what.body);
+    if (!answer?.ok) {
+      notify("Not freed", answer?.reason || "ComfyUI would not take the request.");
+      return;
+    }
+    toast(answer.did || "Asked ComfyUI to free memory.", { kind: "ok" });
+    setTimeout(() => loadModels(), 1200);
+  };
+
+  // Anchored under the header rather than in it: these two act on the machine, and they
+  // belong with the figures they act on rather than beside the close button.
+  const tools = panel.tools;
+  const clearVram = el("button", "om-btn om-dl-btn", "Clear VRAM");
+  clearVram.title = "Unload every model on the card. They load again when a prompt needs them.";
+  clearVram.onclick = () => freeing({
+    ask: "Clear VRAM?",
+    warning: "This clears VRAM regardless of what is using it.",
+    action: "Clear VRAM",
+    body: { vram: true },
+    facts: [
+      ["Unloads", "Every model ComfyUI is holding, in use or not"],
+      ["A run in progress", "May fail, or stall while it loads what it needs again"],
+      ["Keeps", "The cached results of the last run"],
+    ],
+  });
+  tools.appendChild(clearVram);
+
+  const clearRam = el("button", "om-btn om-dl-btn", "Clear RAM");
+  clearRam.title = "Clear the cached results of the last run. ComfyUI unloads the models "
+    + "with them, because the cached results hold on to them.";
+  clearRam.onclick = () => freeing({
+    ask: "Clear RAM?",
+    warning: "This clears RAM regardless of what is using it, and takes the models with it.",
+    action: "Clear RAM",
+    body: { ram: true },
+    facts: [
+      ["Clears", "The cached results of the last run, in use or not"],
+      ["Also unloads", "Every model. ComfyUI frees the two together, in that direction"],
+      ["A run in progress", "May fail, or repeat work it had kept"],
+    ],
+  });
+  tools.appendChild(clearRam);
+
+  const body = el("div", "om-dl-body om-mem-body");
+  const graphs = [
+    buildGraphBlock("cpu", "CPU", "#58a6ff"),
+    buildGraphBlock("ram", "System memory", "#3fb950"),
+    buildGraphBlock("vram", "Graphics memory", "#a371f7"),
+  ];
+  for (const one of graphs) body.appendChild(one.box);
+
+  body.appendChild(memoryBar("Models held").bar);
+  const modelList = el("div", "om-dl-list om-mem-models");
+  body.appendChild(modelList);
+  panel.body.appendChild(body);
+
+  const paint = () => {
+    if (!panel.el.isConnected) return;
+    for (const one of graphs) {
+      const series = memoryHistory[one.key];
+      if (!one.folded()) drawGraph(one.canvas, series, one.colour);
+      one.value.textContent = series.length ? `${Math.round(series[series.length - 1])}%` : "-";
+    }
+    if (!latest) return;
+    if (latest.ram?.total) {
+      graphs[1].detail.textContent =
+        `${bytesText(latest.ram.used)} of ${bytesText(latest.ram.total)} · ${bytesText(latest.ram.free)} free`;
+    }
+    if (latest.vram?.total) {
+      const busy = typeof latest.vram.util === "number" ? ` · ${latest.vram.util}% busy` : "";
+      const hot = typeof latest.vram.temp === "number" ? ` · ${latest.vram.temp}°C` : "";
+      // The graph follows the first device; the rest are named rather than left out, so a
+      // machine with four cards does not look like a machine with one.
+      const others = (latest.devices || []).slice(1)
+        .map((one) => `GPU${one.index} ${meterText(one.used, one.total)}`
+                      + (typeof one.temp === "number" ? ` ${one.temp}°` : ""))
+        .join(" · ");
+      graphs[2].detail.textContent =
+        `${bytesText(latest.vram.used)} of ${bytesText(latest.vram.total)}${busy}${hot} · ${latest.vram.name}`
+        + (others ? `. Also ${others}` : "");
+    }
+    orb.tell(latest.activity);
+    // A line worth reading, which also means every graph block is the same height.
+    const cores = latest.cores?.length;
+    const hottest = (latest.cpu_temps || [])[0];
+    graphs[0].detail.textContent = [
+      cores ? `${cores} logical processors` : "",
+      cores ? `busiest ${Math.round(Math.max(...latest.cores))}%` : "",
+      hottest ? `${hottest.label} ${hottest.temp}°C` : "",
+    ].filter(Boolean).join(" · ");
+  };
+
+  panel.el.addEventListener("om-float-resize", () => { paint(); repaintBlockMaps(panel.el); });
+
+  // Readings arrive on the same channel the strip listens to, so the panel just watches.
+  const onReading = (event) => {
+    latest = event.detail || {};
+    recordReading(latest);
+    paint();
+  };
+  api.addEventListener("open_manager.monitor", onReading);
+
+  async function loadModels() {
+    if (!panel.el.isConnected) return;
+    let found;
+    try {
+      found = await (await api.fetchApi(`${API}/monitor/models`)).json();
+    } catch {
+      return;
+    }
+    if (!panel.el.isConnected) return;
+    const rows = found.models || [];
+    const totals = found.totals || {};
+    summary.textContent = rows.length
+      ? `${rows.length} held · ${bytesText(totals.resident || 0)} resident of ${bytesText(totals.total || 0)}`
+      : "";
+    if (!rows.length) {
+      modelList._shape = "";
+      const empty = el("div", "om-mem-empty", "No managed models in memory");
+      empty.title = "ComfyUI loads a model when a prompt needs it and keeps it until the "
+        + "memory is wanted for something else.";
+      modelList.replaceChildren(empty);
+      return;
+    }
+    // Rebuilt only when the set of models changes; otherwise every row is told the new
+    // figures and keeps its own elements.
+    const shape = rows.map((one) => one.name).join("|");
+    if (modelList._shape !== shape) {
+      modelList._shape = shape;
+      modelList.replaceChildren(...rows.map((one, position) =>
+        buildMemoryModelRow({ ...one, index: position }, loadModels)));
+    } else {
+      const built = [...modelList.children];
+      rows.forEach((one, position) =>
+        built[position]?._update?.({ ...one, index: position }));
+    }
+  }
+
+  // Its own lease, asked for faster than the strip so the graphs move smoothly. The server
+  // samples at whichever of the two is quicker and stops when both are gone.
+  const renew = () => {
+    if (!panel.el.isConnected) return;
+    dlPost("/monitor", { client: MEMORY_CLIENT, interval: 1 })
+      .then((answer) => { if (answer?.reading) { latest = answer.reading; recordReading(latest); paint(); } })
+      .catch(() => {});
+  };
+  panel._tick = setInterval(() => { renew(); loadModels(); }, 3000);
+  renew();
+  loadModels();
+  paint();
+
+  // The listener outlives nothing: when the panel goes, so does it.
+  const stopWatching = () => {
+    if (panel.el.isConnected) return;
+    api.removeEventListener("open_manager.monitor", onReading);
+    clearInterval(watcher);
+  };
+  const watcher = setInterval(stopWatching, 2000);
+  return panel;
+}
+
+// --- model library ---------------------------------------------------------------------------
+
+//: Rows built at once. A library of tens of thousands is a real shape, and a panel that
+//: tries to draw all of it stops responding.
+const LIB_MAX_ROWS = 300;
+
+//: Read once per panel session. Walking is cheap; asking for it on a timer is not.
+let libIndex = null;
+let libRefs = null;
+let libDupes = null;
+let libStorage = null;
+
+async function libGet(path) {
+  return (await api.fetchApi(`${API}${path}`)).json();
+}
+
+async function libPost(path, body) {
+  const answer = await api.fetchApi(`${API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  return answer.json();
+}
+
+//: What the library shows. Each tab answers a different question of the same files, so a file
+//: can appear under more than one.
+const LIB_TABS = [
+  { key: "all", title: "All",
+    empty: "No model files found in the registered folders." },
+  { key: "duplicates", title: "Duplicates",
+    empty: "No file is held in more than one place." },
+  { key: "unreferenced", title: "No reference found",
+    empty: "Every model is referenced by a workflow." },
+  { key: "absent", title: "Not downloaded",
+    empty: "Every model a workflow asks for is on disk." },
+  { key: "storage", title: "Storage",
+    empty: "Nothing indexed yet." },
+];
+
+function libFolderOf(path) {
+  return dirOf(path);
+}
+
+// One file on disk.
+function buildLibraryRow(file, refresh, { note = "" } = {}) {
+  const row = el("div", "om-lib-row");
+
+  const top = el("div", "om-dl-top");
+  top.appendChild(el("span", "om-dl-name", file.name));
+  top.appendChild(el("span", "om-lib-size", bytesText(file.size)));
+  row.appendChild(top);
+
+  const where = el("div", "om-dl-where");
+  where.appendChild(el("span", null, file.directory));
+  const place = el("span", "om-dl-src", libFolderOf(file.path));
+  place.title = file.path;
+  where.appendChild(place);
+  if (file.mtime) where.appendChild(el("span", "om-dl-src", sinceText(file.mtime)));
+  row.appendChild(where);
+
+  if (note) row.appendChild(el("div", "om-dl-note", note));
+
+  const foot = el("div", "om-dl-foot");
+  const digest = el("span", "om-dl-size", file.sha256 ? `SHA256 ${file.sha256}` : "");
+  foot.appendChild(digest);
+  const acts = el("span", "om-dl-acts");
+  const manage = el("button", "om-btn om-dl-btn om-caret", "Manage ▾");
+  manage.onclick = (event) => {
+    event.stopPropagation();
+    openRowMenu(manage, { items: libraryMenu(file, digest, refresh), align: "right" });
+  };
+  acts.appendChild(manage);
+  foot.appendChild(acts);
+  row.appendChild(foot);
+  return row;
+}
+
+// What one file on disk offers. Deletion is per file and confirmed; there is no action here
+// that acts on more than the row it was opened from.
+// Whether the library may read a file's contents. Off, it still describes what is on disk --
+// names, sizes, folders, what no workflow references -- and never opens one. On a library
+// that lives on a network share or a metered disk, an invitation to read 891 GB is not a
+// convenience, so the invitation is what goes away rather than the answer being refused
+// after it is accepted.
+function mayHash() {
+  return panelSetting("openManager.hashOnDemand", true) !== false;
+}
+
+function libraryMenu(file, digest, refresh) {
+  if (!mayHash()) {
+    return [
+      { label: "Where it came from", fn: () => showProvenance(file) },
+      { label: "Copy path", fn: () => {
+          navigator.clipboard?.writeText(file.path)
+            .then(() => toast("Path copied.", { kind: "ok" }))
+            .catch(() => notify("Not copied", "The clipboard is not available here."));
+        } },
+      { label: "Delete file", danger: true, fn: () => confirmLibraryDelete(file, refresh) },
+    ];
+  }
+  return [
+    { label: file.sha256 ? "Re-hash" : "Hash", fn: async () => {
+        const note = toast(`Hashing ${file.name}...`, { sticky: true });
+        const answer = await libPost("/library/hash", { path: file.path, force: !!file.sha256 });
+        note.remove();
+        if (!answer.ok) { notify("Not hashed", answer.reason || "The file could not be read."); return; }
+        file.sha256 = answer.sha256;
+        digest.textContent = `SHA256 ${answer.sha256}`;
+        toast("Hashed.", { kind: "ok" });
+      } },
+    { label: "Where it came from", fn: () => showProvenance(file) },
+    { label: "Copy path", fn: () => {
+        navigator.clipboard?.writeText(file.path)
+          .then(() => toast("Path copied.", { kind: "ok" }))
+          .catch(() => notify("Not copied", "The clipboard is not available here."));
+      } },
+    { label: "Copy hash", fn: async () => {
+        const value = file.sha256 || (await libPost("/library/hash", { path: file.path })).sha256;
+        if (!value) { notify("No hash", "The file could not be read."); return; }
+        file.sha256 = value;
+        digest.textContent = `SHA256 ${value}`;
+        navigator.clipboard?.writeText(value)
+          .then(() => toast("Hash copied.", { kind: "ok" }))
+          .catch(() => notify("Not copied", "The clipboard is not available here."));
+      } },
+    { label: "Delete file", danger: true, fn: () => confirmLibraryDelete(file, refresh) },
+  ];
+}
+
+// Deleting one model, asked for the same way whichever menu it was reached from.
+async function confirmLibraryDelete(file, refresh) {
+  const go = await chooseAction(`Delete ${file.name}?`, "",
+    [{ key: "go", label: "Delete file", primary: true }],
+    { wide: true, facts: [
+      ["File", file.path],
+      ["Folder", file.directory],
+      ["Size", bytesText(file.size)],
+      ["Recoverable", "No. This removes it from disk."],
+    ] });
+  if (!go) return;
+  const answer = await libPost("/library/delete", { path: file.path });
+  if (answer.ok) { toast(`${file.name} deleted.`, { kind: "ok" }); refresh(true); }
+  else notify("Not deleted", answer.reason || "The file could not be deleted.");
+}
+
+// What is recorded about one model: the download that wrote it, a hash if one has been
+// taken, and the workflows naming it. A model copied in by hand has none of that, and saying
+// so is the useful answer -- it is how you tell a file you fetched from one you inherited.
+async function showProvenance(file) {
+  const note = toast("Looking...", { sticky: true });
+  let found;
+  try {
+    found = await libPost("/library/provenance", { path: file.path });
+  } finally {
+    note.remove();
+  }
+  if (!found?.ok) {
+    notify("Nothing to show", found?.reason || "That file could not be read.");
+    return;
+  }
+  const facts = [
+    ["File", found.name],
+    ["Where", found.path],
+    ["Size", bytesText(found.size)],
+    ["Last changed", found.modified ? sinceText(found.modified) : ""],
+  ];
+  const from = found.download || {};
+  if (from.url) {
+    facts.push(["Downloaded", from.at ? sinceText(from.at) : "by the Download Manager"]);
+    facts.push(["From", from.url]);
+    if (from.owner) facts.push(["Account", from.owner]);
+    if (from.source) facts.push(["Added", from.source]);
+    if (from.hash) facts.push([`Expected ${(from.hash_type || "sha256").toUpperCase()}`, from.hash]);
+  } else {
+    facts.push(["Downloaded", "Not by Open Manager. Nothing here fetched this file."]);
+  }
+  facts.push(["SHA256", found.sha256 || "Not taken yet - use Hash on this row"]);
+  const used = found.workflows || [];
+  facts.push([
+    "Used by",
+    used.length ? used.slice(0, 12).join(", ") + (used.length > 12 ? ` and ${used.length - 12} more` : "")
+                : `No saved workflow names it (${found.searched} searched)`,
+  ]);
+  await chooseAction(`Where ${found.name} came from`, "", [], { wide: true, facts });
+}
+
+// What the saved workflows ask for, cannot find, and recorded a source for. Selectable and
+// queueable in one go, through the same trust prompt, disk check and queue a download from
+// anywhere else goes through -- there is no second path to the network here.
+function buildWantedSection(entries, refresh) {
+  const parts = [];
+  const workflows = new Set(entries.flatMap((one) => one.workflows));
+  const lead = el("div", "om-lib-lead");
+  lead.textContent =
+    `${entries.length} model${entries.length === 1 ? "" : "s"} that `
+    + `${workflows.size === 1 ? "a saved workflow asks" : `${workflows.size} saved workflows ask`}`
+    + " for and cannot find. Each one records where it came from, so it can be fetched.";
+  parts.push(lead);
+
+  const boxes = new Map();
+  const bar = el("div", "om-lib-actions");
+  const summary = el("span", "om-dl-summary", "");
+  const all = el("button", "om-btn", "Select none");
+  const go = el("button", "om-btn om-go", "Download");
+  const picked = () => entries.filter((_, index) => boxes.get(index)?.checked);
+  const retally = () => {
+    const chosen = picked();
+    summary.textContent = chosen.length
+      ? `${chosen.length} of ${entries.length} selected`
+      : "Nothing selected";
+    go.disabled = !chosen.length;
+    all.textContent = chosen.length === entries.length ? "Select none" : "Select all";
+  };
+  all.onclick = () => {
+    const turnOn = picked().length !== entries.length;
+    for (const box of boxes.values()) box.checked = turnOn;
+    retally();
+  };
+  go.onclick = async () => {
+    const chosen = picked();
+    if (!chosen.length) return;
+    go.disabled = true;
+    try {
+      await fetchWanted(chosen, refresh);
+    } finally {
+      go.disabled = false;
+      retally();
+    }
+  };
+  bar.appendChild(summary);
+  bar.appendChild(all);
+  bar.appendChild(go);
+  parts.push(bar);
+
+  entries.forEach((entry, index) => {
+    const row = el("label", "om-dl-model");
+    const box = el("input", "om-dl-check");
+    box.type = "checkbox";
+    box.checked = true;
+    box.onchange = retally;
+    boxes.set(index, box);
+    row.appendChild(box);
+
+    const text = el("div", "om-dl-modeltext");
+    text.appendChild(el("div", "om-dl-name", entry.model.name));
+    const meta = el("div", "om-dl-where");
+    meta.appendChild(el("span", null, entry.model.directory || "?"));
+    if (entry.model.owner) meta.appendChild(el("span", "om-dl-owner", entry.model.owner));
+    text.appendChild(meta);
+    // Which workflows are waiting on it. The names are the answer to "why do I need this",
+    // so the first few are shown rather than only a count.
+    const asked = el("div", "om-dl-note",
+      `Wanted by ${entry.workflows.slice(0, 3).join(", ")}`
+      + (entry.workflows.length > 3 ? ` and ${entry.workflows.length - 3} more` : ""));
+    asked.title = entry.workflows.join("\n");
+    text.appendChild(asked);
+    row.appendChild(text);
+    parts.push(row);
+  });
+
+  retally();
+  return parts;
+}
+
+// Queue what was selected: one trust question per account, one disk question for the batch,
+// then the queue. The same three steps the workflow picker takes, because they are the same
+// three questions however the model was found.
+async function fetchWanted(entries, refresh) {
+  const answered = new Map();
+  const perOwner = new Map();
+  for (const entry of entries) {
+    if (!perOwner.has(entry.model.owner)) perOwner.set(entry.model.owner, []);
+    perOwner.get(entry.model.owner).push(entry.model.name);
+  }
+  const ready = [];
+  const skipped = [];
+  for (const entry of entries) {
+    const owner = entry.model.owner;
+    if (!answered.has(owner)) {
+      const names = perOwner.get(owner) || [entry.model.name];
+      answered.set(owner, await confirmDownloadTrust(
+        owner,
+        names.length === 1 ? names[0] : `${names.length} models your workflows ask for`,
+        names.length !== 1,
+        formatsOf(names)));
+    }
+    if (!answered.get(owner)) { skipped.push(entry.model.name); continue; }
+    ready.push({
+      url: entry.model.url, name: entry.model.name, directory: entry.model.directory,
+      owner, hash: entry.model.hash, hash_type: entry.model.hash_type,
+    });
+  }
+  // Trust is per account, so declining one leaves the rest of a mixed batch going ahead.
+  // That is the intent, but it is a surprise if nothing says so: the dialog that was just
+  // refused named one account, not the batch.
+  if (skipped.length) {
+    toast(`Skipped ${skipped.length} model${skipped.length === 1 ? "" : "s"} from `
+          + `${[...new Set(entries.filter((one) => skipped.includes(one.model.name))
+                                  .map((one) => one.model.owner))].join(", ")}.`,
+          { kind: "warn" });
+  }
+  if (!ready.length || !(await confirmDiskRoom(ready))) return;
+
+  let queued = 0;
+  for (const model of ready) {
+    if (await queueModel(model, { source: "missing from a workflow", askTrust: false })) {
+      queued += 1;
+    }
+  }
+  if (queued) {
+    toast(`Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    if (!floatingPanel("downloads")) openDownloadManager();
+  }
+  refresh?.(false);
+}
+
+// A set of files that are the same bytes in more than one place.
+function buildDuplicateGroup(group, refresh) {
+  const box = el("div", "om-lib-group");
+  const head = el("div", "om-lib-group-head");
+  head.appendChild(el("span", "om-dl-name", group.name));
+  head.appendChild(el("span", "om-lib-size",
+    `${group.copies.length} copies · ${bytesText(group.wasted)} reclaimable`));
+  box.appendChild(head);
+  if (group.state === "identical" && group.sha256) {
+    const line = el("div", "om-dl-hash");
+    line.appendChild(el("span", "om-dl-hash-label", "IDENTICAL"));
+    line.appendChild(el("code", "om-dl-hash-value", group.sha256));
+    box.appendChild(line);
+  } else if (group.state === "different") {
+    box.appendChild(el("div", "om-dl-note om-dl-bad",
+      "Same filename, different contents. Which one loads depends on the order ComfyUI "
+      + "searches its folders, so a workflow naming this file may not get the one you mean."));
+  } else if (group.state === "similar") {
+    box.appendChild(el("div", "om-dl-note",
+      "Start and end match. That rules out a name clash but cannot prove the middle matches, "
+      + "so these are not confirmed identical yet."));
+  } else {
+    box.appendChild(el("div", "om-dl-note",
+      "Same name and size. Nothing has been read yet."));
+  }
+  for (const copy of group.copies) {
+    box.appendChild(buildLibraryRow({ ...copy, sha256: group.sha256 }, refresh));
+  }
+  return box;
+}
+
+// One registered path, what it holds, and what is left on the drive it lives on.
+//
+// The drive figure is shown per root rather than summed: several roots frequently share a
+// drive, and adding their free space together would report a machine as having far more room
+// than it has.
+function buildStorageRoot(root) {
+  const row = el("div", "om-lib-row");
+  const top = el("div", "om-dl-top");
+  top.appendChild(el("span", "om-dl-name", dirOf(root.root) ? root.root : root.root));
+  top.appendChild(el("span", "om-lib-size", bytesText(root.bytes)));
+  row.appendChild(top);
+
+  if (root.total) {
+    const bar = el("div", "om-mem-split");
+    const used = el("div", "om-mem-resident");
+    const share = ((root.total - root.free) / root.total) * 100;
+    used.style.width = `${Math.max(0, Math.min(100, share))}%`;
+    if (share >= 90) used.style.background = "#f85149";
+    else if (share >= 75) used.style.background = "#d29922";
+    bar.title = `${bytesText(root.total - root.free)} of ${bytesText(root.total)} used on this drive`;
+    bar.appendChild(used);
+    row.appendChild(bar);
+  }
+
+  const meta = el("div", "om-dl-where");
+  meta.appendChild(el("span", null, `${root.files} file${root.files === 1 ? "" : "s"}`));
+  for (const folder of root.folders.slice(0, 4)) meta.appendChild(el("span", "om-dl-src", folder));
+  if (root.total) {
+    meta.appendChild(el("span", "om-dl-src", `${bytesText(root.free)} free on the drive`));
+  }
+  row.appendChild(meta);
+  return row;
+}
+
+function buildStorageView(report, refresh) {
+  const parts = [];
+  const lead = el("div", "om-lib-lead");
+  lead.textContent = `${report.files} files · ${bytesText(report.total)} across `
+    + `${report.roots.length} registered path${report.roots.length === 1 ? "" : "s"}.`;
+  parts.push(lead);
+
+  // What could be given back, said only where there is something to give.
+  const reclaim = [];
+  if (report.duplicate_bytes) {
+    reclaim.push(`${bytesText(report.duplicate_bytes)} in files sharing a name and size`);
+  }
+  if (report.partial_bytes) {
+    reclaim.push(`${bytesText(report.partial_bytes)} in unfinished downloads`);
+  }
+  if (reclaim.length) {
+    const note = el("div", "om-lib-lead");
+    note.textContent = `Possibly reclaimable: ${reclaim.join(" · ")}. `
+      + "Check the Duplicates tab before acting on the first.";
+    parts.push(note);
+  }
+
+  parts.push(el("div", "om-mem-bar-label", "Registered paths"));
+  parts.push(...report.roots.map(buildStorageRoot));
+
+  if (report.partials?.length) {
+    const head = el("div", "om-lib-row om-lib-sweep");
+    const top = el("div", "om-dl-top");
+    top.appendChild(el("span", "om-dl-name",
+      `${report.partials.length} unfinished download${report.partials.length === 1 ? "" : "s"}`));
+    top.appendChild(el("span", "om-lib-size", bytesText(report.partial_bytes)));
+    head.appendChild(top);
+    head.appendChild(el("div", "om-dl-note",
+      "Part files left by downloads that stopped. A paused download will reuse its own; these "
+      + "are the ones no entry in the Download Manager is waiting on."));
+    const foot = el("div", "om-dl-foot");
+    foot.appendChild(el("span", "om-dl-size", ""));
+    const acts = el("span", "om-dl-acts");
+    const sweep = el("button", "om-btn om-dl-btn om-go", "Clean up");
+    sweep.onclick = async () => {
+      const go = await chooseAction("Delete unfinished downloads?", "",
+        [{ key: "go", label: "Delete them", primary: true }],
+        { wide: true, facts: [
+          ["Files", `${report.partials.length} part files`],
+          ["Frees", bytesText(report.partial_bytes)],
+          ["Models", "Not touched. Only part files are removed."],
+        ] });
+      if (!go) return;
+      const answer = await libPost("/library/sweep", {});
+      if (answer.ok) toast(`Freed ${bytesText(answer.bytes || 0)}.`, { kind: "ok" });
+      refresh(true);
+    };
+    acts.appendChild(sweep);
+    foot.appendChild(acts);
+    head.appendChild(foot);
+    parts.push(el("div", "om-mem-bar-label", "Unfinished downloads"), head);
+  }
+
+  parts.push(el("div", "om-mem-bar-label", "Largest files"));
+  parts.push(...(report.largest || []).map((file) => {
+    const row = el("div", "om-lib-row");
+    const top = el("div", "om-dl-top");
+    top.appendChild(el("span", "om-dl-name", file.name));
+    top.appendChild(el("span", "om-lib-size", bytesText(file.size)));
+    row.appendChild(top);
+    const meta = el("div", "om-dl-where");
+    meta.appendChild(el("span", null, file.directory));
+    const place = el("span", "om-dl-src", dirOf(file.path));
+    place.title = file.path;
+    meta.appendChild(place);
+    row.appendChild(meta);
+    return row;
+  }));
+  return parts;
+}
+
+// The library: what is on disk, what is there twice, and what nothing appears to use.
+function openModelLibrary() {
+  if (floatingPanel("library")) { closeFloatingPanel("library"); return null; }
+
+  const panel = createFloatingPanel({
+    key: "library", title: "Model Library", width: 900, height: 520,
+  });
+  const summary = el("div", "om-dl-summary", "Reading...");
+  panel.bar.querySelector(".om-float-badge").appendChild(summary);
+
+  let tab = LIB_TABS.find((one) => one.key === dlRecall("om-lib-tab", "")) || LIB_TABS[0];
+
+  const filter = el("input", "om-search om-lib-filter");
+  filter.placeholder = "Filter by name or folder";
+  filter.spellcheck = false;
+  let filterTimer = 0;
+  filter.addEventListener("input", () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(draw, 200);
+  });
+  panel.tools.appendChild(filter);
+
+  const rescan = el("button", "om-btn", "Rescan");
+  rescan.title = "Walk the model folders again.";
+  rescan.onclick = () => refresh(true);
+  panel.tools.appendChild(rescan);
+
+  // Two steps, because they cost very different amounts. The quick one reads two megabytes
+  // per file and settles only whether a group is a name clash; the full one reads everything
+  // and is the only thing that can call a group identical.
+  const check = el("button", "om-btn", "Quick check");
+  check.title = "Reads the start and end of each candidate. Fast, and rules out name clashes.";
+  check.style.display = "none";
+  check.onclick = async () => {
+    check.disabled = true;
+    check.textContent = "Checking...";
+    libDupes = await libGet("/library/duplicates?level=quick");
+    check.disabled = false;
+    check.textContent = "Quick check";
+    draw();
+  };
+  panel.tools.appendChild(check);
+
+  const confirm = el("button", "om-btn om-go", "Verify fully");
+  confirm.style.display = "none";
+  confirm.onclick = async () => {
+    confirm.disabled = true;
+    confirm.textContent = "Reading...";
+    libDupes = await libGet("/library/duplicates?level=full");
+    confirm.disabled = false;
+    draw();
+  };
+  panel.tools.appendChild(confirm);
+
+  const tabBar = el("div", "om-dl-tabs");
+  panel.body.appendChild(tabBar);
+  const body = el("div", "om-dl-body");
+  const list = el("div", "om-dl-list");
+  body.appendChild(list);
+  panel.body.appendChild(body);
+
+  const badges = new Map();
+  const buildTabs = () => {
+    badges.clear();
+    tabBar.replaceChildren(...LIB_TABS.map((one) => {
+      const button = el("button", `om-dl-tab${one === tab ? " om-dl-on" : ""}`);
+      button.appendChild(el("span", null, one.title));
+      const badge = el("span", "om-dl-tab-count", "-");
+      badges.set(one.key, badge);
+      button.appendChild(badge);
+      button.onclick = () => {
+        if (one === tab) return;
+        tab = one;
+        dlRemember("om-lib-tab", tab.key);
+        buildTabs();
+        draw();
+      };
+      return button;
+    }));
+  };
+
+  const counts = () => {
+    const files = libIndex?.files || [];
+    const referenced = new Set(libRefs?.names || []);
+    const have = new Set(files.map((one) => one.name.toLowerCase()));
+    return {
+      all: files.length,
+      duplicates: (libDupes?.groups?.length ?? 0) + (libDupes?.collisions?.length ?? 0),
+      unreferenced: libRefs ? files.filter((one) => !referenced.has(one.name.toLowerCase())).length : 0,
+      absent: libRefs ? [...referenced].filter((one) => !have.has(one)).length : 0,
+      storage: libStorage?.roots?.length ?? 0,
+    };
+  };
+
+  const draw = () => {
+    if (!panel.el.isConnected) return;
+    const files = libIndex?.files || [];
+    const total = files.reduce((sum, one) => sum + (one.size || 0), 0);
+    summary.textContent = libIndex
+      ? `${files.length} files · ${bytesText(total)}`
+        + (libIndex.skipped?.length ? ` · ${libIndex.skipped.length} unreachable` : "")
+      : "Reading...";
+
+    const found = counts();
+    for (const [key, badge] of badges) badge.textContent = String(found[key] ?? 0);
+    const onDupes = tab.key === "duplicates";
+    const level = libDupes?.level || "names";
+    const reading = mayHash();
+    check.style.display = reading && onDupes && level === "names" ? "" : "none";
+    confirm.style.display = reading && onDupes && level !== "full" ? "" : "none";
+    if (onDupes && libDupes) {
+      confirm.textContent = `Verify fully (${bytesText(libDupes.candidate_bytes || 0)})`;
+      confirm.title = "Reads every candidate in full. Only this can confirm two files are "
+        + "the same, and only confirmed groups are safe to reclaim.";
+    }
+
+    // Building every row of a large library at once is what makes a panel feel broken. The
+    // list is capped and says so; the filter is how the rest is reached.
+    const wanted = filter.value.trim().toLowerCase();
+    const matches = (one) => !wanted
+      || one.name.toLowerCase().includes(wanted)
+      || String(one.directory).toLowerCase().includes(wanted)
+      || String(one.path).toLowerCase().includes(wanted);
+    const capped = (rows) => {
+      if (rows.length <= LIB_MAX_ROWS) return rows.map((one) => buildLibraryRow(one, refresh));
+      const head = el("div", "om-lib-lead",
+        `Showing the ${LIB_MAX_ROWS} largest of ${rows.length}. Filter to narrow it.`);
+      return [head, ...rows.slice(0, LIB_MAX_ROWS).map((one) => buildLibraryRow(one, refresh))];
+    };
+
+    const parts = [];
+    if (tab.key === "all") {
+      parts.push(...capped(files.filter(matches).sort((a, b) => b.size - a.size)));
+    } else if (tab.key === "duplicates") {
+      const level = libDupes?.level || "names";
+      const clashes = libDupes?.collisions || [];
+      if (libDupes?.groups?.length || clashes.length) {
+        const head = el("div", "om-lib-lead");
+        head.textContent = level === "full"
+          ? `${bytesText(libDupes.reclaimable)} confirmed identical and safe to reclaim.`
+          : level === "quick"
+            ? `${bytesText(libDupes.candidate_bytes)} in candidates. Start and end checked; `
+              + "nothing is confirmed identical until it is read in full."
+            : `${bytesText(libDupes.candidate_bytes)} in files sharing a name and size. `
+              + (mayHash()
+                 ? "Nothing has been read."
+                 : "Nothing has been read, and reading is switched off in settings, so these "
+                   + "cannot be confirmed identical here.");
+        parts.push(head);
+        if (clashes.length) {
+          const warn = el("div", "om-lib-lead om-dl-bad");
+          warn.textContent = `${clashes.length} filename${clashes.length === 1 ? "" : "s"} `
+            + "used by files that are not the same. These are not duplicates and deleting "
+            + "one would lose something.";
+          parts.push(warn, ...clashes.map((one) => buildDuplicateGroup(one, refresh)));
+        }
+        parts.push(...(libDupes.groups || []).map((one) => buildDuplicateGroup(one, refresh)));
+      }
+    } else if (tab.key === "storage") {
+      if (libStorage?.ok) parts.push(...buildStorageView(libStorage, refresh));
+    } else if (tab.key === "unreferenced") {
+      const referenced = new Set(libRefs?.names || []);
+      const mine = files.filter((one) => !referenced.has(one.name.toLowerCase())).filter(matches);
+      if (mine.length) {
+        const head = el("div", "om-lib-lead");
+        head.textContent =
+          `No mention of these in ${libRefs?.workflows ?? 0} saved workflows. `
+          + "A workflow saved in API form, or a reference built while it runs, would not be "
+          + "seen here, so treat this as what was found rather than as what is unused.";
+        parts.push(head, ...capped(mine.sort((a, b) => b.size - a.size)));
+      }
+    } else {
+      // Two different questions wear the same name on this tab. A workflow that recorded
+      // where a model came from can have it fetched; a workflow that only names a file
+      // cannot, because a filename is not a source. The ones that can be acted on go first,
+      // and the rest are still worth listing -- knowing what is missing is the point.
+      const have = new Set(files.map((one) => one.name.toLowerCase()));
+      const byName = new Map();
+      for (const entry of libRefs?.declared || []) {
+        for (const model of entry.models || []) {
+          const folded = (model.name || "").toLowerCase();
+          if (!folded || !model.url || have.has(folded)) continue;
+          if (wanted && !folded.includes(wanted)) continue;
+          if (!byName.has(folded)) byName.set(folded, { model, workflows: [] });
+          const slot = byName.get(folded);
+          if (!slot.workflows.includes(entry.workflow)) slot.workflows.push(entry.workflow);
+        }
+      }
+      // Most wanted first: a model three workflows are waiting on is the one to fetch.
+      const fetchable = [...byName.values()].sort((a, b) =>
+        b.workflows.length - a.workflows.length
+        || (a.model.name || "").localeCompare(b.model.name || ""));
+      const named = [...(libRefs?.names || [])]
+        .filter((one) => !have.has(one) && !byName.has(one)
+                         && (!wanted || one.includes(wanted)));
+
+      if (fetchable.length) parts.push(...buildWantedSection(fetchable, refresh));
+      if (named.length) {
+        const head = el("div", "om-lib-lead");
+        head.textContent = fetchable.length
+          ? "Named by a workflow that did not record where it came from. A filename is not a "
+            + "source, so these cannot be fetched from here."
+          : "Asked for by a workflow, not found in any model folder.";
+        parts.push(head, ...named.map((name) => {
+          const row = el("div", "om-lib-row om-dl-gone");
+          row.appendChild(el("div", "om-dl-name", name));
+          row.appendChild(el("div", "om-dl-note",
+            "Not on disk. Add it from the Download Manager."));
+          return row;
+        }));
+      }
+    }
+
+    if (parts.length) {
+      list.replaceChildren(...parts);
+    } else {
+      const box = el("div", "om-empty");
+      box.appendChild(el("div", "om-empty-title", tab.empty));
+      list.replaceChildren(box);
+    }
+  };
+
+  const refresh = async (rescanNow = false) => {
+    if (!panel.el.isConnected) return;
+    summary.textContent = rescanNow ? "Walking the model folders..." : "Reading...";
+    try {
+      libIndex = await libGet(`/library${rescanNow ? "?refresh=1" : ""}`);
+      if (!panel.el.isConnected) return;
+      libRefs = await libGet("/library/references");
+      if (!panel.el.isConnected) return;
+      // The cheap pass only. Reading every candidate is an explicit action.
+      libDupes = await libGet("/library/duplicates?level=names");
+      if (!panel.el.isConnected) return;
+      libStorage = await libGet("/library/storage");
+    } catch {
+      summary.textContent = "The model folders could not be read";
+      return;
+    }
+    draw();
+  };
+
+  buildTabs();
+  refresh(false);
+  return panel;
+}
 
 const iconStyle = document.createElement("style");
 iconStyle.textContent = `
@@ -4249,16 +8709,21 @@ app.registerExtension({
   name: "openmanager.browser",
   settings: [
     {
-      id: "openManager.classicMenu",
-      name: "Classic Mode",
-      category: ["Open Manager", "Interface", "classicMenu"],
-      type: "boolean",
-      defaultValue: true,
-      tooltip: "Open the Extensions button on a menu of destinations, the way ComfyUI-Manager did, instead of going straight to the panel. Only applies where Open Manager answers as the manager; the sidebar tab is unaffected.",
+      id: "openManager.managerEntry",
+      name: "What the Extensions button opens",
+      category: ["Open Manager", "Interface", "managerEntry"],
+      type: "combo",
+      options: ["auto", "panel", "classic"],
+      defaultValue: "auto",
+      tooltip: "'auto' follows ComfyUI: the classic menu of destinations where it was started "
+        + "with --enable-manager-legacy-ui, and the panel otherwise. 'panel' always opens the "
+        + "manager itself. 'classic' always opens the menu, which is the only way in on an "
+        + "interface with no sidebar. Every destination is in both, so this decides the way "
+        + "in rather than what is reachable.",
     },
     {
       id: "openManager.trustMode",
-      name: "Remember who you trust",
+      name: "Remember trusted authors, or ask every time",
       category: ["Open Manager", "Interface", "trustMode"],
       type: "combo",
       options: ["author", "action"],
@@ -4267,11 +8732,11 @@ app.registerExtension({
     },
     {
       id: "openManager.trustRegistry",
-      name: "Ask before installing from an untrusted author",
+      name: "Ask before installing a registry pack from an untrusted author",
       category: ["Open Manager", "Interface", "trustRegistry"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Repository installs always ask, because nothing has scanned them. Turn this on to be asked for registry packs too. Asked once per author, so several packs by someone already trusted do not ask again. Findings against a pack are shown either way.",
+      tooltip: "Only registry packs are affected. A GitHub install always asks, because nothing has scanned it, and a model download always asks about the account hosting it; neither is switched off here. Turn this on to be asked for registry packs as well, which are scanned and carry a status. Asked once per author, so several packs by someone already trusted do not ask again. Findings against a pack are shown either way.",
     },
     {
       id: "openManager.imageWorkflows",
@@ -4312,11 +8777,11 @@ app.registerExtension({
     },
     {
       id: "openManager.staleDays",
-      name: "Days before the registry is stale",
+      name: "Days before the offline registry counts as stale",
       category: ["Open Manager", "Registry", "staleDays"],
       type: "number",
       defaultValue: 7,
-      tooltip: "Used by the 'When stale' renewal policy.",
+      tooltip: "How old the offline copy of the registry may get before it is treated as out of date. Only consulted by the 'when stale' renewal policy; the other policies ignore it. Nothing is fetched because a catalogue is stale, it is only reported as such until a sync is asked for.",
     },
     {
       id: "openManager.parallelSync",
@@ -4328,7 +8793,7 @@ app.registerExtension({
     },
     {
       id: "openManager.syncConcurrency",
-      name: "Catalogue pages read at once",
+      name: "Catalogue pages read at once when syncing",
       category: ["Open Manager", "Registry", "syncConcurrency"],
       type: "number",
       defaultValue: 8,
@@ -4356,7 +8821,7 @@ app.registerExtension({
       category: ["Open Manager", "Gallery", "galleryExpanded"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Start the gallery section expanded on a pack page rather than collapsed.",
+      tooltip: "Start the gallery open on a pack page rather than collapsed. The images are fetched either way once the section is drawn, so this decides how much of the page you scroll past rather than how much is loaded.",
     },
     {
       id: "openManager.licenseUseApi",
@@ -4364,7 +8829,7 @@ app.registerExtension({
       category: ["Open Manager", "Licences", "licenseUseApi"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Set the GitHub token below first: without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
+      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Set a GitHub token first, under Open Manager > Access keys: without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
     },
     {
       id: "openManager.licenseRace",
@@ -4376,19 +8841,11 @@ app.registerExtension({
     },
     {
       id: "openManager.licenseConcurrency",
-      name: "Repositories read at once for licences",
+      name: "Repositories read at once when naming licences",
       category: ["Open Manager", "Licences", "licenseConcurrency"],
       type: "number",
       defaultValue: 8,
       tooltip: "How many repositories are read at once when resolving licences for a listing. Clamped to 1-32.",
-    },
-    {
-      id: "openManager.virusTotalKey",
-      name: "VirusTotal API key (optional)",
-      category: ["Open Manager", "Scanning", "virusTotalKey"],
-      type: "text",
-      defaultValue: "",
-      tooltip: "Your own key, from virustotal.com. Nothing scanning-related appears anywhere in the panel until one is set. Only file hashes are sent, never the files. VirusTotal's public API must not be used in business workflows, commercial products or services, and allows 4 lookups a minute and 500 a day.",
     },
     {
       id: "openManager.scanOnInstall",
@@ -4396,15 +8853,205 @@ app.registerExtension({
       category: ["Open Manager", "Scanning", "scanOnInstall"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a key above. Where the day's allowance is spent you are asked whether to install without scanning.",
+      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a VirusTotal key, set under Open Manager > Access keys. Where the day's allowance is spent you are asked whether to install without scanning.",
     },
     {
-      id: "openManager.githubToken",
-      name: "GitHub token for one-click starring (optional)",
-      category: ["Open Manager", "Accounts", "githubToken"],
-      type: "text",
-      defaultValue: "",
-      tooltip: "A GitHub token with starring permission lets the Star button star a repository in place. Without it, Star opens the repository on GitHub.",
+      id: "openManager.panelHeaders",
+      onChange: () => applyHeaderHeight(),
+      name: "Header height of the Downloads, Models and Memory panels",
+      category: ["Open Manager", "Interface", "panelHeaders"],
+      type: "number",
+      defaultValue: 44,
+      tooltip: "Height in pixels of the title and section bars in the floating panels, and the size of the text on them. Clamped to 24-80. Raise it on a large or distant screen.",
+    },
+    {
+      id: "openManager.monitor",
+      onChange: () => remountTopbar(),
+      name: "Resource monitor strip",
+      category: ["Open Manager", "Monitor", "monitor"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "A compact CPU, RAM and VRAM readout beside the workflow tabs. The server samples only while a panel is watching and stops as soon as it is not, so nothing is measured when nobody is looking.",
+    },
+    {
+      id: "openManager.monitorPlacement",
+      onChange: () => remountTopbar(),
+      name: "Where the resource monitor strip sits",
+      category: ["Open Manager", "Monitor", "monitorPlacement"],
+      type: "combo",
+      options: ["control", "topbar"],
+      defaultValue: "control",
+      tooltip: "'control' puts the readout in ComfyUI's floating control bar, beside the queue controls and next to any other monitor already there. 'topbar' puts it in the workflow tab strip, ahead of the account button. Falls back to the tab strip where a build has no control bar.",
+    },
+    {
+      id: "openManager.monitorStyle",
+      onChange: () => remountTopbar(),
+      name: "How the resource monitor strip is drawn",
+      category: ["Open Manager", "Monitor", "monitorStyle"],
+      type: "combo",
+      options: MONITOR_STYLES,
+      defaultValue: "mixed",
+      tooltip: "'mixed' draws each figure the way it reads: a share of a total as a bar left "
+        + "to right, a temperature as a column like a thermostat. 'horizontal' and 'vertical' "
+        + "draw everything the one way instead. The compact styles drop the separate label "
+        + "and put the text on the bar, or under the column, which is about half the width.",
+    },
+    {
+      id: "openManager.monitorInterval",
+      onChange: () => remountTopbar(),
+      name: "Seconds between monitor readings",
+      category: ["Open Manager", "Monitor", "monitorInterval"],
+      type: "number",
+      defaultValue: 2,
+      tooltip: "How often the machine is sampled while the strip is on screen, clamped to 1 to 10 seconds. The Memory panel asks for one a second while it is open, and the server samples at whichever of the two is quicker. Nothing is sampled when neither is open.",
+    },
+    {
+      id: "openManager.monitorCpu",
+      onChange: () => remountTopbar(),
+      name: "Show CPU in the monitor strip",
+      category: ["Open Manager", "Monitor", "monitorCpu"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Processor load. Needs psutil, which ComfyUI already depends on; the reading is left out where it cannot be taken.",
+    },
+    {
+      id: "openManager.monitorRam",
+      onChange: () => remountTopbar(),
+      name: "Show RAM in the monitor strip",
+      category: ["Open Manager", "Monitor", "monitorRam"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "System memory in use, as a share of the total, measured by ComfyUI's own model management rather than separately. Always available.",
+    },
+    {
+      id: "openManager.monitorTemp",
+      onChange: () => remountTopbar(),
+      name: "Show temperatures in the monitor strip",
+      category: ["Open Manager", "Monitor", "monitorTemp"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "A thermometer per graphics card, and per processor package where the platform reports one. Graphics temperatures come from NVIDIA's own tooling where it is installed; Windows reports no processor temperature to Python, so that reading is simply absent there.",
+    },
+    {
+      id: "openManager.monitorVram",
+      onChange: () => remountTopbar(),
+      name: "Show VRAM in the monitor strip",
+      category: ["Open Manager", "Monitor", "monitorVram"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Graphics memory in use, as a share of the total, one meter per device. A machine with four cards gets four, labelled VRAM0 to VRAM3. Always available.",
+    },
+    {
+      id: "openManager.startupTimes",
+      name: "Show what each pack costs to load, on the Installed list",
+      category: ["Open Manager", "Library", "startupTimes"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "ComfyUI times every pack it imports and writes the result to its log. This reads that back and puts the seconds beside each installed pack, with the total. Read once when the Installed view opens; nothing is measured or run.",
+    },
+    {
+      id: "openManager.hashOnDemand",
+      name: "Let the Model Library read the contents of a file",
+      category: ["Open Manager", "Library", "hashOnDemand"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Hashing and duplicate confirmation read a model from end to end, which on a "
+        + "large library is hundreds of gigabytes. Nothing is ever read without being asked "
+        + "for, so this decides whether the asking is offered at all. Off, the library still "
+        + "reports names, sizes, folders, duplicates by name, and what no workflow "
+        + "references, and never opens a file. A digest already taken is still shown.",
+    },
+    {
+      id: "openManager.floatingPanels",
+      name: "Downloads, Models and Memory panels can be dragged",
+      category: ["Open Manager", "Interface", "floatingPanels"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Presentation only. On, a panel can be dragged anywhere and reopens where you "
+        + "left it. Off, it always opens in the middle and cannot be moved, which suits a "
+        + "single screen or anyone who would rather not hunt for a window. Either way, a "
+        + "window too small to move a panel around in presents it centred, because there is "
+        + "nowhere to drag it to and an edge to lose it past. Folding, resizing and closing "
+        + "work the same in every case.",
+    },
+    {
+      id: "openManager.modelLibrary",
+      onChange: () => remountTopbar(),
+      name: "Model Library panel, and the Models button",
+      category: ["Open Manager", "Library", "modelLibrary"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Adds a Models button that opens the model library: everything on disk across every folder ComfyUI registers, what is held in more than one place, and what no saved workflow appears to reference. Nothing is read until the panel is opened, and nothing is hashed until it is asked for.",
+    },
+    {
+      id: "openManager.downloadButton",
+      onChange: () => remountTopbar(),
+      name: "Show the Download Manager button",
+      category: ["Open Manager", "Downloads", "downloadButton"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Puts a Downloads button at the right-hand end of the workflow tab strip. Turn it off to reach the Download Manager from the command palette instead.",
+    },
+    {
+      id: "openManager.runBar",
+      onChange: () => remountTopbar(),
+      name: "Run progress bar above the header",
+      category: ["Open Manager", "Monitor", "runBar"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "A strip across the top of the window while a prompt runs: the graph's "
+        + "progress as a gradient, and the running node's own progress filling the block "
+        + "that node will occupy. Off by default because it sits where another pack may "
+        + "already have put one; switch that one off before turning this on.",
+    },
+    {
+      id: "openManager.memoryButton",
+      onChange: () => remountTopbar(),
+      name: "Show the Memory button, which opens this panel",
+      category: ["Open Manager", "Monitor", "memoryButton"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Opens the Memory panel: live graphs, what ComfyUI is holding, and where each "
+        + "model's weights sit. Separate from the resource monitor, so switching the strip "
+        + "off does not leave the panel reachable only from the command palette.",
+    },
+    {
+      id: "openManager.buttonPlacement",
+      onChange: () => remountTopbar(),
+      name: "Where the Downloads, Models and Memory buttons sit",
+      category: ["Open Manager", "Interface", "buttonPlacement"],
+      type: "combo",
+      options: ["topbar", "control"],
+      defaultValue: "topbar",
+      tooltip: "'topbar' puts Downloads, Models and Memory in the workflow tab strip with "
+        + "their names. 'control' puts them in ComfyUI's floating control bar as icons, with "
+        + "the name on the hover, which suits a narrow window or a crowded tab strip. Falls "
+        + "back to the tab strip where a build has no control bar.",
+    },
+    {
+      id: "openManager.downloadLocation",
+      name: "Where new downloads are stored",
+      category: ["Open Manager", "Downloads", "downloadLocation"],
+      type: "combo",
+      options: ["default", "most-free"],
+      defaultValue: "default",
+      tooltip: "Which of the paths ComfyUI registers for a model folder a download starts on. 'default' is ComfyUI's own first path, which honours is_default in extra_model_paths.yaml. 'most-free' picks the registered path with the most room, which suits a machine whose default drive is the small one. Either way the location is shown before the download starts and can be changed.",
+    },
+    {
+      id: "openManager.downloadWorkers",
+      name: "Models downloaded at once, in parallel",
+      category: ["Open Manager", "Downloads", "downloadWorkers"],
+      type: "number",
+      defaultValue: 2,
+      tooltip: "How many downloads run in parallel. Clamped to 1-8. More is not always faster: past a point the link is the limit and a stalled transfer takes a slot with it.",
+    },
+    {
+      id: "openManager.nodeModelMenu",
+      name: "Add and fetch model URLs from a node's menu",
+      category: ["Open Manager", "Downloads", "nodeModelMenu"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Right-clicking a node offers to download the models it names, and to add a URL to it so a shared graph carries its weights. Added URLs are checked against the same host and format rules as any other download.",
     },
   ],
   commands: [
@@ -4412,6 +9059,21 @@ app.registerExtension({
       id: "openmanager.panel",
       label: "Open Manager: open the panel",
       function: () => openPanelWindow(),
+    },
+    {
+      id: "openmanager.memory",
+      label: "Open Manager: open the Memory panel",
+      function: () => openMemoryPanel(),
+    },
+    {
+      id: "openmanager.library",
+      label: "Open Manager: open the Model Library",
+      function: () => openModelLibrary(),
+    },
+    {
+      id: "openmanager.downloads",
+      label: "Open Manager: open the Download Manager",
+      function: () => openDownloadManager(),
     },
     {
       id: "openmanager.open",
@@ -4426,9 +9088,9 @@ app.registerExtension({
     {
       id: "Comfy.Manager.Menu.ToggleVisibility",
       label: "Open Manager: toggle the menu",
-      function: () => (panelSetting("openManager.classicMenu", true) === false
-        ? togglePanelWindow("registry")
-        : openManagerMenu()),
+      function: () => (managerEntry() === "classic"
+        ? openManagerMenu()
+        : togglePanelWindow("registry")),
     },
     {
       id: "Comfy.Manager.CustomNodesManager.ToggleVisibility",
@@ -4436,6 +9098,23 @@ app.registerExtension({
       function: () => togglePanelWindow("registry"),
     },
   ],
+  // ComfyUI asks each extension what to add to a node's right-click menu.
+  getNodeMenuItems(node) {
+    if (panelSetting("openManager.nodeModelMenu", true) === false) return [];
+    const items = [null];
+    const declared = nodeModels(node);
+    if (declared.length) {
+      items.push({
+        content: `Download ${declared.length} model${declared.length === 1 ? "" : "s"} for this node`,
+        callback: () => downloadNodeModels(node),
+      });
+    }
+    items.push({
+      content: "Add a model URL to this node",
+      callback: () => addModelUrlToNode(node),
+    });
+    return items;
+  },
   // ComfyUI reports the graph's missing node types here on every workflow load.
   afterConfigureGraph(missingNodeTypes) {
     lastMissingTypes = Array.isArray(missingNodeTypes)
@@ -4454,6 +9133,20 @@ app.registerExtension({
     });
     // The legacy menu has no sidebar, so it gets a button to the same panel.
     addLegacyMenuButton();
+    // The ways in at the right of the workflow tab strip: downloads, the library, the monitor.
+    topbarReady = true;
+    mountTopbar();
+    // Wired once for the session rather than per mount: a remount that added another set of
+    // listeners would count every node twice, then three times.
+    wireRunBar();
+
+    // Which interface ComfyUI is running, before anything asks which way in to offer.
+    readLegacyUi().catch(() => {});
+    migrateEntryMode();
+
+    // Which keys are held, before anything that might want one runs. The move out of
+    // ComfyUI's settings follows, and happens at most once.
+    loadKeys().then(() => migrateKeys()).catch(() => {});
 
     // What is already on disk, so registry rows can say "Installed" on first paint.
     loadInstalledIndex();

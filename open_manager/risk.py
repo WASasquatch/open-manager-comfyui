@@ -304,7 +304,10 @@ def _acknowledgement(findings: tuple[Finding, ...]) -> str:
             "A custom node runs with the same privileges as ComfyUI itself, so it can read "
             "and write any file that account can reach. Continue if the source is trusted."
         )
-    return "Nothing here blocks the install."
+    # Findings that are merely worth knowing are shown as themselves. Saying "nothing here
+    # blocks the install" adds nothing, and the confirmation gives that sentence the same
+    # alarmed treatment it gives a real warning -- so a clean pack reads as a dangerous one.
+    return ""
 
 
 #: Archive members that mean code runs at install or import time.

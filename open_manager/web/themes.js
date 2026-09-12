@@ -202,7 +202,7 @@ function theme({ id, name, dark, format, bg, surface, title, text, subtext, bord
     // Read by Open Manager; ComfyUI's own loader ignores it.
     extras: {
       shape: { radius: 10, titleHeight: 28, slotHeight: 20 },
-      links: { mode: "spline", border: false },
+      links: { border: false },
       categories: categoryColours(dark, accent, hues),
       glow: { selected: glow, blur: dark ? 16 : 10 },
     },
@@ -281,7 +281,20 @@ function categoryColour(categories, node) {
 }
 
 //: Link shapes a theme may ask for.
-const LINK_MODES = new Set(["straight", "linear", "spline"]);
+
+// The colour the active palette would give a node, for anything outside the canvas that wants
+// to speak the same language. The precedence is the draw hook's, so a progress bar and the
+// node it is reporting on never disagree: a colour set on the node, then a rule for its
+// class, then its category. Empty where the palette has nothing to say, which is the caller's
+// cue to fall back rather than to paint something grey.
+export function nodeTint(node) {
+  if (node?.color) return node.color;
+  const extras = activeExtras;
+  if (!extras) return "";
+  const rule = extras.nodes?.[node?.type];
+  const ruleColor = typeof rule === "string" ? rule : rule?.color;
+  return ruleColor || categoryColour(extras.categories, node) || "";
+}
 
 // Reduce a theme's extras to known keys within known bounds. Nothing outside this shape
 // reaches the renderer.
@@ -304,7 +317,8 @@ function sanitiseExtras(raw) {
 
   if (raw.links && typeof raw.links === "object") {
     const links = {};
-    if (LINK_MODES.has(raw.links.mode)) links.mode = raw.links.mode;
+    // A mode is read and dropped rather than rejected, so an older theme file still loads;
+    // it simply no longer decides how the reader's links are drawn.
     if (typeof raw.links.border === "boolean") links.border = raw.links.border;
     if (Object.keys(links).length) out.links = links;
   }
@@ -392,38 +406,56 @@ function installDrawHook() {
   hookInstalled = true;
 }
 
-// Apply a palette's extras: geometry, link shape, and the data the draw hook reads. A
-// palette without extras restores LiteGraph's starting values.
+//: What this module has actually changed. Restoring something never changed is how a value
+//: the reader chose gets replaced by whatever happened to be set when a theme first loaded.
+let changed = { shape: false, border: false };
+
+// Apply a palette's extras: geometry, link border, and the data the draw hook reads.
+//
+// Link render mode is deliberately absent. ComfyUI gives that its own setting, which means it
+// belongs to the reader; a theme writing over it leaves the settings panel showing one thing
+// and the canvas drawing another, with no hint as to why.
 export function applyExtras(palette) {
   const lg = window.LiteGraph;
   if (!lg) return;
-  if (!baseShape) {
-    baseShape = {
-      radius: lg.ROUND_RADIUS,
-      titleHeight: lg.NODE_TITLE_HEIGHT,
-      slotHeight: lg.NODE_SLOT_HEIGHT,
-      linkMode: lg.LINK_RENDER_MODE,
-    };
-  }
   const extras = extrasFor(palette);
   activeExtras = extras;
 
   const shape = extras?.shape;
-  lg.ROUND_RADIUS = shape?.radius ?? baseShape.radius;
-  lg.NODE_TITLE_HEIGHT = shape?.titleHeight ?? baseShape.titleHeight;
-  lg.NODE_SLOT_HEIGHT = shape?.slotHeight ?? baseShape.slotHeight;
-
-  const modes = { straight: lg.STRAIGHT_LINK, linear: lg.LINEAR_LINK, spline: lg.SPLINE_LINK };
-  const mode = modes[extras?.links?.mode];
-  lg.LINK_RENDER_MODE = mode === undefined ? baseShape.linkMode : mode;
+  if (shape) {
+    // Captured as it is now, at the moment of the first override, so what goes back is what
+    // was actually displaced.
+    if (!changed.shape) {
+      baseShape = {
+        radius: lg.ROUND_RADIUS,
+        titleHeight: lg.NODE_TITLE_HEIGHT,
+        slotHeight: lg.NODE_SLOT_HEIGHT,
+      };
+      changed.shape = true;
+    }
+    lg.ROUND_RADIUS = shape.radius ?? baseShape.radius;
+    lg.NODE_TITLE_HEIGHT = shape.titleHeight ?? baseShape.titleHeight;
+    lg.NODE_SLOT_HEIGHT = shape.slotHeight ?? baseShape.slotHeight;
+  } else if (changed.shape) {
+    lg.ROUND_RADIUS = baseShape.radius;
+    lg.NODE_TITLE_HEIGHT = baseShape.titleHeight;
+    lg.NODE_SLOT_HEIGHT = baseShape.slotHeight;
+    changed.shape = false;
+  }
 
   const canvas = app.canvas;
+  const border = extras?.links?.border;
   if (canvas) {
-    if (baseShape.linkBorder === undefined) baseShape.linkBorder = canvas.render_connections_border;
-    canvas.render_connections_border = extras?.links?.border ?? baseShape.linkBorder;
-    // The canvas holds its own copy, taken from the link render setting.
-    if (baseShape.canvasLinkMode === undefined) baseShape.canvasLinkMode = canvas.links_render_mode;
-    canvas.links_render_mode = mode === undefined ? baseShape.canvasLinkMode : mode;
+    if (typeof border === "boolean") {
+      if (!changed.border) {
+        baseShape = { ...(baseShape || {}), linkBorder: canvas.render_connections_border };
+        changed.border = true;
+      }
+      canvas.render_connections_border = border;
+    } else if (changed.border) {
+      canvas.render_connections_border = baseShape.linkBorder;
+      changed.border = false;
+    }
   }
 
   // The hook goes in only for a theme declaring extras. Every other palette is drawn by
