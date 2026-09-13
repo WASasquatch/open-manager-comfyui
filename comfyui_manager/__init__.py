@@ -92,6 +92,31 @@ def _start_logging() -> None:
                  target, LOG_OFF)
 
 
+def _warn_if_shared() -> None:
+    """Say so when the official manager is installed alongside this one.
+
+    Both distributions own the ``comfyui_manager`` import name, because ComfyUI imports a
+    manager by that exact name and offers no other way in. pip will install either over the
+    other without complaint, and uninstalling one then takes files the other still lists. The
+    copy on disk is this one; the point is that it will not survive reinstalling the other.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, distribution
+    except Exception:  # noqa: BLE001 - not worth failing a startup over
+        return
+    try:
+        distribution("comfyui-manager")
+    except PackageNotFoundError:
+        return
+    except Exception:  # noqa: BLE001
+        return
+    logger.warning(
+        "[Open Manager] the comfyui-manager distribution is also installed. Both provide the "
+        "comfyui_manager module, so reinstalling or updating either replaces these files. Run "
+        "`pip uninstall comfyui-manager` to leave only this one."
+    )
+
+
 def prestartup() -> None:
     """Called before custom nodes load.
 
@@ -99,6 +124,7 @@ def prestartup() -> None:
     keeping are written while the custom nodes load, which is after this and before that.
     """
     _start_logging()
+    _warn_if_shared()
     logging.info("[Open Manager] enabled in place of ComfyUI-Manager")
 
 

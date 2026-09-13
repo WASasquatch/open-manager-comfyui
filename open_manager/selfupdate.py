@@ -25,12 +25,10 @@ __all__ = ["DIST", "NODE_ID", "state"]
 DIST = "comfyui-open-manager"
 NODE_ID = "comfyui-open-manager"
 
-#: Where an update comes from. Open Manager is not on PyPI, so a bare ``pip install
-#: comfyui-open-manager`` finds nothing: every command offered here names a source.
 REPO_URL = "https://github.com/WASasquatch/open-manager-comfyui"
 
-#: The default source. A zip of the default branch, because pip can install one unaided and a
-#: portable build usually has no git for the ``git+`` form to use.
+#: For an install that did not come from an index. A zip of the default branch, because pip
+#: can install one unaided and a portable build usually has no git for the ``git+`` form.
 ARCHIVE_URL = f"{REPO_URL}/archive/refs/heads/main.zip"
 
 #: Where the package is. ``open_manager/`` itself, whichever way it was installed.
@@ -229,10 +227,12 @@ def state() -> dict:
              "command": f'{python} -m pip install --upgrade --force-reinstall "{url}"'},
         ]
     else:
-        # Everything else, including a local build directory that is no longer there. The
-        # archive of the default branch needs neither git nor a copy of the source.
+        # No direct_url.json means pip resolved this from an index, so the name is enough.
+        # The archive stays as the answer for an index that does not carry it.
         steps = [
-            {"label": "Install the latest from GitHub",
+            {"label": "Update from PyPI",
+             "command": f"{python} -m pip install --upgrade {DIST}"},
+            {"label": "Or install the latest from GitHub",
              "command": f'{python} -m pip install --upgrade --force-reinstall "{ARCHIVE_URL}"'},
         ]
 

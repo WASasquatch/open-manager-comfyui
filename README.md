@@ -1,8 +1,8 @@
 # Open Manager for ComfyUI  ![Open Manager](https://img.shields.io/badge/Open-Manager-yellow) ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![License](https://img.shields.io/badge/License-MIT-green) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
 
-<img src="./open-manager-banner.png" alt="Open Manager for ComfyUI">
+<img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-banner.png" alt="Open Manager for ComfyUI">
 
-<img src="./open-manager-screenshot.png" alt="Open Manager for ComfyUI">
+<img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-screenshot.png" alt="Open Manager for ComfyUI">
 
 https://github.com/user-attachments/assets/58e5d65e-ce23-464b-8c9a-2a249818a1d1
 
@@ -43,9 +43,9 @@ Three pieces sit alongside the pack manager. None of them adds a node to your gr
 
 | | | Default |
 | --- | --- | --- |
-| [Download Manager](DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, and picks the drive | on |
-| [Model Library](MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced, storage | off |
-| [Resource Monitor](MONITOR.md) | A compact CPU/RAM/VRAM strip, and a Memory panel behind it | off |
+| [Download Manager](https://github.com/WASasquatch/open-manager-comfyui/blob/main/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, and picks the drive | on |
+| [Model Library](https://github.com/WASasquatch/open-manager-comfyui/blob/main/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced, storage | off |
+| [Resource Monitor](https://github.com/WASasquatch/open-manager-comfyui/blob/main/MONITOR.md) | A compact CPU/RAM/VRAM strip, and a Memory panel behind it | off |
 
 ---
 
@@ -66,7 +66,7 @@ It coexists with ComfyUI-Manager and adds its own sidebar tab.
 
 ```sh
 pip uninstall comfyui-manager
-pip install git+https://github.com/WASasquatch/open-manager-comfyui.git
+pip install comfyui-open-manager
 
 # Launch ComfyUI with --enable-manager flag
 python main.py --enable-manager
@@ -179,7 +179,7 @@ thumbnail. `docs` and `funding` fall back to `[project.urls]`.
 A theme is a ComfyUI colour palette with an optional `extras` block. ComfyUI reads `colors`
 and ignores `extras`; Open Manager reads both. Themes listed in `[tool.open_manager] themes`
 appear on the pack page with an Add button. Copy one of the six in
-[`open_manager/themes/`](open_manager/themes/), change the id and the colours.
+[`open_manager/themes/`](https://github.com/WASasquatch/open-manager-comfyui/blob/main/open_manager/themes/), change the id and the colours.
 
 ```jsonc
 {
@@ -220,7 +220,7 @@ appear on the pack page with an Add button. Copy one of the six in
 
 ## Licence
 
-MIT, see [`LICENSE`](LICENSE).
+MIT, see [`LICENSE`](https://github.com/WASasquatch/open-manager-comfyui/blob/main/LICENSE).
 
 The GitHub mark shown on links to github.com is `mark-github` from
 [Octicons](https://github.com/primer/octicons), MIT licensed, Copyright (c) GitHub Inc. It is

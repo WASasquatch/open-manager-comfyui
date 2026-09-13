@@ -1811,8 +1811,12 @@ async function openPack(packId) {
   // dialog below would otherwise be built and torn down again, which reads as a flicker.
   const already = floatingPanel(`pack:${packId}`);
   if (already) { already.present(); return already; }
+  // The same again as a modal is the page that is already in front of the reader.
+  const showing = document.querySelector(".om-backdrop[data-om-pack]");
+  if (showing?.dataset.omPack === packId) return;
 
   const backdrop = el("div", "om-backdrop");
+  backdrop.dataset.omPack = packId;
   const dialog = el("div", "om-dialog");
   dialog.appendChild(el("div", "om-body", `Reading ${packId} from the registry...`));
   backdrop.appendChild(dialog);
@@ -1822,7 +1826,12 @@ async function openPack(packId) {
   // dialog that appears for two frames reads as a fault rather than as progress.
   let waiting = null;
   const showWaiting = () => {
-    if (waiting !== "shown") document.body.appendChild(backdrop);
+    if (waiting !== "shown") {
+      // One pack page at a time. A README link to another pack replaces the page rather than
+      // stacking a dialog over it, which left no way back but closing each in turn.
+      for (const other of document.querySelectorAll(".om-backdrop[data-om-pack]")) other.remove();
+      document.body.appendChild(backdrop);
+    }
     waiting = "shown";
   };
   const timer = setTimeout(() => { if (waiting === null) showWaiting(); }, LOADING_GRACE);
@@ -2743,13 +2752,82 @@ function docResolve(base, href) {
   return parts.join("/");
 }
 
+//: Declarations honoured from a README's inline `style`. Layout and type only. `position`,
+//: `z-index`, `transform` and the offsets are left out: a README should not be able to place
+//: anything over the interface around it. Nothing here can fetch, so no `background-image`
+//: and no shorthand that hides a `url()`.
+const STYLE_ALLOWED = new Set([
+  "width", "height", "max-width", "max-height", "min-width", "min-height",
+  "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "margin-inline",
+  "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+  "text-align", "vertical-align", "float", "clear", "display", "gap",
+  "color", "background-color", "opacity", "object-fit", "aspect-ratio",
+  "font-size", "font-weight", "font-style", "font-family", "line-height",
+  "letter-spacing", "text-decoration", "text-transform", "white-space",
+  "border", "border-radius", "border-width", "border-style", "border-color",
+]);
+
+//: Values refused whatever the property. `url()` would let a README fetch from a third party
+//: on open; the rest are ways of smuggling something that is not a value.
+const STYLE_REFUSED = /url\(|image-set\(|expression\(|javascript:|@import|[<>{}]|\\/i;
+
+//: A fenced block, an inline code span, or an HTML tag. Ordered alternation, so a tag written
+//: inside an example is consumed as part of the example and stays one.
+//:
+//: Indented lines are deliberately not treated as code. Four-space indentation inside a
+//: `<div align="center">` is how the markup in issue #15 is written, and protecting it meant
+//: the one case this exists for was the one case it skipped.
+const MD_SCAN = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]+`|<\/?[a-zA-Z][^>]*>/g;
+
+// Carry each inline `style` past ComfyUI's sanitiser, which empties the attribute.
+//
+// Args:
+//   text: Markdown as published.
+// Returns:
+//   The same markdown with style attributes renamed, to be read back by applyInlineStyle.
+function carryInlineStyle(text) {
+  let inCode = 0;
+  return String(text || "").replace(MD_SCAN, (chunk) => {
+    if (!chunk.startsWith("<")) return chunk;
+    const tag = /^<(\/?)(pre|code|samp|kbd)\b/i.exec(chunk);
+    if (tag) { inCode = Math.max(0, inCode + (tag[1] ? -1 : 1)); return chunk; }
+    if (inCode) return chunk;
+    return chunk.replace(/(\sstyle\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)/gi, " data-om-style=$2");
+  });
+}
+
+// Apply what the author asked for, one declaration at a time, refusing anything not listed.
+//
+// Args:
+//   view: The rendered markdown.
+function applyInlineStyle(view) {
+  for (const node of view.querySelectorAll("[data-om-style]")) {
+    const asked = node.getAttribute("data-om-style") || "";
+    node.removeAttribute("data-om-style");
+    for (const part of asked.split(";")) {
+      const at = part.indexOf(":");
+      if (at < 0) continue;
+      const name = part.slice(0, at).trim().toLowerCase();
+      let value = part.slice(at + 1).trim();
+      let priority = "";
+      if (/!\s*important$/i.test(value)) {
+        priority = "important";
+        value = value.replace(/!\s*important$/i, "").trim();
+      }
+      if (!value || !STYLE_ALLOWED.has(name) || STYLE_REFUSED.test(value)) continue;
+      try { node.style.setProperty(name, value, priority); } catch { /* browser said no */ }
+    }
+  }
+}
+
 // Render markdown into a view and wire everything that follows from it. One path, so a
 // linked document behaves exactly as the README does: same sanitising, same media, same
 // heading links, same workflow offers.
 async function renderMarkdownInto(view, text, meta, ref, base) {
   try {
-    const html = await app.extensionManager.renderMarkdownToHtml(text);
+    const html = await app.extensionManager.renderMarkdownToHtml(carryInlineStyle(text));
     view.innerHTML = typeof html === "string" ? html : "";
+    applyInlineStyle(view);
     view._repository = meta.repository || "";
     linkHeadings(view);
     absolutiseLinks(view, meta.repository, ref, { meta, base: base || "" });

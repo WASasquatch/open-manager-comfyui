@@ -1,27 +1,69 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-open-manager"
 description = "An alternative package manager for ComfyUI. Browse and install custom nodes and custom themes."
 version = "0.1.3"
-license = { file = "LICENSE" }
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
-dependencies = ["tomli; python_version < '3.11'"]
+authors = [{ name = "Jordan Thompson (WASasquatch)" }]
+keywords = [
+    "comfyui",
+    "comfyui-manager",
+    "custom-nodes",
+    "package-manager",
+    "stable-diffusion",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: System :: Software Distribution",
+]
+# aiohttp is imported at module level; ComfyUI already requires it. packaging is what makes a
+# declared version range comparable rather than a string. Everything else the code reaches for
+# is imported inside a try and the feature using it stands down when it is missing.
+dependencies = [
+    "aiohttp",
+    "packaging",
+    "tomli; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+# The Resource Monitor reads these. Without them it reports what it can and says so.
+monitor = ["psutil", "pynvml"]
 
 [project.urls]
+Homepage = "https://github.com/WASasquatch/open-manager-comfyui"
 Repository = "https://github.com/WASasquatch/open-manager-comfyui"
+Issues = "https://github.com/WASasquatch/open-manager-comfyui/issues"
 
 # Two ways to load, one core:
-#   pip install .   -> provides the `comfyui_manager` import name, loaded by --enable-manager
-#   clone into custom_nodes -> loaded by the custom_nodes scan, can live besides core ComfyUI Manager
+#   pip install comfyui-open-manager -> provides the `comfyui_manager` import name, which
+#     ComfyUI imports by that exact name under --enable-manager. Taking it is what replaces
+#     the official manager, and is why `comfyui-manager` must be uninstalled first: both
+#     distributions write the same files.
+#   clone into custom_nodes -> loaded by the custom_nodes scan, can live beside the official
+#     ComfyUI Manager.
 [tool.setuptools]
 packages = ["open_manager", "comfyui_manager"]
 
 [tool.setuptools.package-data]
 open_manager = ["web/*.js", "web/*.svg", "themes/*.json"]
 
+# The Comfy Registry takes the node id from [project] name above, so the two identities are
+# one string and renaming the distribution would start a new listing.
 [tool.comfy]
 PublisherId = "was"
 DisplayName = "Open Manager"
