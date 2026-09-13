@@ -716,6 +716,20 @@ def register_routes() -> None:
         )
         return web.json_response(payload)
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/media")
+    async def readme_media(request: web.Request) -> web.Response:
+        """Signed URLs for the attachments a README embeds.
+
+        Never cached: GitHub mints these with a five minute window, so a stored one is worse
+        than none. The reply carries that window so the panel can ask again.
+        """
+        repo = request.query.get("repo", "")
+        if not repo:
+            return web.json_response({"ok": False, "reason": "repo is required"}, status=400)
+        async with aiohttp.ClientSession() as session:
+            found = await metadata.attachment_media(repo, session, keys.secret("github"))
+        return web.json_response({"ok": True, "media": found, "ttl": metadata.MEDIA_TTL})
+
     @PromptServer.instance.routes.get(f"{PREFIX}/repo-meta")
     async def repo_meta(request: web.Request) -> web.Response:
         """Answer a repository's README and support fields for a pack matched from GitHub.

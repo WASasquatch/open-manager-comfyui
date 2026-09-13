@@ -2876,7 +2876,7 @@ async function renderMarkdownInto(view, text, meta, ref, base) {
     view._repository = meta.repository || "";
     linkHeadings(view);
     absolutiseLinks(view, meta.repository, ref, { meta, base: base || "" });
-    embedMediaLinks(view);
+    embedMediaLinks(view, await attachmentMedia(view, meta.repository));
     offerImageWorkflows(view);
   } catch {
     view.replaceChildren();
@@ -4031,7 +4031,23 @@ function linkHeadings(view) {
 // element is chosen by trying: video first, an image if the video will not decode, and the
 // original link back if neither works. Guessing wrong and leaving a dead player would be
 // worse than the link it replaced.
-function embedMediaLinks(view) {
+const ATTACHMENT_ID = /\/user-attachments\/assets\/([0-9a-f-]{36})/i;
+
+async function attachmentMedia(view, repository) {
+  if (!repository) return {};
+  const wanted = [...view.querySelectorAll("a[href]")]
+    .some((a) => ATTACHMENT_ID.test(a.getAttribute("href") || ""));
+  if (!wanted) return {};
+  try {
+    const answer = await api.fetchApi(`${API}/media?repo=${encodeURIComponent(repository)}`);
+    const data = await answer.json();
+    return data?.media || {};
+  } catch {
+    return {};
+  }
+}
+
+function embedMediaLinks(view, media = {}) {
   const ATTACHMENT = /^https?:\/\/(www\.)?github\.com\/user-attachments\/assets\//i;
   const VIDEO_EXT = /\.(mp4|webm|mov|m4v)(\?|#|$)/i;
   const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i;
@@ -4043,6 +4059,9 @@ function embedMediaLinks(view) {
     if (!href) continue;
     const bare = ATTACHMENT.test(href);
     if (!bare && !VIDEO_EXT.test(href) && !IMAGE_EXT.test(href)) continue;
+    const assetId = (ATTACHMENT_ID.exec(href) || [])[1];
+    const signed = assetId ? media[assetId.toLowerCase()] : "";
+    const source = signed || href;
     // A link with its own words reads as a link, not an embed.
     const text = (anchor.textContent || "").trim();
     if (text && text !== href) continue;
@@ -4055,12 +4074,12 @@ function embedMediaLinks(view) {
       const holder = el("div", "om-readme-gone");
       holder.appendChild(anchor.cloneNode(true));
       holder.appendChild(el("span", "om-readme-gone-note",
-        bare ? "This attachment is no longer on GitHub." : "This file could not be shown."));
+        bare ? "GitHub did not serve this attachment." : "This file could not be shown."));
       return holder;
     };
     const asImage = () => {
       const image = el("img", "om-readme-media");
-      image.src = href;
+      image.src = source;
       // Not lazy: a deleted attachment must fail now so the link can come back. Deferred,
       // an offscreen one never errors and leaves an empty box where a link used to be.
       image.alt = "";
@@ -4070,7 +4089,7 @@ function embedMediaLinks(view) {
     if (IMAGE_EXT.test(href)) { anchor.replaceWith(asImage()); continue; }
 
     const video = el("video", "om-readme-media");
-    video.src = href;
+    video.src = source;
     video.controls = true;
     video.preload = "metadata";
     video.playsInline = true;

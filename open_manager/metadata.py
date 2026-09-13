@@ -8,6 +8,7 @@ pack's version list and re-runs only when a version is added or changes status.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 import time
@@ -19,7 +20,8 @@ import aiohttp
 
 from . import developer, paths
 
-__all__ = ["Metadata", "cache_dir", "fetch", "fetch_repo", "signature"]
+__all__ = ["MEDIA_TTL", "Metadata", "attachment_media", "cache_dir", "fetch",
+           "fetch_repo", "signature"]
 
 #: Which revision of the scrape produced a cached entry. A scrape is kept until the pack's
 #: versions change, so a change in what we read would otherwise never reach anyone who had
@@ -545,3 +547,56 @@ async def _scrape(
         fetched_at=time.time(),
         developer=dev_table,
     )
+
+
+#: Asset UUID inside a signed media URL GitHub renders for a README attachment.
+_SIGNED_MEDIA = re.compile(
+    r"https://private-user-images\.githubusercontent\.com/[^\s\"'<>]*?"
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"[^\s\"'<>]*"
+)
+
+#: Seconds a signed media URL is good for. GitHub mints them with a five minute window.
+MEDIA_TTL = 300
+
+
+async def attachment_media(
+    repository: str, session: aiohttp.ClientSession, token: str = ""
+) -> dict:
+    """Signed URLs for the attachments a README embeds, keyed by asset id.
+
+    A ``github.com/user-attachments/assets/<id>`` URL answers 404 for many assets. GitHub's
+    own rendering rewrites them to signed ``private-user-images`` URLs, and the rendered HTML
+    the API returns carries those.
+
+    Args:
+        repository: Repository URL.
+        session: Session the request runs on.
+        token: GitHub token, which lifts the hourly limit.
+
+    Returns:
+        ``{asset_id: signed_url}``, empty where nothing could be read.
+    """
+    pair = _owner_repo(repository)
+    if not pair:
+        return {}
+    owner, repo = pair
+    headers = {"Accept": "application/vnd.github.html+json", "User-Agent": "open-manager"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with session.get(
+            f"https://api.github.com/repos/{owner}/{repo}/readme",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=TIMEOUT),
+        ) as answer:
+            if answer.status != 200:
+                return {}
+            body = await answer.text()
+    except (aiohttp.ClientError, TimeoutError):
+        return {}
+
+    found = {}
+    for match in _SIGNED_MEDIA.finditer(body):
+        found.setdefault(match.group(1).lower(), html.unescape(match.group(0)))
+    return found
