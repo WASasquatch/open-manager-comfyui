@@ -21,6 +21,24 @@ const SEVERITY_COLOUR = {
   note: "#8b949e",
 };
 
+//: Where our surfaces sit, measured against ComfyUI's own: canvas menu 999, topbar 1001,
+//: canvas controls 1200, dialogs 1701 and 1702, toasts 10000, node tooltip 99999.
+//:
+//: The host's dialogs win. A ComfyUI settings dialog is the reader answering ComfyUI rather
+//: than us, and a window of ours over it is one they cannot get out from under. So the band
+//: ends below 1701, and starts above 1200 so a window still covers the canvas controls.
+const FLOAT_Z = 1300;
+const FLOAT_Z_TOP = 1399;
+
+//: Modals over windows, menus over both, all three under the host's dialogs. Toasts and the
+//: lightbox stay above: ComfyUI puts its own toasts at 10000, over its settings dialog, and a
+//: progress line that hides whenever a dialog opens is a progress line nobody sees.
+const MODAL_Z = 1400;
+const MENU_Z = 1450;
+
+//: How long a read may take before it is worth saying so, in milliseconds.
+const LOADING_GRACE = 180;
+
 const style = document.createElement("style");
 style.textContent = `
 /* Chrome follows the active ComfyUI theme; status and licence colours stay fixed. */
@@ -39,7 +57,7 @@ style.textContent = `
 }
 .om-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);
-  display: flex; align-items: center; justify-content: center; z-index: 10000;
+  display: flex; align-items: center; justify-content: center; z-index: ${MODAL_Z};
 }
 /* Width and height follow the viewport rather than a fixed breakpoint. */
 .om-dialog {
@@ -113,7 +131,7 @@ style.textContent = `
 .om-ictl:hover > .om-btn.om-caret.installing { border-left-color: #388bfd; }
 .om-ictl:hover > .om-btn.om-caret.flagged { border-left-color: #d29922; }
 .om-ictl:hover > .om-btn.om-caret.banned { border-left-color: #f85149; }
-.om-menu { position: fixed; z-index: 10002; min-width: 150px; background: var(--om-surface);
+.om-menu { position: fixed; z-index: ${MENU_Z}; min-width: 150px; background: var(--om-surface);
   border: 1px solid var(--om-border); border-radius: 8px; padding: 4px;
   box-shadow: 0 8px 24px rgba(0,0,0,.5); font: 13px/1.5 system-ui, sans-serif; }
 .om-menu-item { padding: 7px 12px; border-radius: 6px; cursor: pointer; color: var(--om-text); }
@@ -267,6 +285,10 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
   gap: 10px; align-items: center; color: var(--om-muted); }
 .om-find { border: 1px solid var(--om-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
 .om-find h4 { margin: 0 0 4px; font-size: 14px; }
+/* A finding long enough to need a second paragraph gets one. Wrapping is unchanged; only a
+   blank line an author wrote deliberately survives, which is what stops a six-line warning
+   reading as one undifferentiated block. */
+.om-find-detail { white-space: pre-line; }
 .om-ev { font-family: ui-monospace, monospace; font-size: 11px; color: var(--om-muted); margin-top: 6px; }
 .om-ack { border-left: 3px solid #f85149; background: #1c1214; padding: 12px 14px; margin: 12px 0; }
 .om-state { display: flex; gap: 8px; align-items: center; padding: 9px 14px; margin: 4px 0;
@@ -357,7 +379,7 @@ const findingCard = (finding) => {
   const title = el("h4", null, finding.title);
   title.style.color = SEVERITY_COLOUR[finding.severity] || "var(--om-text)";
   card.appendChild(title);
-  card.appendChild(el("div", null, finding.detail));
+  card.appendChild(el("div", "om-find-detail", finding.detail));
   if (finding.evidence?.length) {
     for (const line of finding.evidence) {
       card.appendChild(el("div", "om-ev", line));
@@ -886,6 +908,49 @@ function installedPack(packId) {
 //   cls: The view's own class for the control.
 // Returns:
 //   The control, already restored to whatever state its pack is actually in.
+//: A leading or trailing "ComfyUI" in a pack name, however its author spelled it. Two names
+//: in three carry one, and in a ComfyUI pack manager it is the one part that says nothing:
+//: every entry here is a ComfyUI pack. Only the ends are matched -- a name like
+//: `Diffusion_pipe_in_ComfyUI_Win` is using the word as a word, and cutting it out of the
+//: middle would leave nonsense.
+const COMFY_LEAD = /^comfy[\s_-]?ui[\s_.-]+/i;
+const COMFY_TRAIL = /[\s_.-]+comfy[\s_-]?ui$/i;
+
+//: What is left has to still be a name. `ComfyUI-J` shortens to "J" and `ComfyUI-988` to
+//: "988", which are worse than the originals, so a remainder this short keeps its prefix.
+const NAME_FLOOR = 4;
+
+// The name a row should show: the author's, less the word that is true of every pack here.
+//
+// Args:
+//   name: The pack name as published.
+// Returns:
+//   The name to display, which is the original wherever shortening it would not help.
+function shortPackName(name) {
+  const text = String(name || "").trim();
+  const cut = text.replace(COMFY_LEAD, "").replace(COMFY_TRAIL, "").trim();
+  return cut.length >= NAME_FLOOR ? cut : text;
+}
+
+// A pack name element showing the shortened name, with the published one on hover.
+//
+// The full name is what the reader will search for, paste into an issue and compare against
+// the registry, so it stays one hover away and is never what gets stored or matched -- only
+// what is drawn is shortened.
+//
+// Args:
+//   name: The pack name as published.
+//   cls: Class for the element holding it.
+// Returns:
+//   An element containing the name to show.
+function packName(name, cls) {
+  const text = String(name || "");
+  const shown = shortPackName(text);
+  const holder = el("span", cls, shown);
+  if (shown !== text) holder.title = text;
+  return holder;
+}
+
 function registryControl(entry, cls) {
   // Open Manager's own entry is listed so it can be found and read, but a manager cannot be
   // installed through itself: the control says what it is and sends the reader to the place
@@ -1032,6 +1097,9 @@ async function runInstallQueue() {
         body: JSON.stringify({
           id: job.packId, version: job.entry.version,
           status: job.entry.status, overwrite: !!job.overwrite,
+          // Read now rather than when the job was queued: the block is the reader's, and
+          // the answer that counts is the one standing when the install actually runs.
+          allow_banned: allowBanned(),
           // Held back so the files can be looked at before anything joins the environment.
           with_deps: !job.scanFirst,
         }),
@@ -1339,7 +1407,9 @@ async function offerRestore(entryId, packName) {
 
 async function install({ packId, entry, control, rowsRoot, overwrite }) {
   if (entry.installable === false) {
-    notify(`${packId} ${entry.version} is blocked`, entry.blocked_reason || "Blocked by policy.");
+    notify(`${packId} ${entry.version} is blocked`,
+      entry.blocked_reason
+      || "Blocked by policy. Open Manager's settings decide whether banned versions install.");
     return;
   }
   // A different version already installed makes this a switch. The installed version is
@@ -1737,20 +1807,36 @@ function packRoot(node) {
 }
 
 async function openPack(packId) {
+  // Already open: bring it forward. Checked before anything is drawn, because the loading
+  // dialog below would otherwise be built and torn down again, which reads as a flicker.
+  const already = floatingPanel(`pack:${packId}`);
+  if (already) { already.present(); return already; }
+
   const backdrop = el("div", "om-backdrop");
   const dialog = el("div", "om-dialog");
   dialog.appendChild(el("div", "om-body", `Reading ${packId} from the registry...`));
   backdrop.appendChild(dialog);
-  document.body.appendChild(backdrop);
   closeOn(backdrop);
+
+  // Held back rather than shown at once. A cached registry answer returns inside this, and a
+  // dialog that appears for two frames reads as a fault rather than as progress.
+  let waiting = null;
+  const showWaiting = () => {
+    if (waiting !== "shown") document.body.appendChild(backdrop);
+    waiting = "shown";
+  };
+  const timer = setTimeout(() => { if (waiting === null) showWaiting(); }, LOADING_GRACE);
+  const doneWaiting = () => { clearTimeout(timer); if (waiting === null) waiting = "skipped"; };
 
   let data;
   try {
     const answer = await api.fetchApi(
-      `${API}/pack/${encodeURIComponent(packId)}?${new URLSearchParams(licenseOptions())}`);
+      `${API}/pack/${encodeURIComponent(packId)}?${packQuery()}`);
     data = await answer.json();
     if (!answer.ok) throw new Error(registryReason(data, answer.status));
+    doneWaiting();
   } catch (error) {
+    doneWaiting();
     // The registry not having an entry is not the same as there being nothing to show. A
     // pack sitting in custom_nodes doing its job has a page's worth of information in it.
     const local = await localPack(packId);
@@ -1765,10 +1851,12 @@ async function openPack(packId) {
         close.onclick = () => backdrop.remove();
         dialog.appendChild(close);
         buildLocalPackBody(dialog, local);
+        showWaiting();
       }
       return;
     }
     dialog.replaceChildren(packProblem(`Could not read ${packId}`, error, backdrop));
+    showWaiting();
     return;
   }
 
@@ -1799,6 +1887,7 @@ async function openPack(packId) {
   } catch (error) {
     dialog.replaceChildren(close, packProblem(`Could not show ${packId}`, error, backdrop));
   }
+  showWaiting();
 }
 
 //: The setting behind each surface that can be either a window or a modal.
@@ -2105,7 +2194,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     titleRow.appendChild(icon);
   }
   const titles = el("div");
-  titles.appendChild(el("div", "om-title", pack.name || pack.id));
+  titles.appendChild(packName(pack.name || pack.id, "om-title"));
   titles.appendChild(el("div", "om-sub", pack.description || ""));
   titles.appendChild(el("div", "om-sub", pack.id));
   titleRow.appendChild(titles);
@@ -2831,7 +2920,7 @@ function buildRefPicker(meta, host) {
           const o = el("option", null, published ? `${t.name} · published` : t.name);
           o.value = t.name;
           o.title = published
-            ? `${t.name} — the registry publishes this version`
+            ? `${t.name}: the registry publishes this version`
             : `${t.name} (${t.sha})`;
           return o;
         }));
@@ -4147,7 +4236,7 @@ async function quickInstall(packId, control) {
   let data;
   try {
     const answer = await api.fetchApi(
-      `${API}/pack/${encodeURIComponent(packId)}?${new URLSearchParams(licenseOptions())}`);
+      `${API}/pack/${encodeURIComponent(packId)}?${packQuery()}`);
     data = await answer.json();
     if (!answer.ok) throw new Error(data.detail || `HTTP ${answer.status}`);
   } catch (error) {
@@ -4444,7 +4533,7 @@ function buildResultRow(entry) {
   const row = el("div", "om-side-row");
   row.appendChild(packIcon(entry.icon, entry.name || entry.id));
   const text = el("div", "om-side-text");
-  text.appendChild(el("div", "om-side-name", entry.name || entry.id));
+  text.appendChild(packName(entry.name || entry.id, "om-side-name"));
   const meta = el("div", "om-side-meta");
   // In its own element so it is the part that gives way when the panel is narrow: the
   // version and count truncate, and the star and licence badges beside them do not.
@@ -4488,7 +4577,7 @@ function buildResultTableRow(entry, index) {
 
   const title = el("div", "om-tcell om-tcell-title");
   title.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-table-icon"));
-  const name = el("span", "om-side-name", entry.name || entry.id);
+  const name = packName(entry.name || entry.id, "om-side-name");
   title.appendChild(name);
   title.title = entry.name || entry.id;
   title.onclick = () => openPack(entry.id);
@@ -4538,7 +4627,7 @@ function buildResultCard(entry) {
   const head = el("div", "om-card-head");
   head.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-card-icon"));
   const title = el("div", "om-card-title");
-  title.appendChild(el("div", "om-side-name", entry.name || entry.id));
+  title.appendChild(packName(entry.name || entry.id, "om-side-name"));
   // Always present, empty or not: the windowed grid scrolls on one row pitch, so a card
   // that dropped a line would be shorter than its neighbours and put the scrollbar out of
   // step with the cards it scrolls.
@@ -5545,6 +5634,21 @@ function dropdown(storageKey, fallback, options) {
 
 // How a licence lookup should run, from the panel's settings. Every speed-up is off by
 // default, so the behaviour only changes for someone who asks for it.
+// Whether the reader has taken the block off versions the registry banned.
+//
+// Off by default, and it lifts a block rather than silencing a warning: a banned version
+// still carries its critical finding and still has to be confirmed. The answer travels with
+// each request, so the server never holds a standing permission the reader cannot see.
+function allowBanned() {
+  return panelSetting("openManager.allowBanned", false) === true;
+}
+
+// The query a pack page is fetched with: how far its licence lookup may go, and whether a
+// banned version should come back installable.
+function packQuery() {
+  return new URLSearchParams({ ...licenseOptions(), allow_banned: allowBanned() });
+}
+
 function licenseOptions() {
   const get = (key, fallback) => {
     try { return app.extensionManager.setting.get(key) ?? fallback; } catch { return fallback; }
@@ -6763,11 +6867,6 @@ document.head.appendChild(sidebarStyle);
 
 // --- floating panels ------------------------------------------------------------------------
 
-//: Where floating panels sit. ComfyUI uses 8888, 9999 and 10000 for its overlays and tops out
-//: at 99999; our own modals are at 10000. This band is above the canvas and ordinary chrome and
-//: below every dialog on either side, so a settings window is never trapped underneath one.
-const FLOAT_Z = 8000;
-const FLOAT_Z_TOP = 8099;
 
 //: Room a panel needs around it before dragging it means anything. A window almost as wide
 //: as the screen has nowhere to go, and letting it be dragged there is only a way to lose
@@ -6830,7 +6929,7 @@ function markActive(panel) {
 function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
                                centred = false, modal = false } = {}) {
   const open = floatingPanel(key);
-  if (open) { open.raise(); return open; }
+  if (open) { open.present(); return open; }
 
   const saved = floatRecall(key, {});
   // What the screen can actually take. A size remembered from a larger window is brought
@@ -6956,20 +7055,24 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     centre();
   }
 
+  // Size and position, and deliberately not whether it was folded. Collapsing is an
+  // arrangement of the desk rather than a preference, and restoring it meant clicking a pack
+  // and getting a window already collapsed, which reads as the click having failed.
   const state = () => ({
     left: parseInt(panel.style.left, 10) || 0,
     top: parseInt(panel.style.top, 10) || 0,
     width: panel.offsetWidth,
     height: parseInt(body.style.height, 10) || height,
-    folded: panel.classList.contains("om-float-folded"),
   });
   const remember = () => {
     const now = state();
+    // Written by an older build, read by nothing now.
+    const { folded: _gone, ...previous } = floatRecall(key, {});
     // A centred panel has no position of its own to keep. Writing one away would move the
     // panel the moment there was room to float again, or the setting was turned back on --
     // to a place the reader never chose, on a screen they may not be using any more.
     if (!floating()) { delete now.left; delete now.top; }
-    floatRemember(key, { ...floatRecall(key, {}), ...now });
+    floatRemember(key, { ...previous, ...now });
   };
 
   const raise = () => {
@@ -7004,7 +7107,6 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     fold.title = folded ? "Expand" : "Collapse";
     remember();
   };
-  if (saved.folded) setFolded(true);
   fold.onclick = (event) => { event.stopPropagation(); setFolded(!panel.classList.contains("om-float-folded")); };
   bar.addEventListener("dblclick", (event) => {
     if (event.target.closest("button")) return;
@@ -7084,7 +7186,9 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
       if (label) { label.textContent = text; label.title = text; }
     },
     raise, destroy,
-    setTitle: (text) => { heading.textContent = text; },
+    // Opening something already open. Raising alone leaves a collapsed window collapsed, so
+    // the reader clicks and nothing they can see happens.
+    present: () => { setFolded(false); raise(); },
     setBadge: (text) => { badge.textContent = text || ""; },
     isFolded: () => panel.classList.contains("om-float-folded"),
   };
@@ -10514,6 +10618,21 @@ app.registerExtension({
       type: "number",
       defaultValue: 8,
       tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16; higher is not always faster and risks the registry rate-limiting you.",
+    },
+    {
+      id: "openManager.allowBanned",
+      name: "Install versions the registry has banned",
+      category: ["Open Manager", "Registry", "allowBanned"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Off, a banned version shows as Blocked and will not install. On, it installs "
+        + "like any other version after a confirmation that names the ban, and the risk is "
+        + "yours: a custom node reads and writes anything the account running ComfyUI can "
+        + "reach, and nothing here has checked whether the ban is right. Worth knowing either "
+        + "way: the registry's automated scanner is currently banning at a rate publishers "
+        + "dispute, with no reason published, no category and no route to contest or clear "
+        + "one, and it has caught working, widely used packs. Scan or read a pack before "
+        + "installing it over a ban.",
     },
     {
       id: "openManager.galleryShow",

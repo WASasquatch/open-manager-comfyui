@@ -34,7 +34,8 @@ installing before it happens.
 | Fast sync | The whole Comfy Registry in seconds, at a concurrency you set |
 
 A risk changes the wording of the confirmation, not whether Install works. The one exception is
-a version the registry has banned; `OPEN_MANAGER_ALLOW_BANNED=1` lifts that too.
+a version the registry has banned; a setting lifts that too, because the registry's scanner bans
+for reasons it does not publish (`OPEN_MANAGER_ALLOW_BANNED=1` for a headless host).
 
 ### Beyond packs
 

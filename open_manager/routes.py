@@ -76,11 +76,13 @@ REF_COMMITS = 20
 #: About a quarter of packs publish any, so this is often empty and that is not an error.
 REF_TAGS = 100
 
-#: Statuses blocked rather than warned about. ``OPEN_MANAGER_ALLOW_BANNED=1`` lifts the
-#: block and treats a ban as a warning.
+#: Statuses blocked rather than warned about.
 BLOCKED_STATUSES = ("banned",)
 
-#: Whether a banned version may be installed after acknowledgement rather than blocked.
+#: Whether a banned version installs for a host with no panel attached. The panel carries
+#: its own answer on each request -- the "Install versions the registry has banned" setting
+#: -- and this is the override for a headless or scripted install, where there is nobody to
+#: ask. Either one lifts the block; neither silences the warning.
 ALLOW_BANNED = os.environ.get("OPEN_MANAGER_ALLOW_BANNED", "").strip().lower() in (
     "1",
     "true",
@@ -498,20 +500,22 @@ async def _pack_by_repo(repo_url: str, session: aiohttp.ClientSession) -> dict |
     return None
 
 
-def _installable(status: str) -> tuple[bool, str]:
+def _installable(status: str, allowed: bool = False) -> tuple[bool, str]:
     """Whether a version may be installed, and why not where it may not.
 
     Args:
         status: Short registry status.
+        allowed: Whether the caller has turned the ban block off for this request.
 
     Returns:
         ``(installable, reason)``. ``reason`` is empty where the version installs.
     """
-    if status in BLOCKED_STATUSES and not ALLOW_BANNED:
+    if status in BLOCKED_STATUSES and not (allowed or ALLOW_BANNED):
         return False, (
-            "The registry banned this version. A ban is applied for illegal content or "
-            "malware, so it is blocked rather than warned about. Set "
-            "OPEN_MANAGER_ALLOW_BANNED=1 to install it anyway."
+            "The registry banned this version, so it is withheld by default. Bans are "
+            "meant for harmful releases, and the registry's automated scanner also issues "
+            "them for reasons it does not publish. Turn on Open Manager's 'Install "
+            "versions the registry has banned' setting to decide for yourself."
         )
     return True, ""
 
@@ -537,8 +541,19 @@ def _assessment_json(assessment: risk.Assessment) -> dict:
     }
 
 
-def _version_json(entry: registry.NodeVersion, pack_id: str) -> dict:
-    """One version, with everything worth saying about installing it."""
+def _version_json(entry: registry.NodeVersion, pack_id: str, allow_banned: bool = False) -> dict:
+    """One version, with everything worth saying about installing it.
+
+    Args:
+        entry: The published version.
+        pack_id: Registry identifier of the pack it belongs to.
+        allow_banned: Whether the reader has turned the ban block off. It decides whether a
+            banned version comes back installable; the findings against it are the same
+            either way.
+
+    Returns:
+        The version as the panel draws it.
+    """
     fit = compat.check(
         supported_comfyui=entry.supported_comfyui,
         supported_frontend=entry.supported_frontend,
@@ -553,7 +568,7 @@ def _version_json(entry: registry.NodeVersion, pack_id: str) -> dict:
         deprecated=entry.deprecated,
         compatibility=fit,
     )
-    installable, blocked_reason = _installable(entry.status)
+    installable, blocked_reason = _installable(entry.status, allow_banned)
     return {
         "version": entry.version,
         "status": entry.status,
@@ -584,6 +599,12 @@ def register_routes() -> None:
         node_id = request.match_info.get("node_id", "")
         if not node_id:
             return web.json_response({"error": "no pack named"}, status=400)
+
+        # Whether a banned version comes back installable is the reader's setting, so it
+        # travels with the request rather than being remembered here. The page is then the
+        # only place that answer lives, and turning the setting off cannot leave a server
+        # still handing out installable bans.
+        allow_banned = _flag(request.query.get("allow_banned", False))
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -662,7 +683,9 @@ def register_routes() -> None:
                         )
                     ),
                 },
-                "versions": [_version_json(entry, record.node_id) for entry in versions],
+                "versions": [
+                    _version_json(entry, record.node_id, allow_banned) for entry in versions
+                ],
             }
         )
 
@@ -1769,7 +1792,8 @@ def register_routes() -> None:
             )
 
         status = str(body.get("status", "")).strip()
-        allowed, blocked_reason = _installable(status) if status else (True, "")
+        allow_banned = _flag(body.get("allow_banned", False))
+        allowed, blocked_reason = _installable(status, allow_banned) if status else (True, "")
         if not allowed:
             return web.json_response({"ok": False, "reason": blocked_reason}, status=403)
 

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -211,13 +212,17 @@ def resolve_install_dir(node_id: str) -> Path | None:
 def _download(url: str, target: Path) -> None:
     """Download a URL to a file.
 
+    Only ``https``. ``urlopen`` also honours ``file:`` and ``ftp:``, which no real source uses.
+
     Args:
         url: Artifact URL.
         target: File to write.
 
     Raises:
-        RuntimeError: On any download failure.
+        RuntimeError: On any download failure, or where the URL is not https.
     """
+    if urllib.parse.urlparse(url or "").scheme.lower() != "https":
+        raise RuntimeError(f"refusing to download from a non-https URL: {url[:120]!r}")
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "open-manager"})
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as answer:
@@ -489,6 +494,27 @@ def _requirements(directory: Path) -> list[str]:
 #: set up with -- a CUDA wheel, a matching torchvision -- which a generic one would replace.
 PIP_BLACKLIST = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
 
+#: Requirements-file options never passed on to pip, and why. These apply to every package in
+#: the run, not to one of their own, so a pack that sets ``--index-url`` also redirects the
+#: ordinary requirements beneath it. Held back rather than refused, and named in the result.
+#: Options that only make an install stricter (``--hash``, ``--only-binary``) pass through.
+PIP_REDIRECTS = {
+    "-i": "changes where every package in this install comes from",
+    "--index-url": "changes where every package in this install comes from",
+    "--extra-index-url": "adds another source for every package in this install",
+    "--no-index": "stops pip using the package index at all",
+    "-f": "adds another source for every package in this install",
+    "--find-links": "adds another source for every package in this install",
+    "--trusted-host": "waives certificate checking for a host",
+    "-r": "reads requirements from another file",
+    "--requirement": "reads requirements from another file",
+    "-c": "reads version constraints from another file",
+    "--constraint": "reads version constraints from another file",
+    "--no-binary": "forces a source build, which runs the package's own setup code",
+    "--global-option": "passes arguments to the package's own build",
+    "--config-settings": "passes arguments to the package's own build",
+}
+
 #: Lines of pip output worth showing first. A dependency resolution failure prints its
 #: explanation well before the end, so a tail alone hides the one sentence that matters.
 _PIP_TROUBLE = (
@@ -576,22 +602,54 @@ def _requirement_name(line: str) -> str:
     return match.group(1).lower().replace("_", "-") if match else ""
 
 
-def plan_requirements(lines: list[str]) -> tuple[list[str], list[str], list[str]]:
+def requirement_redirect(line: str) -> tuple[str, str]:
+    """The source-changing option a requirement line carries, if it carries one.
+
+    Args:
+        line: One line of a requirements file.
+
+    Returns:
+        ``(option, why)``, both empty where the line changes nothing about where packages
+        come from.
+    """
+    text = line.strip()
+    if not text.startswith("-"):
+        return "", ""
+    # pip accepts `--index-url URL`, `--index-url=URL` and `-iURL` alike.
+    head = text.split("=", 1)[0].split()[0]
+    if head in PIP_REDIRECTS:
+        return head, PIP_REDIRECTS[head]
+    for option in ("-i", "-f", "-r", "-c"):
+        if head.startswith(option) and len(head) > len(option):
+            return option, PIP_REDIRECTS[option]
+    return "", ""
+
+
+def plan_requirements(
+    lines: list[str],
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """What will be handed to pip, and what changed on the way.
 
     Args:
         lines: Requirement lines as the pack wrote them.
 
     Returns:
-        ``(to_install, held_back, substituted)``. ``held_back`` names requirements dropped
-        because installing them would disturb the running environment; ``substituted``
-        records each ``before -> after`` the user's overrides applied.
+        ``(to_install, held_back, substituted, redirects)``. ``held_back`` names requirements
+        dropped because installing them would disturb the running environment; ``redirects``
+        names option lines dropped because they would change where packages come from, each
+        as ``line -- why``; ``substituted`` records each ``before -> after`` the user's
+        overrides applied.
     """
     overrides = pip_overrides()
     keep: list[str] = []
     held: list[str] = []
     swapped: list[str] = []
+    redirects: list[str] = []
     for line in lines:
+        option, why = requirement_redirect(line)
+        if option:
+            redirects.append(f"{line.strip()} ({why})")
+            continue
         name = _requirement_name(line)
         if name and name in PIP_BLACKLIST:
             held.append(line.strip())
@@ -601,7 +659,7 @@ def plan_requirements(lines: list[str]) -> tuple[list[str], list[str], list[str]
             keep.append(overrides[name])
             continue
         keep.append(line)
-    return keep, held, swapped
+    return keep, held, swapped, redirects
 
 
 def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
@@ -636,10 +694,15 @@ def _pip_install(directory: Path, python: str) -> dict:
         ``errors`` is what pip said went wrong, which is the part a reader needs and the part
         a trimmed tail is most likely to lose.
     """
-    keep, held, swapped = plan_requirements(_requirements(directory))
+    keep, held, swapped, redirects = plan_requirements(_requirements(directory))
     notes = []
     if held:
         notes.append("Held back to protect the running install: " + ", ".join(held))
+    if redirects:
+        notes.append(
+            "Held back because they change where packages come from, not which ones: "
+            + "; ".join(redirects)
+        )
     if swapped:
         notes.append("Substituted by your overrides: " + "; ".join(swapped))
     if not keep:

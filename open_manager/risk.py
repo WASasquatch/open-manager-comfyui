@@ -12,7 +12,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Iterable
 
-from . import advisories
+from . import advisories, installer
 
 __all__ = [
     "Finding",
@@ -130,6 +130,23 @@ def repository_findings(owner: str, repo: str) -> list[Finding]:
     return []
 
 
+#: Title of the finding a ban raises. Named because the acknowledgement has to tell a ban
+#: apart from a documented compromise: both are critical and they do not mean the same thing.
+_BANNED_TITLE = "Withdrawn by the registry"
+
+#: Provisional, and written to be replaced. On 2026-09-13 a sample of 400 registry packs
+#: found 50 -- one in eight -- with a banned version, widely used packs among them, and no
+#: reason published for any of them. That is the state of the registry's automated scanner as
+#: this was written rather than a permanent property of it; when it publishes its reasoning,
+#: or a route to contest a ban exists, this paragraph should go.
+_SCANNER_NOTE = (
+    "Weigh the ban rather than read it as a finding. The registry's automated scanner is "
+    "currently producing detections that many publishers say are false, with no reason "
+    "given, no category and no route to contest or clear one, and it has caught packs that "
+    "were working and widely used. A ban here is a claim by that scanner, not a confirmed "
+    "compromise -- and equally, not an all-clear."
+)
+
 _STATUS_TEXT = {
     "flagged": (
         "caution",
@@ -139,9 +156,11 @@ _STATUS_TEXT = {
     ),
     "banned": (
         "critical",
-        "Withdrawn by the registry",
-        "The registry banned this version. A ban is applied to versions believed harmful, "
-        "and unlike a flag it is not routine.",
+        _BANNED_TITLE,
+        "The registry banned this version, so it is withheld from install unless the reader "
+        "turns bans off. A ban is meant for versions believed harmful. No reason, category "
+        "or report is published with one, so what it is for is not knowable from here.\n\n"
+        + _SCANNER_NOTE,
     ),
     "deleted": (
         "caution",
@@ -225,6 +244,21 @@ def assess_version(
                 )
             )
         text = requirement.strip()
+        # The installer drops these. Still reported: it is a fact about the pack, and an
+        # install done some other way will honour them.
+        option, why = installer.requirement_redirect(text)
+        if option:
+            findings.append(
+                Finding(
+                    severity="caution",
+                    title=f"Requirements file carries {option}, which {why}",
+                    detail="The option applies to every package in the install, not to one "
+                           "of them, so ordinary requirements beneath it are fetched from "
+                           "wherever it points. Open Manager holds it back and installs the "
+                           "packages without it.",
+                    evidence=(f"requirement: {text}",),
+                )
+            )
         if text.startswith(("git+", "-e ", "--editable")) or "git+" in text:
             findings.append(
                 Finding(
@@ -316,6 +350,16 @@ def _acknowledgement(findings: tuple[Finding, ...]) -> str:
     if not findings:
         return ""
     if findings[0].severity == "critical":
+        # A ban and a documented compromise are both critical and do not read the same. An
+        # advisory names a real incident with a reference; a ban is the registry's scanner
+        # saying so, and it says so wrongly often enough that the two cannot share a sentence.
+        if findings[0].title == _BANNED_TITLE:
+            return (
+                "Installing a banned version is your decision and your risk. Nothing here "
+                "has checked whether the ban is right, and nothing here can undo what the "
+                "code does once it runs -- a custom node reads and writes anything the "
+                "account running ComfyUI can reach. Scan it, or read what it installs, first."
+            )
         return (
             "This install is recorded as harmful. Installing it can compromise credentials "
             "and files reachable by the account ComfyUI runs under. Continue only if the "
