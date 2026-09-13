@@ -1,4 +1,4 @@
-# Open Manager for ComfyUI  ![Open Manager](https://img.shields.io/badge/Open-Manager-yellow) ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) ![License](https://img.shields.io/badge/License-MIT-green) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
+# Open Manager for ComfyUI  ![Open Manager](https://img.shields.io/badge/Open-Manager-yellow) ![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom_Node-blue) [![PyPI](https://img.shields.io/pypi/v/comfyui-open-manager?label=PyPI&color=yellow)](https://pypi.org/project/comfyui-open-manager/) ![License](https://img.shields.io/badge/License-MIT-green) [![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://paypal.me/ThompsonJordan?country.x=US&locale.x=en_US)
 
 <img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-banner.png" alt="Open Manager for ComfyUI">
 
@@ -62,7 +62,8 @@ git clone https://github.com/WASasquatch/open-manager-comfyui.git
 
 It coexists with ComfyUI-Manager and adds its own sidebar tab.
 
-**As a pip package**, through `--enable-manager`:
+**As a pip package** from [PyPI](https://pypi.org/project/comfyui-open-manager/), through
+`--enable-manager`:
 
 ```sh
 pip uninstall comfyui-manager
@@ -72,8 +73,13 @@ pip install comfyui-open-manager
 python main.py --enable-manager
 ```
 
-It takes the `comfyui_manager` name and replaces the official manager. A later install of
-`comfyui-manager`, or a desktop auto-update, puts the official one back.
+Update with `pip install --upgrade comfyui-open-manager`. On a portable build, call its own
+interpreter rather than the `python` on your PATH, or the install lands in the wrong
+environment: `ComfyUI_windows_portable\python_embeded\python.exe -m pip install ...`
+
+It takes the `comfyui_manager` name and replaces the official manager. Both packages own that
+name, so `pip uninstall comfyui-manager` first; installing either afterwards, or a desktop
+auto-update, puts the other one back.
 
 In this mode it also writes `user/comfyui.log`, rotating to `comfyui.prev.log` and
 `comfyui.prev2.log`, because ComfyUI writes no log of its own unless launched with
