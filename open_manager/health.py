@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Mapping
 import time
 from pathlib import Path
 
@@ -250,9 +251,46 @@ def enable(name: str) -> dict:
 
 # --- node names two packs both claim ---------------------------------------------------------
 
+def _attr(obj: object, name: str, default=None):
+    """Read an attribute off somebody else's object without running their code.
+
+    ``getattr`` is the wrong tool here twice over. It looks total and is not -- the default
+    only covers ``AttributeError``, while a module may define ``__getattr__`` and raise
+    anything at all from it, as one pack does with ``ImportError("_C_flashattention
+    unavailable")``. Worse, ``getattr`` *calls* that ``__getattr__``, and a module is free to
+    do real work in it: import a heavy optional dependency, probe hardware, warn. Walking
+    ``sys.modules`` and asking every module for a name would run a little of a thousand packs'
+    code on a request that is only meant to be looking.
+
+    So the namespace is read directly. ``__dict__`` holds what a module actually defined and
+    consulting it triggers nothing; a pack that has no such name simply does not have one,
+    which is the answer anyway. ``getattr`` is kept only as a fallback for objects with no
+    readable ``__dict__``, still wrapped, because being unable to look is not a failure worth
+    propagating.
+
+    Args:
+        obj: Any object, including one from a pack this knows nothing about.
+        name: Attribute to read.
+        default: Returned where it cannot be read for any reason.
+
+    Returns:
+        The attribute, or the default.
+    """
+    try:
+        namespace = object.__getattribute__(obj, "__dict__")
+        if isinstance(namespace, Mapping):
+            return namespace[name] if name in namespace else default
+    except Exception:  # noqa: BLE001 - no readable namespace; fall through and ask politely
+        pass
+    try:
+        return getattr(obj, name, default)
+    except Exception:  # noqa: BLE001 - the point is that anything at all may come out
+        return default
+
+
 def _pack_of(module: object, root: Path) -> str:
     """Which pack directory a module was loaded from, or empty for anything else."""
-    where = getattr(module, "__file__", "") or ""
+    where = _attr(module, "__file__", "") or ""
     if not where:
         return ""
     try:
@@ -269,7 +307,7 @@ def _defined_in(node_class: object, root: Path, seen: dict) -> str:
     classes from a handful of modules -- so the answer is kept per module and the path is
     resolved once rather than once per node.
     """
-    module = getattr(node_class, "__module__", "")
+    module = _attr(node_class, "__module__", "") or ""
     if module not in seen:
         seen[module] = _pack_of(sys.modules.get(module), root)
     return seen[module]
@@ -299,34 +337,45 @@ def collisions() -> dict:
     mapping either.
 
     Returns:
-        ``{ok, groups, packs, names, reason}``. Each group is ``{node, packs, loaded}``,
-        where ``loaded`` is the pack whose class is the one in use, or empty where that
-        cannot be told.
+        ``{ok, groups, packs, names, skipped, reason}``. Each group is ``{node, packs,
+        loaded}``, where ``loaded`` is the pack whose class is the one in use, or empty where
+        that cannot be told. ``skipped`` names any module that could not be read, with why:
+        its claims are missing from the answer and saying so is better than a silently short
+        one.
     """
     try:
         root = installer.custom_nodes_dir().resolve()
-    except OSError as error:
-        return {"ok": False, "groups": [], "packs": 0, "names": 0, "reason": str(error)}
+    except (OSError, RuntimeError) as error:
+        return {"ok": False, "groups": [], "packs": 0, "names": 0, "skipped": [],
+                "reason": str(error)}
 
     claims: dict = {}
     packs = set()
     seen: dict = {}
+    skipped: list = []
     for module in list(sys.modules.values()):
-        mapping = getattr(module, MAPPING, None)
-        if not isinstance(mapping, dict) or not mapping:
-            continue
-        pack = _pack_of(module, root)
-        if not pack:
-            continue
-        for name, node_class in list(mapping.items()):
-            if isinstance(name, str) and _defined_in(node_class, root, seen) == pack:
-                claims.setdefault(name, set()).add(pack)
-                packs.add(pack)
+        # Per module rather than around the loop: one unreadable module should cost its own
+        # claims and nothing else's. Reading it is the whole of what can go wrong here, and
+        # what goes wrong belongs to the module, not to the reader.
+        try:
+            mapping = _attr(module, MAPPING, None)
+            if not isinstance(mapping, dict) or not mapping:
+                continue
+            pack = _pack_of(module, root)
+            if not pack:
+                continue
+            for name, node_class in list(mapping.items()):
+                if isinstance(name, str) and _defined_in(node_class, root, seen) == pack:
+                    claims.setdefault(name, set()).add(pack)
+                    packs.add(pack)
+        except Exception as error:  # noqa: BLE001 - a pack's module, doing anything at all
+            named = _attr(module, "__name__", "") or "an unnamed module"
+            skipped.append(f"{named}: {type(error).__name__}: {error}")
 
     try:
         import nodes
 
-        live = getattr(nodes, MAPPING, {}) or {}
+        live = _attr(nodes, MAPPING, {}) or {}
     except Exception:  # noqa: BLE001 - no live mapping only means "cannot say which won"
         live = {}
 
@@ -342,7 +391,7 @@ def collisions() -> dict:
         })
     groups.sort(key=lambda group: (-len(group["packs"]), group["node"]))
     return {"ok": True, "groups": groups, "packs": len(packs), "names": len(claims),
-            "reason": ""}
+            "skipped": skipped, "reason": ""}
 
 
 # --- holding a pack at the version that works -------------------------------------------------

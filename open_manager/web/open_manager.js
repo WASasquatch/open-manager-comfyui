@@ -211,6 +211,11 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
 .om-readme-body tr:nth-child(even) td { background: color-mix(in srgb, var(--om-surface) 45%, transparent); }
 /* Media the README linked, shown in place of the bare URL. */
 .om-readme-media { max-width: 100%; height: auto; border-radius: 6px; margin: 12px 0; display: block; }
+/* A link standing in for media that could not be shown, with the reason beside it. */
+.om-readme-gone { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--om-border);
+  background: var(--om-surface); border-radius: 0 6px 6px 0; }
+.om-readme-gone-note { color: var(--om-muted); font-size: 12px; }
 /* Honour the alignment attribute a README uses, which the markdown renderer may pass
    through but browsers no longer style on their own. */
 .om-readme-body [align="center"] { text-align: center; }
@@ -510,7 +515,10 @@ function confirmInstall(packId, entry, change) {
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
 
     appendImpact(packId, entry.version, impactSlot, go);
   });
@@ -627,7 +635,10 @@ function askText(title, value = "", actionLabel = "Open") {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(null); });
     input.focus();
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") ok.click(); });
   });
@@ -649,7 +660,10 @@ function confirmAction(title, message, actionLabel, danger) {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
   });
 }
 
@@ -697,7 +711,10 @@ function chooseAction(title, message, choices, { wide = false, facts = [] } = {}
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(""); });
   });
 }
 
@@ -1533,7 +1550,10 @@ function confirmRepoInstall(pack) {
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
 
     (async () => {
       let data;
@@ -3815,14 +3835,24 @@ function embedMediaLinks(view) {
     const text = (anchor.textContent || "").trim();
     if (text && text !== href) continue;
 
+    // Neither a video nor an image. An attachment that decodes as neither is usually one
+    // GitHub no longer has -- they expire, and the URL then answers a nine-byte "Not Found"
+    // -- so the link comes back with a word about why, rather than as a bare URL sitting
+    // where a video should be, which reads as this failing to render something that is there.
+    const asDeadLink = () => {
+      const holder = el("div", "om-readme-gone");
+      holder.appendChild(anchor.cloneNode(true));
+      holder.appendChild(el("span", "om-readme-gone-note",
+        bare ? "This attachment is no longer on GitHub." : "This file could not be shown."));
+      return holder;
+    };
     const asImage = () => {
       const image = el("img", "om-readme-media");
       image.src = href;
       // Not lazy: a deleted attachment must fail now so the link can come back. Deferred,
       // an offscreen one never errors and leaves an empty box where a link used to be.
       image.alt = "";
-      // Neither a video nor an image: give the reader the link back.
-      image.onerror = () => image.replaceWith(anchor.cloneNode(true));
+      image.onerror = () => image.replaceWith(asDeadLink());
       return image;
     };
     if (IMAGE_EXT.test(href)) { anchor.replaceWith(asImage()); continue; }
@@ -3834,7 +3864,7 @@ function embedMediaLinks(view) {
     video.playsInline = true;
     // An attachment that will not decode as video is almost always an image.
     if (bare) video.onerror = () => video.replaceWith(asImage());
-    else video.onerror = () => video.replaceWith(anchor.cloneNode(true));
+    else video.onerror = () => video.replaceWith(asDeadLink());
     anchor.replaceWith(video);
   }
 }
@@ -3879,7 +3909,9 @@ async function pngText(bytes, wanted) {
   while (at + 12 <= bytes.length) {
     const length = view.getUint32(at);
     const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
-    if (type === "IDAT" || type === "IEND") break;
+    // Only IEND ends the file. A tEXt chunk after IDAT is legal and some writers emit one,
+    // so stopping at the image data was reporting "no workflow" for images that have one.
+    if (type === "IEND") break;
     if (type === "tEXt" || type === "iTXt") {
       const body = bytes.subarray(at + 8, at + 8 + length);
       let split = 0;
@@ -3932,25 +3964,41 @@ async function workflowInImage(url) {
     if (!answer.ok) throw new Error(`HTTP ${answer.status}`);
     return new Uint8Array(await answer.arrayBuffer());
   };
-  let bytes;
-  try {
-    bytes = await read({ Range: "bytes=0-262143" });
-    // A server ignoring the range hands back everything, which is equally fine.
-  } catch {
-    bytes = await read(null);
-  }
-  for (const key of ["workflow", "prompt"]) {
-    const text = await pngText(bytes, key);
-    if (!text) continue;
-    try {
-      const parsed = JSON.parse(text);
-      // A prompt is the executed form and carries no nodes to lay out; only a workflow does.
-      if (key === "workflow" || parsed.nodes) return parsed;
-    } catch {
-      // Truncated by the range, or not JSON. Fall through.
+  const scan = async (bytes) => {
+    for (const key of ["workflow", "prompt"]) {
+      const text = await pngText(bytes, key);
+      if (!text) continue;
+      try {
+        const parsed = JSON.parse(text);
+        // A prompt is the executed form and carries no nodes to lay out; only a workflow does.
+        if (key === "workflow" || parsed.nodes) return parsed;
+      } catch {
+        // Truncated by the range, or not JSON. Fall through.
+      }
     }
+    return null;
+  };
+
+  // The first quarter of a megabyte covers the common case without pulling a 40MB screenshot
+  // across the wire. It is a guess about where the metadata sits, though, and a guess that
+  // misses must not be reported as an answer: an image whose workflow sits past the range, or
+  // whose workflow is larger than it, would be called empty. So a miss is retried in full
+  // before anything is said.
+  let partial = null;
+  let ranged = false;
+  try {
+    partial = await read({ Range: "bytes=0-262143" });
+    // A server ignoring the range hands back everything, which is equally fine.
+    ranged = partial.length >= 262144;
+  } catch {
+    partial = null;
   }
-  return null;
+  if (partial) {
+    const found = await scan(partial);
+    if (found) return found;
+    if (!ranged) return null;
+  }
+  return scan(await read(null));
 }
 
 // Right-click a README image to load the workflow it was made with. Authors publish these
@@ -8300,7 +8348,10 @@ function pickFolder(folders, name) {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    closeOn(backdrop);
+    // Dismissing counts as cancelling. Without this the promise is never settled and
+    // the caller waits for an answer that cannot arrive -- which is how a guarded
+    // action stayed guarded after an Escape and refused to run again.
+    closeOn(backdrop, () => { backdrop.remove(); resolve(""); });
   });
 }
 
