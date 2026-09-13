@@ -21,6 +21,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import paths
+
 __all__ = [
     "InstallResult",
     "custom_nodes_dir",
@@ -63,6 +65,10 @@ class InstallResult:
         pip_ran: Whether a requirements install was attempted.
         pip_ok: Whether that install succeeded.
         pip_output: Captured pip output, trimmed.
+        pip_requirements: The requirement lines pip was actually given, after anything held
+            back or substituted.
+        pip_errors: The lines of pip's output that say what went wrong, pulled out of the
+            middle where the resolver puts them rather than left for the reader to find.
         restart_required: Whether ComfyUI must restart to load the pack.
     """
 
@@ -73,6 +79,8 @@ class InstallResult:
     pip_ran: bool = False
     pip_ok: bool = False
     pip_output: str = ""
+    pip_requirements: tuple[str, ...] = ()
+    pip_errors: tuple[str, ...] = ()
     restart_required: bool = False
 
     def to_json(self) -> dict:
@@ -85,6 +93,8 @@ class InstallResult:
             "pip_ran": self.pip_ran,
             "pip_ok": self.pip_ok,
             "pip_output": self.pip_output,
+            "pip_requirements": list(self.pip_requirements),
+            "pip_errors": list(self.pip_errors),
             "restart_required": self.restart_required,
         }
 
@@ -445,7 +455,10 @@ def install_repo(
     result = InstallResult(ok=True, directory=str(target), files=len(written), restart_required=True)
     if with_deps and _requirements(target):
         result.pip_ran = True
-        result.pip_ok, result.pip_output = _pip_install(target, python)
+        _ran = _pip_install(target, python)
+        result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
+        result.pip_requirements = tuple(_ran["requirements"])
+        result.pip_errors = tuple(_ran["errors"])
     return result
 
 
@@ -476,20 +489,51 @@ def _requirements(directory: Path) -> list[str]:
 #: set up with -- a CUDA wheel, a matching torchvision -- which a generic one would replace.
 PIP_BLACKLIST = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
 
+#: Lines of pip output worth showing first. A dependency resolution failure prints its
+#: explanation well before the end, so a tail alone hides the one sentence that matters.
+_PIP_TROUBLE = (
+    "ERROR:",
+    "error:",
+    "No matching distribution",
+    "Could not find a version",
+    "The conflict is caused by",
+    "Cannot install",
+    "is incompatible",
+    "Failed building",
+    "subprocess-exited-with-error",
+    "metadata-generation-failed",
+    "requires Python",
+)
+
+#: How much of pip's output is kept. Enough for a build log's last failure, not so much that
+#: a successful install of forty wheels arrives as a wall of text.
+_PIP_TAIL = 40
+
+
+def pip_trouble(output: str) -> tuple[str, ...]:
+    """The lines of pip output that say what went wrong.
+
+    Args:
+        output: Everything pip printed.
+
+    Returns:
+        The lines worth reading first, in the order pip printed them, without repeats.
+    """
+    seen: dict[str, None] = {}
+    for line in (output or "").splitlines():
+        text = line.strip()
+        if text and any(mark in text for mark in _PIP_TROUBLE):
+            seen.setdefault(text, None)
+    return tuple(seen)
+
+
 #: A requirement line's package name: what precedes any extras, specifier or marker.
 _REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
 def overrides_path() -> Path:
     """The file holding the user's package substitutions."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "pip_overrides.json"
+    return paths.store_file("pip_overrides.json")
 
 
 def pip_overrides() -> dict:
@@ -575,10 +619,11 @@ def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
     """
     if not _requirements(directory):
         return True, "No requirements declared."
-    return _pip_install(directory, python)
+    ran = _pip_install(directory, python)
+    return ran["ok"], ran["output"]
 
 
-def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
+def _pip_install(directory: Path, python: str) -> dict:
     """Install a pack's requirements, less anything held back.
 
     Args:
@@ -586,8 +631,10 @@ def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
         python: Interpreter to install into.
 
     Returns:
-        ``(succeeded, output)``. The output names what was held back or substituted, so the
-        result says what was done rather than only that it finished.
+        ``{ok, output, requirements, errors}``. ``output`` names what was held back or
+        substituted, so the result says what was done rather than only that it finished.
+        ``errors`` is what pip said went wrong, which is the part a reader needs and the part
+        a trimmed tail is most likely to lose.
     """
     keep, held, swapped = plan_requirements(_requirements(directory))
     notes = []
@@ -596,14 +643,16 @@ def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
     if swapped:
         notes.append("Substituted by your overrides: " + "; ".join(swapped))
     if not keep:
-        return True, "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
+        said = "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
+        return {"ok": True, "output": said, "requirements": [], "errors": []}
 
     # Written out rather than passed as arguments, so pip parses option lines itself.
     filtered = directory / ".open_manager_requirements.txt"
     try:
         filtered.write_text("\n".join(keep) + "\n", encoding="utf-8")
     except OSError as error:
-        return False, f"requirements could not be prepared ({error})"
+        return {"ok": False, "output": f"requirements could not be prepared ({error})",
+                "requirements": keep, "errors": [f"requirements could not be prepared ({error})"]}
 
     command = [
         python or sys.executable, "-m", "pip", "install", "--no-input",
@@ -615,16 +664,22 @@ def _pip_install(directory: Path, python: str) -> tuple[bool, str]:
             encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.SubprocessError) as error:
-        return False, f"pip could not be run ({type(error).__name__}: {error})"
+        said = f"pip could not be run ({type(error).__name__}: {error})"
+        return {"ok": False, "output": said, "requirements": keep, "errors": [said]}
     try:
         filtered.unlink()
     except OSError:
         pass
     output = (finished.stdout or "") + (finished.stderr or "")
-    tail = "\n".join(output.strip().splitlines()[-12:])
+    tail = "\n".join(output.strip().splitlines()[-_PIP_TAIL:])
     if notes:
         tail = f"{chr(10).join(notes)}\n{tail}" if tail else chr(10).join(notes)
-    return finished.returncode == 0, tail
+    return {
+        "ok": finished.returncode == 0,
+        "output": tail,
+        "requirements": keep,
+        "errors": list(pip_trouble(output)),
+    }
 
 
 def installed_version(node_id: str) -> str:
@@ -694,9 +749,10 @@ def list_installed() -> list[dict]:
     """Every pack directory currently in custom_nodes.
 
     Returns:
-        One entry per pack, each ``{id, version, dir, disabled, from_git}``. ``id`` is the
-        pack's pyproject name where it declares one, otherwise the directory name.
-        ``from_git`` marks a working copy: a clone, or one this installed from a repository.
+        One entry per pack, each ``{id, version, dir, disabled, from_git, installed_at}``.
+        ``id`` is the pack's pyproject name where it declares one, otherwise the directory
+        name. ``from_git`` marks a working copy: a clone, or one this installed from a
+        repository. ``installed_at`` is a POSIX timestamp, 0 where none could be worked out.
     """
     try:
         base = custom_nodes_dir()
@@ -714,8 +770,44 @@ def list_installed() -> list[dict]:
             "dir": child.name,
             "disabled": child.name.endswith(".disabled"),
             "from_git": (child / ".git").exists() or version.startswith("git:"),
+            "installed_at": _installed_at(child),
         })
     return packs
+
+
+def _installed_at(directory: Path) -> float:
+    """When a pack arrived, as well as can be told from what is on disk.
+
+    Packs this installed record the moment in their marker, which is the only exact answer.
+    For everything else, a clone or a hand-placed directory, the filesystem is asked. Birth
+    time is preferred where the platform reports one, because a directory's modification time
+    moves every time the pack is updated and would sort a long-installed pack as new.
+
+    Args:
+        directory: The pack directory.
+
+    Returns:
+        A POSIX timestamp, or 0.0 where nothing could be read.
+    """
+    marker = directory / MARKER
+    if marker.is_file():
+        try:
+            recorded = json.loads(marker.read_text(encoding="utf-8")).get("installed_at")
+            if isinstance(recorded, (int, float)) and recorded > 0:
+                return float(recorded)
+        except (OSError, ValueError):
+            pass
+    try:
+        info = directory.stat()
+    except OSError:
+        return 0.0
+    # st_birthtime where the platform has it; on Windows st_ctime is the creation time, while
+    # on Linux it is the inode change time, which is the nearest thing available there.
+    for name in ("st_birthtime", "st_ctime"):
+        value = getattr(info, name, None)
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+    return float(getattr(info, "st_mtime", 0.0) or 0.0)
 
 
 def _version_in(directory: Path) -> str:
@@ -814,5 +906,8 @@ def install(
     )
     if with_deps and _requirements(target):
         result.pip_ran = True
-        result.pip_ok, result.pip_output = _pip_install(target, python)
+        _ran = _pip_install(target, python)
+        result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
+        result.pip_requirements = tuple(_ran["requirements"])
+        result.pip_errors = tuple(_ran["errors"])
     return result

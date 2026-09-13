@@ -6,6 +6,7 @@ Every route sits under a versioned prefix, leaving room for a later revision bes
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import posixpath
@@ -19,9 +20,11 @@ from aiohttp import web
 
 from . import (
     catalog,
+    compat,
     deps,
     developer,
     downloads,
+    environment,
     health as pack_health,
     keys,
     impact,
@@ -30,6 +33,7 @@ from . import (
     installer,
     license_files,
     licenses,
+    local as local_pack,
     log,
     metadata,
     models as model_policy,
@@ -37,7 +41,9 @@ from . import (
     nodemap,
     registry,
     risk,
+    selfupdate,
     sources,
+    topics,
     trust,
 )
 
@@ -64,6 +70,11 @@ REF_BRANCHES = 100
 
 #: Recent commits listed for a repository.
 REF_COMMITS = 20
+
+#: Tags read. A tag is where a release was actually cut, which is the only thing in a
+#: repository that corresponds to a published version -- a commit sha does not say what it is.
+#: About a quarter of packs publish any, so this is often empty and that is not an error.
+REF_TAGS = 100
 
 #: Statuses blocked rather than warned about. ``OPEN_MANAGER_ALLOW_BANNED=1`` lifts the
 #: block and treats a ban as a warning.
@@ -95,6 +106,40 @@ DOC_LIMIT = 400_000
 
 #: What a GitHub owner or repository name may contain. Used before either is put into a URL.
 _GH_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
+
+
+def _json_body(handler):
+    """Give a POST handler a parsed body, and the content-type guard it must not be without.
+
+    Thirty-two routes opened with the same eight lines. That is thirty-two chances to leave
+    one of them off, and the one that matters is a security control: without the content type
+    check, a page on another site can post here without the browser asking first. ``/reboot``
+    shipped without it once. A decorator is not a tidier way of writing those lines; it is the
+    difference between remembering and not having to.
+
+    The body is coerced to a dict here too. Fourteen handlers did that for themselves and nine
+    went on to call ``body.get`` without it, so a JSON body that happened to be a list answered
+    500 where it should have answered 400.
+
+    Args:
+        handler: Called as ``handler(request, body)``.
+
+    Returns:
+        A handler aiohttp can route to.
+    """
+    @functools.wraps(handler)
+    async def wrapped(request: web.Request) -> web.Response:
+        if not _is_json(request):
+            return web.json_response(
+                {"ok": False, "reason": "expected application/json"}, status=415)
+        try:
+            body = await request.json()
+        except ValueError:
+            return web.json_response(
+                {"ok": False, "reason": "invalid request body"}, status=400)
+        return await handler(request, body if isinstance(body, dict) else {})
+
+    return wrapped
 
 
 def _is_json(request: web.Request) -> bool:
@@ -494,12 +539,19 @@ def _assessment_json(assessment: risk.Assessment) -> dict:
 
 def _version_json(entry: registry.NodeVersion, pack_id: str) -> dict:
     """One version, with everything worth saying about installing it."""
+    fit = compat.check(
+        supported_comfyui=entry.supported_comfyui,
+        supported_frontend=entry.supported_frontend,
+        supported_os=entry.supported_os,
+        supported_accelerators=entry.supported_accelerators,
+    )
     assessment = risk.assess_version(
         pack_id=pack_id,
         version=entry.version,
         status=entry.status,
         dependencies=entry.dependencies,
         deprecated=entry.deprecated,
+        compatibility=fit,
     )
     installable, blocked_reason = _installable(entry.status)
     return {
@@ -507,6 +559,9 @@ def _version_json(entry: registry.NodeVersion, pack_id: str) -> dict:
         "status": entry.status,
         "created_at": entry.created_at,
         "deprecated": entry.deprecated,
+        # Publisher text. It reaches the page as text and is never parsed as markup there.
+        "changelog": entry.changelog,
+        "compatibility": fit,
         "download_url": entry.download_url,
         "dependencies": list(entry.dependencies),
         "installable": installable,
@@ -572,6 +627,8 @@ def register_routes() -> None:
                     "name": record.name,
                     "description": record.description,
                     "publisher": record.publisher,
+                    "publisher_name": record.publisher_name,
+                    "publisher_members": list(record.publisher_members),
                     "publisher_status": record.publisher_status,
                     "status": record.status,
                     "repository": record.repository,
@@ -586,9 +643,6 @@ def register_routes() -> None:
                     "license_color": lic["color"],
                     "tags": list(record.tags),
                     "created_at": record.created_at,
-                    "supported_os": list(record.supported_os),
-                    "supported_comfyui": record.supported_comfyui,
-                    "supported_accelerators": list(record.supported_accelerators),
                     "installed_version": installer.installed_version(record.node_id),
                 },
                 "resolution": {
@@ -760,20 +814,14 @@ def register_routes() -> None:
         return web.json_response({"ok": True, "theme": data})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/scan")
-    async def start_scan(request: web.Request) -> web.Response:
+    @_json_body
+    async def start_scan(request: web.Request, body: dict) -> web.Response:
         """Begin a reputation scan of an installed pack.
 
         The key arrives in the body rather than the query string, because a query string is
         the part that reaches proxy and server logs. It is passed to the scan and kept
         nowhere else.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         if not isinstance(body, dict):
             return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         key = keys.secret("virustotal")
@@ -796,27 +844,19 @@ def register_routes() -> None:
         return web.json_response(virustotal.state())
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install-requirements")
-    async def install_requirements(request: web.Request) -> web.Response:
+    @_json_body
+    async def install_requirements(request: web.Request, body: dict) -> web.Response:
         """Install a pack's requirements after the fact.
 
         Used where the requirements were deferred so the pack could be scanned first.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         pack_id = str((body or {}).get("id") or "").strip()
         if not pack_id:
             return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
         directory = installer.resolve_install_dir(pack_id)
         if directory is None:
             return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
-        loop = asyncio.get_running_loop()
-        ok, output = await loop.run_in_executor(
-            None, installer.install_requirements, directory, ""
+        ok, output = await asyncio.to_thread(installer.install_requirements, directory, ""
         )
         return web.json_response({"ok": ok, "output": output})
 
@@ -840,12 +880,110 @@ def register_routes() -> None:
                 )
         return web.json_response({"ok": True, "reasons": reasons})
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/comfy-nodes/" + "{node_id}")
+    async def comfy_nodes(request: web.Request) -> web.Response:
+        """The node classes one published version of a pack registers.
+
+        Asked for only when a reader opens the section, because it is a separate request per
+        version and most readers never want it. ``known`` distinguishes a pack the registry
+        was never told about from one that genuinely adds no nodes.
+        """
+        node_id = request.match_info.get("node_id", "")
+        version = (request.query.get("version") or "").strip()
+        if not node_id or not version:
+            return web.json_response(
+                {"ok": False, "reason": "a pack and a version are both needed"}, status=400)
+        async with aiohttp.ClientSession() as session:
+            try:
+                nodes = await registry.fetch_comfy_nodes(node_id, version, session)
+            except registry.RegistryError as error:
+                return web.json_response(
+                    {"ok": False, "reason": error.detail or "the registry did not answer"},
+                    status=502,
+                )
+        return web.json_response({"ok": True, "known": bool(nodes), "nodes": list(nodes)})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/environment")
+    async def environment_changes(_request: web.Request) -> web.Response:
+        """What recent installs did to the Python environment, newest first.
+
+        Each entry carries the plan that would undo it, so the interface can say exactly what
+        a restore would run without asking again.
+        """
+        entries = await asyncio.to_thread(environment.recorded)
+        for entry in entries:
+            entry["plan"] = environment.restore_plan(entry.get("diff") or {})
+        return web.json_response({"ok": True, "entries": entries})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/environment/restore")
+    @_json_body
+    async def environment_restore(request: web.Request, body: dict) -> web.Response:
+        """Put the packages back as they were before one install.
+
+        Destructive, so it runs nothing unless ``confirm`` is true. Without it the plan is
+        returned and the environment is untouched, which is what the interface shows the
+        reader before asking.
+        """
+
+        entry_id = str(body.get("id", "")).strip()
+        entry = next((one for one in environment.recorded() if one.get("id") == entry_id), None)
+        if entry is None:
+            return web.json_response(
+                {"ok": False, "reason": "no record of that install"}, status=404)
+
+        diff = entry.get("diff") or {}
+        plan = environment.restore_plan(diff)
+        if not body.get("confirm"):
+            return web.json_response({"ok": True, "preview": True, "entry": entry, "plan": plan})
+
+        # The record is dropped whatever the outcome. A half-applied restore describes an
+        # environment that is no longer the one the record was taken against, so offering to
+        # run it again would be undoing something that is not there any more.
+        outcome = await asyncio.to_thread(environment.restore, diff)
+        await asyncio.to_thread(environment.forget, entry_id)
+        return web.json_response({"ok": outcome["ok"], "preview": False, **outcome},
+                                 status=200 if outcome["ok"] else 500)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/environment/forget")
+    @_json_body
+    async def environment_forget(request: web.Request, body: dict) -> web.Response:
+        """Drop a record without acting on it."""
+        gone = await asyncio.to_thread(environment.forget, str(body.get("id", "")))
+        return web.json_response({"ok": gone})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/local/" + "{node_id}")
+    async def local_describe(request: web.Request) -> web.Response:
+        """What can be read about an installed pack from the copy on disk.
+
+        For packs the registry has never heard of: one written locally, one whose entry was
+        pulled, one placed by hand. Everything comes from files the pack already ships, so
+        this answers without reaching the network at all.
+        """
+        node_id = request.match_info.get("node_id", "")
+        if not node_id:
+            return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        found = await asyncio.to_thread(local_pack.describe, node_id)
+        return web.json_response(found, status=200 if found.get("ok") else 404)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/topic")
+    async def topic_search(request: web.Request) -> web.Response:
+        """Which packs carry a GitHub topic.
+
+        The registry does not index topics, so this asks GitHub and narrows the answer to the
+        catalogue. Always 200 where the topic itself was well formed: a topic nothing carries
+        is an empty list, not an error.
+        """
+        name = (request.query.get("name") or "").strip()
+        async with aiohttp.ClientSession() as session:
+            answer = await topics.packs_for(name, session)
+        return web.json_response(answer, status=200 if answer.get("ok") else 502)
+
     @PromptServer.instance.routes.get(f"{PREFIX}/refs")
     async def repo_refs(request: web.Request) -> web.Response:
-        """List a repository's branches and its most recent commits.
+        """List a repository's branches, tags and most recent commits.
 
-        Two API calls, so the panel asks only when the picker is opened rather than on
-        every pack page. A token lifts the hourly limit that otherwise applies.
+        Asked for only when the picker is opened rather than on every pack page. A token
+        lifts the hourly limit that otherwise applies.
         """
         repo = request.query.get("repo", "")
         token = keys.secret("github")
@@ -874,6 +1012,9 @@ def register_routes() -> None:
             commits, _ = await read(
                 f"https://api.github.com/repos/{owner}/{name}/commits?per_page={REF_COMMITS}"
             )
+            tags, _ = await read(
+                f"https://api.github.com/repos/{owner}/{name}/tags?per_page={REF_TAGS}"
+            )
 
         if branches is None and commits is None:
             reason = (
@@ -889,6 +1030,10 @@ def register_routes() -> None:
             "branches": [
                 {"name": b.get("name", ""), "sha": (b.get("commit") or {}).get("sha", "")[:7]}
                 for b in (branches or []) if b.get("name")
+            ],
+            "tags": [
+                {"name": t.get("name", ""), "sha": (t.get("commit") or {}).get("sha", "")[:7]}
+                for t in (tags or []) if t.get("name")
             ],
             "commits": [
                 {
@@ -1009,15 +1154,9 @@ def register_routes() -> None:
         return web.json_response({"kind": kind, "authors": trust.listing(kind)})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/trust")
-    async def set_trust(request: web.Request) -> web.Response:
+    @_json_body
+    async def set_trust(request: web.Request, body: dict) -> web.Response:
         """Add or remove an owner from the trusted list."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         owner = str((body or {}).get("owner") or "").strip()
         if not owner or len(owner) > 100:
             return web.json_response({"ok": False, "reason": "owner is required"}, status=400)
@@ -1035,21 +1174,14 @@ def register_routes() -> None:
         return web.json_response(downloads.state())
 
     @PromptServer.instance.routes.post(f"{PREFIX}/downloads")
-    async def queue_download(request: web.Request) -> web.Response:
+    @_json_body
+    async def queue_download(request: web.Request, body: dict) -> web.Response:
         """Put one model on the queue, or say why it cannot go on.
 
         The policy in :mod:`.models` decides what may be fetched and where it may land; this
         only carries the answer back. A model already on disk is refused once, with the path
         it is at, so the panel can ask before replacing it.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         result = downloads.add(
             str(body.get("url") or ""),
             str(body.get("name") or ""),
@@ -1072,39 +1204,25 @@ def register_routes() -> None:
         return web.json_response({"ok": True, "holds": pack_health.holds()})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/hold")
-    async def set_hold(request: web.Request) -> web.Response:
+    @_json_body
+    async def set_hold(request: web.Request, body: dict) -> web.Response:
         """Hold a pack at its installed version, or stop holding it.
 
         Nothing on disk changes either way. A hold only decides whether an update is offered.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         name = str(body.get("name") or "")
         if _flag(body.get("off", False)):
             return web.json_response(pack_health.release(name))
         return web.json_response(pack_health.hold(name, str(body.get("version") or "")))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/star")
-    async def star_repo(request: web.Request) -> web.Response:
+    @_json_body
+    async def star_repo(request: web.Request, body: dict) -> web.Response:
         """Read or set whether the reader has starred a repository.
 
         Made here rather than from the page because the token lives here. The panel used to
         call GitHub directly, which meant the browser had to hold the token to do it.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         owner_repo = metadata._owner_repo(str(body.get("repo") or ""))
         if owner_repo is None:
             return web.json_response(
@@ -1204,21 +1322,14 @@ def register_routes() -> None:
         return web.json_response(keys.listing())
 
     @PromptServer.instance.routes.post(f"{PREFIX}/keys")
-    async def set_key(request: web.Request) -> web.Response:
+    @_json_body
+    async def set_key(request: web.Request, body: dict) -> web.Response:
         """Keep an access key, or forget one.
 
         The value arrives once, in a body, and is not echoed back. What comes back is whether
         a key is now held and the last four characters of it, which is enough to tell two
         apart and not enough to use.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         name = str(body.get("name") or "")
         if _flag(body.get("forget")):
             answer = keys.forget(name)
@@ -1237,35 +1348,21 @@ def register_routes() -> None:
         return web.json_response(await asyncio.to_thread(pack_health.collisions))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/downloads/plan")
-    async def plan_downloads(request: web.Request) -> web.Response:
+    @_json_body
+    async def plan_downloads(request: web.Request, body: dict) -> web.Response:
         """What these downloads would ask of each drive, before any of them are queued.
 
         Nothing is queued and nothing is written. The answer is for the panel to show, so a
         21 GB model going onto a drive with 12 GB left is a question asked up front rather
         than a failure part way through.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         items = body.get("items")
         return web.json_response(await downloads.plan(items if isinstance(items, list) else []))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/downloads/action")
-    async def download_action(request: web.Request) -> web.Response:
+    @_json_body
+    async def download_action(request: web.Request, body: dict) -> web.Response:
         """Resume, pause or cancel one download, or remove one or several from the list."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         what = str(body.get("action") or "")
         download_id = str(body.get("id") or "")
         if what == "remove-many":
@@ -1306,21 +1403,14 @@ def register_routes() -> None:
         return web.json_response(monitor.models())
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor")
-    async def monitor_lease(request: web.Request) -> web.Response:
+    @_json_body
+    async def monitor_lease(request: web.Request, body: dict) -> web.Response:
         """Ask for machine readings, renew that request, or give it up.
 
         Sampling runs only while a lease is held, and a lease that stops being renewed lapses
         on its own. That is what keeps a closed tab from leaving the server measuring for
         nobody.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         client = str(body.get("client") or "")
         if _flag(body.get("release")):
             return web.json_response({"ok": True, **monitor.release(client)})
@@ -1339,35 +1429,21 @@ def register_routes() -> None:
         return web.json_response({"ok": True, "reading": first, **answer})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor/free")
-    async def monitor_free(request: web.Request) -> web.Response:
+    @_json_body
+    async def monitor_free(request: web.Request, body: dict) -> web.Response:
         """Ask ComfyUI to let go of what it is holding.
 
         Handed to the prompt worker as a flag, which is how ComfyUI frees memory for itself;
         the freeing then happens on the thread that owns the models. The worker is woken as
         the flag is set, so this is not a wait for the next prompt.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         answer = monitor.free(vram=_flag(body.get("vram")), ram=_flag(body.get("ram")))
         return web.json_response(answer, status=200 if answer.get("ok") else 400)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor/unload")
-    async def monitor_unload(request: web.Request) -> web.Response:
+    @_json_body
+    async def monitor_unload(request: web.Request, body: dict) -> web.Response:
         """Unload one model ComfyUI is holding. Refused while a prompt is running."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         try:
             model_id = int(body.get("id") or 0)
         except (TypeError, ValueError):
@@ -1381,21 +1457,24 @@ def register_routes() -> None:
         """How long each installed pack took to import, from ComfyUI's own log."""
         return web.json_response(await asyncio.to_thread(pack_health.startup_times))
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/self")
+    async def self_state(_request: web.Request) -> web.Response:
+        """How Open Manager is installed here, and what updating it takes.
+
+        Read-only, and it reads nothing the page could not work out for itself except the
+        path of the interpreter running the server, which is the whole point: the update
+        command for a portable build names an interpreter a terminal would never find.
+        """
+        return web.json_response(await asyncio.to_thread(selfupdate.state))
+
     @PromptServer.instance.routes.post(f"{PREFIX}/pack/toggle")
-    async def pack_toggle(request: web.Request) -> web.Response:
+    @_json_body
+    async def pack_toggle(request: web.Request, body: dict) -> web.Response:
         """Switch a pack off, or back on, by renaming its directory.
 
         The rename is the same one people already do by hand, so anything done here can be
         undone there. Nothing is deleted and no setting is touched.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         result = await asyncio.to_thread(
             pack_health.toggle, str(body.get("name") or ""), _flag(body.get("off", True)))
         return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -1432,19 +1511,13 @@ def register_routes() -> None:
         return web.json_response(await asyncio.to_thread(library.storage))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/sweep")
-    async def library_sweep(request: web.Request) -> web.Response:
+    @_json_body
+    async def library_sweep(request: web.Request, body: dict) -> web.Response:
         """Delete the part files left by downloads that never finished.
 
         Only ``.part`` files, and only those the index itself found inside a registered model
         folder. A finished model is never a candidate, and there is no route that sweeps one.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         wanted = (body or {}).get("paths")
         removed = await asyncio.to_thread(
             library.sweep_partials, wanted if isinstance(wanted, list) else None)
@@ -1457,16 +1530,9 @@ def register_routes() -> None:
         return web.json_response(found)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/hash")
-    async def library_hash(request: web.Request) -> web.Response:
+    @_json_body
+    async def library_hash(request: web.Request, body: dict) -> web.Response:
         """The sha256 of one file, taken now or remembered from before."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         where = str(body.get("path") or "")
         digest = await asyncio.to_thread(library.hash_of, where, _flag(body.get("force")))
         if not digest:
@@ -1475,39 +1541,25 @@ def register_routes() -> None:
         return web.json_response({"ok": True, "path": where, "sha256": digest})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/provenance")
-    async def library_provenance(request: web.Request) -> web.Response:
+    @_json_body
+    async def library_provenance(request: web.Request, body: dict) -> web.Response:
         """Where one model came from, as far as anything here recorded it.
 
         Reads the download records, the held hashes and the saved workflows. Nothing is
         hashed and nothing is fetched.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         found = await asyncio.to_thread(library.provenance, str(body.get("path") or ""))
         return web.json_response(found, status=200 if found.get("ok") else 400)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/delete")
-    async def library_delete(request: web.Request) -> web.Response:
+    @_json_body
+    async def library_delete(request: web.Request, body: dict) -> web.Response:
         """Delete one model file.
 
         One file per request. There is deliberately no route that takes a list: a sweep over
         a folder of models is a different and much more dangerous thing than deleting a file,
         and it should not be reachable by passing a longer array to this.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         result = await asyncio.to_thread(library.delete, str(body.get("path") or ""))
         return web.json_response(result, status=200 if result.get("ok") else 400)
 
@@ -1536,20 +1588,13 @@ def register_routes() -> None:
                                   "roots": model_policy.roots(directory)})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/models/check")
-    async def check_model(request: web.Request) -> web.Response:
+    @_json_body
+    async def check_model(request: web.Request, body: dict) -> web.Response:
         """Whether a URL may be downloaded, and what it would be saved as.
 
         Asked before a URL is written into a node as well as before it is fetched, so a URL
         that will never be allowed is refused while it is being typed rather than later.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
-        body = body if isinstance(body, dict) else {}
         declared = str(body.get("url") or "").strip()
         url = model_policy.normalise(declared)
         directory = str(body.get("directory") or "")
@@ -1584,20 +1629,14 @@ def register_routes() -> None:
         })
 
     @PromptServer.instance.routes.post(f"{PREFIX}/models/in-workflow")
-    async def models_in_workflow(request: web.Request) -> web.Response:
+    @_json_body
+    async def models_in_workflow(request: web.Request, body: dict) -> web.Response:
         """The models a workflow asks for, and which of them are already on disk.
 
         ComfyUI records these on each node as ``properties.models``. Most sit inside subgraph
         definitions rather than the top-level node list, so the whole document is walked
         instead of just ``nodes``.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         document = (body if isinstance(body, dict) else {}).get("workflow")
         found = []
         for item in library.declared_models(document):
@@ -1682,8 +1721,7 @@ def register_routes() -> None:
 
         import asyncio
 
-        report = await asyncio.get_running_loop().run_in_executor(
-            None, impact.analyse, list(entry.dependencies), ""
+        report = await asyncio.to_thread(impact.analyse, list(entry.dependencies), ""
         )
         return web.json_response(
             {
@@ -1719,15 +1757,9 @@ def register_routes() -> None:
         )
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install")
-    async def do_install(request: web.Request) -> web.Response:
+    @_json_body
+    async def do_install(request: web.Request, body: dict) -> web.Response:
         """Install a specific version of a pack, from the registry, without the host manager."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
 
         node_id = str(body.get("id", "")).strip()
         version = str(body.get("version", "")).strip()
@@ -1752,43 +1784,40 @@ def register_routes() -> None:
 
         with_deps = bool(body.get("with_deps", True))
         overwrite = bool(body.get("overwrite", False))
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, installer.install, node_id, version,
+
+        # Read either side of the install, so what pip did is a fact rather than something to
+        # be reconstructed later from its output. Only worth taking when pip is going to run.
+        before = await asyncio.to_thread(environment.snapshot) if with_deps else {}
+        result = await asyncio.to_thread(installer.install, node_id, version,
             target.get("download_url", ""), "", with_deps, overwrite,
         )
-        return web.json_response(result.to_json(), status=200 if result.ok else 409)
+        answer = result.to_json()
+        if before:
+            after = await asyncio.to_thread(environment.snapshot)
+            diff = environment.compare(before, after)
+            answer["environment"] = diff
+            # Kept on disk as well as answered, because an install that breaks something is
+            # usually noticed after a restart, by which time this response is long gone.
+            answer["environment_id"] = await asyncio.to_thread(environment.record, node_id, version, diff)
+        return web.json_response(answer, status=200 if result.ok else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/inspect-repo")
-    async def inspect_repo(request: web.Request) -> web.Response:
+    @_json_body
+    async def inspect_repo(request: web.Request, body: dict) -> web.Response:
         """Inspect a GitHub pack (contents, install scripts, dependency impact) without installing."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         repo = str(body.get("repo", "")).strip()
         if not repo:
             return web.json_response({"ok": False, "reason": "repo is required"}, status=400)
-        loop = asyncio.get_running_loop()
         ref = str(body.get("ref", "")).strip()
         if ref and not metadata.valid_ref(ref):
             return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
-        result = await loop.run_in_executor(None, installer.inspect_repo, repo, ref)
+        result = await asyncio.to_thread(installer.inspect_repo, repo, ref)
         return web.json_response(result, status=200 if result.get("ok") else 502)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install-repo")
-    async def install_repo(request: web.Request) -> web.Response:
+    @_json_body
+    async def install_repo(request: web.Request, body: dict) -> web.Response:
         """Install a pack from its GitHub repository, for packs not on the registry."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         repo = str(body.get("repo", "")).strip()
         if not repo:
             return web.json_response({"ok": False, "reason": "repo is required"}, status=400)
@@ -1797,31 +1826,32 @@ def register_routes() -> None:
         if ref and not metadata.valid_ref(ref):
             return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
         overwrite = bool(body.get("overwrite"))
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, installer.install_repo, repo, "", with_deps, ref, overwrite
+        # Read either side, the same as a registry install: a pack from a URL is no less able
+        # to move a package, and rather more likely to.
+        before = await asyncio.to_thread(environment.snapshot) if with_deps else {}
+        result = await asyncio.to_thread(installer.install_repo, repo, "", with_deps, ref, overwrite
         )
-        return web.json_response(result.to_json(), status=200 if result.ok else 409)
+        answer = result.to_json()
+        if before:
+            after = await asyncio.to_thread(environment.snapshot)
+            diff = environment.compare(before, after)
+            answer["environment"] = diff
+            answer["environment_id"] = await asyncio.to_thread(environment.record, repo, ref or "default branch", diff)
+        return web.json_response(answer, status=200 if result.ok else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/uninstall")
-    async def do_uninstall(request: web.Request) -> web.Response:
+    @_json_body
+    async def do_uninstall(request: web.Request, body: dict) -> web.Response:
         """Remove an installed pack."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         node_id = str(body.get("id", "")).strip()
         if not node_id:
             return web.json_response({"ok": False, "reason": "id is required"}, status=400)
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, installer.uninstall, node_id)
+        result = await asyncio.to_thread(installer.uninstall, node_id)
         return web.json_response(result.to_json(), status=200 if result.ok else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/reboot")
-    async def reboot(request: web.Request) -> web.Response:
+    @_json_body
+    async def reboot(request: web.Request, _body: dict) -> web.Response:
         """Restart the ComfyUI server, so newly installed or removed packs take effect.
 
         Loopback-only is not on its own a defence against another site asking for this. A
@@ -1829,9 +1859,6 @@ def register_routes() -> None:
         so its peer address is loopback too. The content type is what stops it: a cross-origin
         caller cannot set one without asking permission first.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
         peer = request.transport.get_extra_info("peername") if request.transport else None
         host = peer[0] if peer else ""
         if host not in _LOOPBACK:
@@ -1878,35 +1905,19 @@ def register_routes() -> None:
             return None
 
     @PromptServer.instance.routes.post(f"{PREFIX}/catalog/sync")
-    async def catalog_sync(request: web.Request) -> web.Response:
+    @_json_body
+    async def catalog_sync(request: web.Request, body: dict) -> web.Response:
         """Start a catalogue sync in the background."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            body = {}
-        if not isinstance(body, dict):
-            body = {}
         asyncio.get_running_loop().create_task(catalog.sync(_sync_concurrency(body)))
         return web.json_response({"ok": True})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/catalog/auto-sync")
-    async def catalog_auto_sync(request: web.Request) -> web.Response:
+    @_json_body
+    async def catalog_auto_sync(request: web.Request, body: dict) -> web.Response:
         """Start a background sync where the configured renewal policy calls for it.
 
         A per-session guard limits this to one renewal per server run.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            body = {}
-        if not isinstance(body, dict):
-            body = {}
         policy = str(body.get("policy", "startup"))
         try:
             stale_days = float(body.get("stale_days", 7) or 7)
@@ -1924,8 +1935,7 @@ def register_routes() -> None:
         A pack matching a catalogue entry also carries its registry id, icon, and the version
         the registry advertises.
         """
-        loop = asyncio.get_running_loop()
-        packs = await loop.run_in_executor(None, installer.list_installed)
+        packs = await asyncio.to_thread(installer.list_installed)
         index = {}
         for entry in catalog.load():
             folded = _fold(entry.get("id"))
@@ -1968,15 +1978,9 @@ def register_routes() -> None:
         return web.json_response({"packs": packs})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/resolve-nodes")
-    async def resolve_nodes(request: web.Request) -> web.Response:
+    @_json_body
+    async def resolve_nodes(request: web.Request, body: dict) -> web.Response:
         """Given node classes missing from a graph, name the packs that provide them."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"error": "invalid request body"}, status=400)
         classes = [str(c) for c in (body.get("classes") or [])]
         if not classes:
             return web.json_response({"packs": [], "unresolved": []})
@@ -2010,19 +2014,13 @@ def register_routes() -> None:
         return web.json_response({"packs": packs, "unresolved": sorted(unresolved)})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/licenses")
-    async def resolve_licenses(request: web.Request) -> web.Response:
+    @_json_body
+    async def resolve_licenses(request: web.Request, body: dict) -> web.Response:
         """Read licences from repositories for listing rows the registry left unnamed.
 
         Each item is ``{id, repository}``. The answer is keyed by pack id.
         """
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"error": "invalid request body"}, status=400)
-        raw = body.get("items") if isinstance(body, dict) else None
+        raw = body.get("items")
         items = [
             (str(i.get("id", "")), str(i.get("repository", "")))
             for i in raw
@@ -2056,8 +2054,7 @@ def register_routes() -> None:
     @PromptServer.instance.routes.get(f"{PREFIX}/github")
     async def github_list(_request: web.Request) -> web.Response:
         """List the GitHub repositories the user added, with each one's installed state."""
-        loop = asyncio.get_running_loop()
-        rows = await loop.run_in_executor(None, sources.load)
+        rows = await asyncio.to_thread(sources.load)
         for row in rows:
             directory = installer.resolve_install_dir(row["name"])
             row["installed_version"] = installer.installed_version(row["name"])
@@ -2065,28 +2062,16 @@ def register_routes() -> None:
         return web.json_response({"repos": rows})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/github")
-    async def github_add(request: web.Request) -> web.Response:
+    @_json_body
+    async def github_add(request: web.Request, body: dict) -> web.Response:
         """Put a GitHub repository on the user's list."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         result = sources.add(str(body.get("url", "")))
         return web.json_response(result, status=200 if result["ok"] else 422)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/github/remove")
-    async def github_remove(request: web.Request) -> web.Response:
+    @_json_body
+    async def github_remove(request: web.Request, body: dict) -> web.Response:
         """Take a repository off the list, uninstalling the pack where it is installed."""
-        if not _is_json(request):
-            return web.json_response(
-                {"ok": False, "reason": "expected application/json"}, status=415)
-        try:
-            body = await request.json()
-        except ValueError:
-            return web.json_response({"ok": False, "reason": "invalid request body"}, status=400)
         url = str(body.get("url", ""))
         pair = sources.parse(url)
         if pair is None:
@@ -2099,8 +2084,7 @@ def register_routes() -> None:
             result["reason"] = "that repository was not on the list"
             return web.json_response(result, status=404)
         if installer.resolve_install_dir(pair[1]) is not None:
-            outcome = await asyncio.get_running_loop().run_in_executor(
-                None, installer.uninstall, pair[1]
+            outcome = await asyncio.to_thread(installer.uninstall, pair[1]
             )
             result["uninstalled"] = outcome.ok
             result["restart_required"] = outcome.restart_required

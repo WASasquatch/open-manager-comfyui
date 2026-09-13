@@ -11,6 +11,8 @@ import re
 import time
 from pathlib import Path
 
+from . import paths
+
 __all__ = ["add", "load", "path", "remove"]
 
 #: Most repositories held in the list.
@@ -27,14 +29,7 @@ def path() -> Path:
         A path under ComfyUI's user directory, or beside this package where that is
         unavailable.
     """
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "github_sources.json"
+    return paths.store_file("github_sources.json")
 
 
 def parse(url: str) -> tuple[str, str] | None:

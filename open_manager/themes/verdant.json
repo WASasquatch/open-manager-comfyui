@@ -1,7 +1,7 @@
 {
   "id": "om_verdant",
   "name": "Verdant",
-  "version": 13,
+  "version": 14,
   "extras": {
     "shape": {
       "radius": 10,
@@ -9,6 +9,7 @@
       "slotHeight": 20
     },
     "links": {
+      "mode": "spline",
       "border": false
     },
     "categories": {

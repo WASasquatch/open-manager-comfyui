@@ -27,7 +27,7 @@ import stat
 import sys
 from pathlib import Path
 
-from . import log
+from . import log, paths
 
 __all__ = ["ENV_NAMES", "NAMES", "forget", "hint", "listing", "path", "secret",
            "source", "store"]
@@ -91,14 +91,7 @@ def _from_env(name: str) -> tuple:
 
 def path() -> Path:
     """Where the keys are written."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:  # noqa: BLE001 - running outside ComfyUI
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "keys.json"
+    return paths.store_file("keys.json")
 
 
 def _harden(target: Path) -> str:

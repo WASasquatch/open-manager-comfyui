@@ -17,7 +17,8 @@ import aiohttp
 
 from . import license_files, licenses, log, metadata
 
-__all__ = ["load", "should_auto_sync", "state", "sync"]
+__all__ = [
+    "is_self","load", "should_auto_sync", "state", "sync"]
 
 #: Registry catalogue endpoint. The server caps the page size at 100.
 BASE = "https://api.comfy.org/nodes"
@@ -156,10 +157,15 @@ def _pair(repository: str) -> tuple[str, str] | None:
 def hidden(repository: str) -> bool:
     """Whether a pack belongs in the browsable listing.
 
-    Managers are not node packs, and reaching one through another is a category error: this
-    one cannot install itself, and a second manager is a decision about the installation
-    rather than a pack to browse. Both remain installable from the GitHub tab, and both stay
-    in :func:`load`, so an installed copy keeps its icon, version and update path.
+    Another manager is a decision about the installation rather than a pack to browse, and
+    reaching one through this one is a category error. It stays installable from the GitHub
+    tab and stays in :func:`load`, so an installed copy keeps its icon, version and update
+    path.
+
+    Open Manager itself is not hidden. It was, and the result was that searching for it in
+    its own listing found nothing, which reads as a broken search rather than as a policy.
+    It is marked instead, and the listing offers no Install for it: being unable to install a
+    manager through itself is a reason to withhold the button, not the entry.
 
     Args:
         repository: The repository URL the registry gives.
@@ -170,12 +176,29 @@ def hidden(repository: str) -> bool:
     from . import risk
 
     pair = _pair(repository)
-    return pair is not None and (pair == SELF_REPO or pair in risk.MANAGER_REPOS)
+    return pair is not None and pair in risk.MANAGER_REPOS
+
+
+def is_self(repository: str) -> bool:
+    """Whether an entry is Open Manager's own."""
+    return _pair(repository) == SELF_REPO
 
 
 def browsable() -> list[dict]:
-    """The catalogue as the registry browser shows it, managers and self removed."""
-    return [entry for entry in load() if not hidden(entry.get("repository", ""))]
+    """The catalogue as the registry browser shows it, other managers removed.
+
+    Open Manager's own entry carries ``is_self``, so the listing can show it and decline to
+    offer an install of the thing doing the offering.
+    """
+    out = []
+    for entry in load():
+        repository = entry.get("repository", "")
+        if hidden(repository):
+            continue
+        if is_self(repository):
+            entry = {**entry, "is_self": True}
+        out.append(entry)
+    return out
 
 
 def _borrowed(repository: str) -> bool:

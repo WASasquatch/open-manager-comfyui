@@ -27,7 +27,7 @@ from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
-from . import keys, models
+from . import keys, models, paths
 
 __all__ = [
     "add",
@@ -99,14 +99,7 @@ _loaded = False
 
 def _dir() -> Path:
     """Where the record of downloads is kept."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    return paths.store()
 
 
 def _record_path() -> Path:

@@ -222,3 +222,6 @@ __marimo__/
 
 # Cache
 tmp/
+
+# Where Open Manager keeps its files when there is no ComfyUI to ask.
+_cache/

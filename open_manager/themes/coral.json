@@ -1,7 +1,7 @@
 {
   "id": "om_coral",
   "name": "Coral",
-  "version": 13,
+  "version": 14,
   "light_theme": true,
   "extras": {
     "shape": {
@@ -10,6 +10,7 @@
       "slotHeight": 20
     },
     "links": {
+      "mode": "spline",
       "border": false
     },
     "categories": {

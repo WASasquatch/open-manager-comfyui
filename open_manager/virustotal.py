@@ -26,6 +26,8 @@ from pathlib import Path
 
 import aiohttp
 
+from . import paths
+
 __all__ = [
     "DAILY_BUDGET",
     "budget_used",
@@ -86,14 +88,7 @@ _state = {
 
 def _dir() -> Path:
     """Where the cache and the day's tally are kept."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    return paths.store()
 
 
 def _read(name: str) -> dict:

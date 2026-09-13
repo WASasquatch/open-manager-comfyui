@@ -9,6 +9,7 @@ only, and :func:`resolve_versions` reports ``newest`` beside it.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -74,6 +75,12 @@ class NodeVersion:
             ``deleted`` or the raw value where the registry publishes something new.
         created_at: ISO timestamp of publication.
         deprecated: Whether the publisher marked this version deprecated.
+        changelog: What the publisher said changed in this version, empty where they said
+            nothing. Free text supplied by the publisher, so it is never treated as markup.
+        supported_os: Operating system classifiers this version declares.
+        supported_comfyui: ComfyUI version specifier this version declares.
+        supported_frontend: Frontend package version specifier this version declares.
+        supported_accelerators: Accelerator classifiers this version declares.
         download_url: Artifact URL, empty where the registry did not supply one.
         dependencies: Package requirements declared by the version.
         raw: The unmodified object the registry answered with.
@@ -83,6 +90,14 @@ class NodeVersion:
     status: str
     created_at: str = ""
     deprecated: bool = False
+    changelog: str = ""
+    # Declared per version, and only per version: the node-level copies of these are empty
+    # for every pack that fills them in, so the pack page was describing the newest release
+    # no matter which version was being looked at.
+    supported_os: tuple[str, ...] = ()
+    supported_comfyui: str = ""
+    supported_frontend: str = ""
+    supported_accelerators: tuple[str, ...] = ()
     download_url: str = ""
     dependencies: tuple[str, ...] = ()
     raw: dict = field(default_factory=dict, repr=False)
@@ -108,6 +123,9 @@ class NodeRecord:
         description: Publisher's summary.
         publisher: Publisher identifier.
         publisher_status: Publisher account status.
+        publisher_name: The publisher's display name, which the registry fills in for almost
+            every pack while ``author`` is nearly always empty.
+        publisher_members: Names of the people on the publisher account.
         status: Node-level status, separate from any version status.
         repository: Source repository URL.
         icon: Icon URL, empty where none is published.
@@ -120,9 +138,6 @@ class NodeRecord:
         license: License as the registry records it, empty where unset.
         tags: Registry tags.
         created_at: ISO timestamp the pack was first published.
-        supported_os: Operating systems the pack declares support for.
-        supported_comfyui: ComfyUI version range the pack declares.
-        supported_accelerators: Accelerators the pack declares support for.
         raw: The unmodified object the registry answered with.
     """
 
@@ -130,6 +145,8 @@ class NodeRecord:
     name: str = ""
     description: str = ""
     publisher: str = ""
+    publisher_name: str = ""
+    publisher_members: tuple[str, ...] = ()
     publisher_status: str = ""
     status: str = ""
     repository: str = ""
@@ -143,9 +160,6 @@ class NodeRecord:
     license: str = ""
     tags: tuple[str, ...] = ()
     created_at: str = ""
-    supported_os: tuple[str, ...] = ()
-    supported_comfyui: str = ""
-    supported_accelerators: tuple[str, ...] = ()
     raw: dict = field(default_factory=dict, repr=False)
 
 
@@ -231,6 +245,27 @@ def _cached(key: str) -> Any | None:
     return value
 
 
+def _members(publisher: dict) -> tuple[str, ...]:
+    """The people on a publisher account, in the order the registry lists them.
+
+    The registry nests each one as ``{"user": {"name": ...}}``. Names repeat where somebody
+    appears twice, so they are folded while keeping the order they arrived in.
+
+    Args:
+        publisher: The publisher object from a node payload.
+
+    Returns:
+        Display names, empty where the account lists nobody.
+    """
+    seen: dict[str, None] = {}
+    for entry in publisher.get("members") or ():
+        name = ((entry or {}).get("user") or {}).get("name") or ""
+        name = str(name).strip()
+        if name:
+            seen.setdefault(name, None)
+    return tuple(seen)
+
+
 def _licence_name(value) -> str:
     """A displayable license name from the registry's license field.
 
@@ -285,6 +320,8 @@ async def fetch_node(node_id: str, session: aiohttp.ClientSession) -> NodeRecord
         name=payload.get("name", ""),
         description=payload.get("description", ""),
         publisher=publisher.get("id", ""),
+        publisher_name=publisher.get("name", "") or "",
+        publisher_members=_members(publisher),
         publisher_status=_short_status(publisher.get("status", "")),
         status=_short_status(payload.get("status", "")),
         repository=payload.get("repository", ""),
@@ -298,13 +335,6 @@ async def fetch_node(node_id: str, session: aiohttp.ClientSession) -> NodeRecord
         license=licence,
         tags=tuple(payload.get("tags") or ()),
         created_at=payload.get("created_at", "") or "",
-        supported_os=tuple(payload.get("supported_os") or latest.get("supported_os") or ()),
-        supported_comfyui=payload.get("supported_comfyui_version")
-        or latest.get("supported_comfyui_version")
-        or "",
-        supported_accelerators=tuple(
-            payload.get("supported_accelerators") or latest.get("supported_accelerators") or ()
-        ),
         raw=payload,
     )
     _cache[key] = (time.monotonic(), record)
@@ -339,6 +369,12 @@ async def fetch_versions(node_id: str, session: aiohttp.ClientSession) -> tuple[
                     status=_short_status(row.get("status", "")),
                     created_at=row.get("createdAt", ""),
                     deprecated=bool(row.get("deprecated")),
+                    changelog=str(row.get("changelog") or "").strip(),
+                    supported_os=tuple(row.get("supported_os") or ()),
+                    supported_comfyui=str(row.get("supported_comfyui_version") or "").strip(),
+                    supported_frontend=str(
+                        row.get("supported_comfyui_frontend_version") or "").strip(),
+                    supported_accelerators=tuple(row.get("supported_accelerators") or ()),
                     download_url=row.get("downloadUrl", "") or "",
                     dependencies=tuple(row.get("dependencies") or ()),
                     raw=row,
@@ -439,6 +475,120 @@ async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> 
             reasons[version] = summary
     _cache[key] = (time.monotonic(), reasons)
     return reasons
+
+
+#: Pages of node classes to follow before giving up. At 100 a page this is far more than any
+#: real pack ships, and it stops a bad ``totalNumberOfPages`` turning one page view into an
+#: unbounded crawl of someone else's server.
+_NODE_PAGE_CAP = 8
+
+#: How many node classes to ask for at once. The default page size is ten, which turns a large
+#: pack into twenty-odd requests.
+_NODE_PAGE_SIZE = 100
+
+
+def _decoded_list(value) -> tuple[str, ...]:
+    """A registry field that holds a JSON array inside a string.
+
+    Args:
+        value: The raw field, which may already be a list, a JSON string, or nothing.
+
+    Returns:
+        The entries as strings, empty where the field held nothing readable.
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(str(one) for one in value)
+    if not isinstance(value, str) or not value.strip():
+        return ()
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return ()
+    if isinstance(parsed, (list, tuple)):
+        return tuple(str(one) for one in parsed)
+    return ()
+
+
+def _input_count(value) -> dict:
+    """How many inputs a node class takes, split by whether they are required.
+
+    Args:
+        value: The raw ``input_types`` field, a JSON object inside a string.
+
+    Returns:
+        ``{"required": int, "optional": int}``, zeroes where nothing could be read.
+    """
+    raw = value
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else {}
+        except (TypeError, ValueError):
+            raw = {}
+    if not isinstance(raw, dict):
+        return {"required": 0, "optional": 0}
+    return {
+        "required": len(raw.get("required") or {}),
+        "optional": len(raw.get("optional") or {}),
+    }
+
+
+async def fetch_comfy_nodes(
+    node_id: str, version: str, session: aiohttp.ClientSession
+) -> tuple[dict, ...]:
+    """The node classes one published version registers, as the registry recorded them.
+
+    Roughly three packs in five have this filled in, so an empty answer means the registry was
+    never told rather than that the pack adds no nodes. Callers have to say which of those two
+    they are looking at, because "no nodes" and "nobody said" read very differently next to a
+    pack you are deciding whether to install.
+
+    Args:
+        node_id: Registry identifier.
+        version: Exact published version.
+        session: Session the request runs on.
+
+    Returns:
+        One entry per node class: ``{name, category, description, deprecated, experimental,
+        inputs, outputs}``. ``inputs`` is ``{required, optional}`` counts and ``outputs`` the
+        socket types. Empty where the registry holds none.
+
+    Raises:
+        RegistryError: Where the registry did not answer.
+    """
+    key = f"comfynodes:{node_id}:{version}"
+    hit = _cached(key)
+    if hit is not None:
+        return hit
+
+    base = f"{BASE_URL}/nodes/{node_id}/versions/{version}/comfy-nodes"
+    rows: list[dict] = []
+    page = 1
+    while page <= _NODE_PAGE_CAP:
+        payload = await _get(session, f"{base}?page={page}&limit={_NODE_PAGE_SIZE}")
+        found = (payload or {}).get("comfy_nodes") or []
+        rows.extend(found)
+        total = int((payload or {}).get("totalNumberOfPages") or 1)
+        if page >= total or not found:
+            break
+        page += 1
+
+    nodes = tuple(
+        {
+            "name": str(row.get("comfy_node_name") or ""),
+            "category": str(row.get("category") or ""),
+            "description": str(row.get("description") or ""),
+            "deprecated": bool(row.get("deprecated")),
+            "experimental": bool(row.get("experimental")),
+            # The registry stores these JSON-encoded inside strings, so they have to be
+            # decoded rather than iterated: a bare `for` over '["STRING"]' yields characters.
+            "inputs": _input_count(row.get("input_types")),
+            "outputs": _decoded_list(row.get("return_types")),
+        }
+        for row in rows
+        if row.get("comfy_node_name")
+    )
+    _cache[key] = (time.monotonic(), nodes)
+    return nodes
 
 
 def resolve_versions(versions: tuple[NodeVersion, ...]) -> Resolution:

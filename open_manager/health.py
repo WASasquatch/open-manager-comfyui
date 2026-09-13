@@ -22,7 +22,7 @@ from pathlib import Path
 
 _IMPORTED_AT = time.time()
 
-from . import installer
+from . import installer, paths
 
 __all__ = ["collisions", "disable", "enable", "hold", "holds", "is_disabled", "release",
            "startup_times", "toggle"]
@@ -59,11 +59,8 @@ _TIMING = re.compile(r"([\d.]+)\s+seconds(\s*\(IMPORT FAILED\))?:\s*(.+)")
 
 def _logs() -> list[Path]:
     """ComfyUI's log and the ones it rotated, newest first."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory())
-    except Exception:
+    base = paths.user_root()
+    if base is None:
         return []
     found = [base / "comfyui.log", base / "comfyui.prev.log", base / "comfyui.prev2.log"]
     return [one for one in found if one.is_file()]
@@ -356,14 +353,7 @@ def holds_path() -> Path:
     Beside the trusted list, in ComfyUI's user directory, so a hold outlives a browser and a
     reinstall of this pack both.
     """
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:  # noqa: BLE001 - running outside ComfyUI
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "held_versions.json"
+    return paths.store_file("held_versions.json")
 
 
 def holds() -> dict:

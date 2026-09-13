@@ -23,6 +23,8 @@ import json
 import time
 from pathlib import Path
 
+from . import paths
+
 __all__ = ["KINDS", "forget", "is_trusted", "listing", "path", "record"]
 
 #: What a decision covers. Trusting someone to ship code that runs with ComfyUI's
@@ -36,14 +38,7 @@ _CAP = 500
 
 def path() -> Path:
     """Where the trusted list is written."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "trusted_authors.json"
+    return paths.store_file("trusted_authors.json")
 
 
 def _fold(owner: str) -> str:

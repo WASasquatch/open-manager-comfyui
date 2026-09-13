@@ -197,12 +197,15 @@ function theme({ id, name, dark, format, bg, surface, title, text, subtext, bord
   return {
     id,
     name,
-    version: 13,
+    // Bump this whenever anything below changes. `registerThemes` only replaces a reader's
+    // stored copy when the shipped version is higher, so an edit left at the old number
+    // reaches new installs only and silently does nothing for everyone who already has it.
+    version: 14,
     ...(dark ? {} : { light_theme: true }),
     // Read by Open Manager; ComfyUI's own loader ignores it.
     extras: {
       shape: { radius: 10, titleHeight: 28, slotHeight: 20 },
-      links: { border: false },
+      links: { mode: "spline", border: false },
       categories: categoryColours(dark, accent, hues),
       glow: { selected: glow, blur: dark ? 16 : 10 },
     },
@@ -281,6 +284,7 @@ function categoryColour(categories, node) {
 }
 
 //: Link shapes a theme may ask for.
+const LINK_MODES = new Set(["straight", "linear", "spline"]);
 
 // The colour the active palette would give a node, for anything outside the canvas that wants
 // to speak the same language. The precedence is the draw hook's, so a progress bar and the
@@ -317,8 +321,9 @@ function sanitiseExtras(raw) {
 
   if (raw.links && typeof raw.links === "object") {
     const links = {};
-    // A mode is read and dropped rather than rejected, so an older theme file still loads;
-    // it simply no longer decides how the reader's links are drawn.
+    // A theme may name a link shape. It is applied to the canvas while that theme is in
+    // use and taken back when it is not; the reader's own setting is never written.
+    if (LINK_MODES.has(raw.links.mode)) links.mode = raw.links.mode;
     if (typeof raw.links.border === "boolean") links.border = raw.links.border;
     if (Object.keys(links).length) out.links = links;
   }
@@ -406,15 +411,104 @@ function installDrawHook() {
   hookInstalled = true;
 }
 
+//: Bumped only if this ever has to run again for a different reason. A reader who has been
+//: through it carries this number, so it happens once and not on every load.
+const LINK_REPAIR = 1;
+
+//: Where that is recorded. Registered as a hidden setting so it lives with the reader's
+//: account rather than in one browser: repairing again in a second browser would overwrite a
+//: choice they had already put back.
+const LINK_REPAIR_KEY = "openManager.linkModeRepair";
+
+// Put back the link shape an earlier version of this extension took away.
+//
+// That version assigned `LiteGraph.LINK_RENDER_MODE` on every palette load, including
+// ComfyUI's own palettes, and restored it from a snapshot taken when the value was undefined.
+// The result was global and persisted: readers who had never chosen linear were left on it,
+// on every theme, with ComfyUI's setting reporting linear as though they had asked for it.
+// Nothing distinguishes that from a deliberate choice of linear, so this corrects exactly
+// that one value, once, and says so rather than doing it quietly.
+//
+// Returns:
+//   `{from, to}` where a setting was corrected, otherwise null.
+export async function repairLinkMode() {
+  const setting = app.extensionManager?.setting;
+  if (!setting) return null;
+
+  let done = 0;
+  try { done = Number(setting.get(LINK_REPAIR_KEY)) || 0; } catch { return null; }
+  if (done >= LINK_REPAIR) return null;
+
+  let corrected = null;
+  try {
+    const current = Number(setting.get("Comfy.LinkRenderMode"));
+    const fixed = defaultLinkMode();
+    if (current === (window.LiteGraph?.LINEAR_LINK ?? 1) && current !== fixed) {
+      await setting.set("Comfy.LinkRenderMode", fixed);
+      corrected = { from: "linear", to: fixed === 2 ? "spline" : String(fixed) };
+    }
+    // Recorded either way. A reader who was never affected should not be asked again, and a
+    // reader who was must not be corrected a second time after putting it back.
+    await setting.set(LINK_REPAIR_KEY, LINK_REPAIR);
+  } catch {
+    return null;
+  }
+  return corrected;
+}
+
+//: The shapes ComfyUI's own setting offers. A value outside this is not a link mode, and
+//: restoring one would leave the canvas drawing nothing recognisable.
+const LINK_VALUES = new Set([0, 1, 2, 3]);
+
+// What ComfyUI registered as the default for the link shape, which is spline. Read from the
+// setting's own definition rather than assumed, so a future ComfyUI that changes its mind is
+// followed rather than contradicted. The constant is the last resort, for a frontend that
+// keeps its definitions somewhere this does not know to look.
+function defaultLinkMode() {
+  try {
+    const setting = app.extensionManager?.setting;
+    const store = setting?.settingStore || setting;
+    for (const key of ["settingsById", "settings", "settingTree"]) {
+      const table = store?.[key];
+      if (!table) continue;
+      const entry = table instanceof Map
+        ? table.get("Comfy.LinkRenderMode")
+        : table["Comfy.LinkRenderMode"];
+      const value = Number(entry?.defaultValue);
+      if (LINK_VALUES.has(value)) return value;
+    }
+  } catch {
+    // Falls through to the constant.
+  }
+  return window.LiteGraph?.SPLINE_LINK ?? 2;
+}
+
+// The link shape to go back to when no theme is asking for one.
+//
+// The reader's setting comes first: it is the record of what they chose, we never write it,
+// and reading it live means a change made while a theme was overriding is respected rather
+// than undone. Where it holds nothing usable the answer is ComfyUI's own default, because
+// that is what the canvas would draw if Open Manager were not installed.
+function readerLinkMode() {
+  try {
+    const chosen = Number(app.extensionManager?.setting?.get("Comfy.LinkRenderMode"));
+    if (LINK_VALUES.has(chosen)) return chosen;
+  } catch {
+    // Falls through to the default.
+  }
+  return defaultLinkMode();
+}
+
 //: What this module has actually changed. Restoring something never changed is how a value
 //: the reader chose gets replaced by whatever happened to be set when a theme first loaded.
-let changed = { shape: false, border: false };
+let changed = { shape: false, border: false, linkMode: false };
 
-// Apply a palette's extras: geometry, link border, and the data the draw hook reads.
+// Apply a palette's extras: geometry, link border, link shape, and the data the draw hook reads.
 //
-// Link render mode is deliberately absent. ComfyUI gives that its own setting, which means it
-// belongs to the reader; a theme writing over it leaves the settings panel showing one thing
-// and the canvas drawing another, with no hint as to why.
+// Everything here is undone when a palette without extras is loaded, so a theme's choices last
+// exactly as long as the theme does. Nothing is written to `Comfy.LinkRenderMode`: that setting
+// is the reader's, and a theme writing over it leaves the settings panel showing one thing and
+// the canvas drawing another, with no hint as to why.
 export function applyExtras(palette) {
   const lg = window.LiteGraph;
   if (!lg) return;
@@ -455,6 +549,25 @@ export function applyExtras(palette) {
     } else if (changed.border) {
       canvas.render_connections_border = baseShape.linkBorder;
       changed.border = false;
+    }
+
+    // A theme may choose how links are drawn while it is the theme in use. Two things are
+    // never touched: `Comfy.LinkRenderMode`, which is the reader's own stored preference, and
+    // `LiteGraph.LINK_RENDER_MODE`, which is global. Issue #21 was the global one being
+    // written, so a shape one theme asked for became every theme's shape and outlived the
+    // session. The canvas property is per-canvas and unpersisted, so the choice lasts exactly
+    // as long as the theme does.
+    const modes = { straight: lg.STRAIGHT_LINK, linear: lg.LINEAR_LINK, spline: lg.SPLINE_LINK };
+    const mode = modes[extras?.links?.mode];
+    if (mode !== undefined) {
+      changed.linkMode = true;
+      canvas.links_render_mode = mode;
+    } else if (changed.linkMode) {
+      // Back to what ComfyUI would draw on its own: the reader's setting, or its registered
+      // default where that says nothing usable. Deliberately not the snapshot taken at first
+      // override, which goes stale the moment they change the setting while a theme is on.
+      canvas.links_render_mode = readerLinkMode();
+      changed.linkMode = false;
     }
   }
 
@@ -530,9 +643,19 @@ export async function registerThemes() {
   const service = app.extensionManager?.colorPalette;
   if (!setting) return;
 
+  // Read before written, because writing a store that could not be read would replace
+  // whatever palettes the reader has with only ours. An empty store is not that case: it is
+  // what a fresh ComfyUI holds, and bailing on it meant a new install never received a single
+  // bundled theme. Only a read that actually failed stops this.
   let store = {};
-  try { store = setting.get("Comfy.CustomColorPalettes") || {}; } catch {}
-  if (!Object.keys(store).length) return;
+  let readable = false;
+  try {
+    store = setting.get("Comfy.CustomColorPalettes") || {};
+    readable = true;
+  } catch {
+    readable = false;
+  }
+  if (!readable || typeof store !== "object") return;
 
   const merged = {};
   let changed = false;

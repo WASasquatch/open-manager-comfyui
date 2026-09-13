@@ -123,12 +123,22 @@ Under **Open Manager → Monitor**.
 | How the resource monitor strip is drawn | `mixed` | One of the six styles above. |
 | Show the Memory button, which opens this panel | on | The button that opens this panel. Separate from the strip. |
 
-Shared with the other panels, under **Open Manager → Interface**:
+Shared with every window, under **Open Manager → Windows**:
 
 | Setting | Default | What it does |
 |---|---|---|
-| Header height of the Downloads, Models and Memory panels | 44 | 24 to 80. |
-| Downloads, Models and Memory panels can be dragged | on | Off opens every panel centred and fixed. A window too small to move a panel around in presents it centred whatever this says. |
+| Memory panel as a window | on | Off, it opens as a modal: centred, in front of everything, closing when you click away or press Escape. Each surface has its own toggle, so Memory can be a modal while the Download Manager is a window. |
+| Default window size | `large` | `compact`, `standard` or `large`. Scales each window's own default, so their relative sizes are kept. A window you have resized keeps the size you gave it. |
+| Header height | 44 | 24 to 80. |
+| Title text size | 15 | 10 to 28. The title bar and section headings, independent of the header height. |
+| Content text size | 13 | 10 to 22. Body text inside windows. |
+| Drop shadow | on | The shadow that lifts a window off the graph behind it. |
+| Windows can be dragged | on | Presentation only. Off, a window always opens in the middle and cannot be dragged away. A screen too small to move a window around in presents it centred whatever this says, and goes back to floating when there is room again. |
+
+And under **Open Manager → Interface**:
+
+| Setting | Default | What it does |
+|---|---|---|
 | Where the Downloads, Models and Memory buttons sit | `topbar` | `topbar` puts Downloads, Models and Memory in the workflow tab strip with their names. `control` puts them in the floating control bar as icons, with the name on the hover. |
 
 ## Related

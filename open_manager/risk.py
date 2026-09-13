@@ -162,6 +162,7 @@ def assess_version(
     status: str,
     dependencies: Iterable[str] = (),
     deprecated: bool = False,
+    compatibility: dict | None = None,
 ) -> Assessment:
     """Everything worth saying about installing one published version.
 
@@ -171,6 +172,8 @@ def assess_version(
         status: Short registry status, as :mod:`.registry` reports it.
         dependencies: Requirement lines the version declares.
         deprecated: Whether the publisher marked the version deprecated.
+        compatibility: The result of :func:`.compat.check` for this version, where the
+            version declared anything.
 
     Returns:
         An :class:`Assessment`.
@@ -233,6 +236,25 @@ def assess_version(
                     evidence=(f"requirement: {text}",),
                 )
             )
+
+    # Stated, not predicted. Publishers declare these loosely, and a pack asking for
+    # "ComfyUI >=1.0.0" against a ComfyUI that has never left 0.x is a typo, not an
+    # incompatibility. So this says what was declared and what is installed, at note
+    # severity, and leaves the reader to weigh it.
+    for note in (compatibility or {}).get("notes", ()):
+        if note.get("state") != "differs":
+            continue
+        findings.append(
+            Finding(
+                severity="note",
+                title=f"Declared {note['label']} does not match this install",
+                detail=f"The publisher declared {note['declared']} for this version. "
+                       f"This install reports {note['yours']}. Publishers often declare a "
+                       "range wider or narrower than a pack really needs, so this is worth "
+                       "knowing rather than conclusive.",
+                evidence=(f"declared: {note['declared']}", f"installed: {note['yours']}"),
+            )
+        )
 
     if deprecated:
         findings.append(

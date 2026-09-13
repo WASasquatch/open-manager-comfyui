@@ -118,7 +118,7 @@ Under **Open Manager → Downloads**.
 | Add and fetch model URLs from a node's menu | on | Right-click a node to download the models it names, or add a URL to it so a shared graph carries its weights. |
 
 Related, under **Open Manager → Interface**: *Remember trusted authors, or ask every time* (`author` asks once per
-account, `action` asks every time) and *Header height of the Downloads, Models and Memory panels*.
+account, `action` asks every time). Under **Open Manager → Windows**: *Download Manager as a window* (off opens it as a modal instead, centred and closing on a click away), alongside the size, text and shadow settings shared by every window.
 
 ## Environment
 

@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { nodeTint, registerThemes, watchThemeExtras } from "./themes.js";
+import { nodeTint, registerThemes, repairLinkMode, watchThemeExtras } from "./themes.js";
 
 const API = "/open_manager/v1/api";
 
@@ -47,7 +47,8 @@ style.textContent = `
   width: min(75vw, 2200px); height: min(84vh, 1500px);
   background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border); border-radius: 10px;
   display: flex; flex-direction: column; overflow: hidden;
-  font: 13px/1.5 system-ui, sans-serif;
+  box-shadow: var(--om-shadow, none);
+  font: var(--om-text-size, 13px)/1.5 system-ui, sans-serif;
 }
 .om-x { position: absolute; top: 8px; right: 12px; z-index: 2;
   background: none; border: none; color: var(--om-muted); font-size: 26px; line-height: 1;
@@ -91,7 +92,7 @@ style.textContent = `
 .om-note { background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border); border-radius: 10px;
   padding: 18px 20px; width: min(90vw, 460px); font: 13px/1.5 system-ui, sans-serif;
   display: flex; flex-direction: column; gap: 12px; }
-.om-note-title { font-size: 15px; font-weight: 600; }
+.om-note-title { font-size: var(--om-title-size, 15px); font-weight: 600; }
 .om-note-body { color: var(--om-text-2); white-space: pre-wrap; }
 .om-note-foot { display: flex; gap: 10px; justify-content: flex-end; }
 /* Main button and caret read as one control: the button keeps its status colour and rounds
@@ -136,9 +137,11 @@ style.textContent = `
 .om-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .om-tag { font-size: 11px; line-height: 18px; height: 18px; color: #539bf5; background: #12253d;
   border-radius: 4px; padding: 0 8px; display: inline-flex; align-items: center; }
-.om-readme { margin-top: 16px; border-top: 1px solid var(--om-border); padding-top: 14px; }
+.om-readme { margin-top: 16px; }
 .om-readme .om-chips { margin-bottom: 8px; }
 .om-readme .om-tags { margin-bottom: 14px; }
+.om-tag-go { font: inherit; font-size: 11px; border: none; cursor: pointer; }
+.om-tag-go:hover { filter: brightness(1.35); }
 .om-readme-status { color: var(--om-muted); }
 /* Centred, and set down from the top rather than pinned to it: a result that is on its way
    should look like the page is working, not like a line of text that failed to become one. */
@@ -180,6 +183,19 @@ style.textContent = `
   padding: 0 3px; border-radius: 4px; line-height: 1;
 }
 .om-repo-link:hover { color: var(--om-text); background: var(--om-hover); }
+/* The mark takes the colour of the control it sits in, so it reads as part of the interface
+   rather than as a pasted-in logo, and follows every theme without a second asset. */
+.om-gh-mark { display: block; }
+.om-repo-link { display: inline-flex; align-items: center; }
+.om-icon-btn { display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px 10px; text-decoration: none; box-sizing: border-box; }
+a.om-btn { text-decoration: none; color: var(--om-text); }
+.om-gh-fallback { font-size: 13px; line-height: 1; }
+/* The Comfy mark keeps its own colour: it is a brand asset, not an interface glyph, so it is
+   the one icon here that does not follow the theme. */
+.om-comfy-mark { display: block; width: 14px; height: 14px; }
+.om-icon-btn .om-comfy-mark { width: 16px; height: 16px; }
+.om-registry-link:hover { background: var(--om-hover); }
 /* Long URLs need breaking anywhere, but the same rule inside a table breaks mid-word and
    collapses every column, which is why READMEs rendered here looked squished against
    GitHub. Tables wrap on word boundaries and scroll sideways instead. */
@@ -216,7 +232,7 @@ style.textContent = `
 .om-panel-head::-webkit-details-marker { display: none; }
 .om-panel-head:hover { background: var(--om-hover); }
 .om-panel[open] .om-panel-head { border-bottom-color: var(--om-border); }
-.om-panel-title { font-weight: 600; flex: none; }
+.om-panel-title { font-weight: 600; flex: none; font-size: var(--om-title-size, 15px); }
 .om-panel-note { flex: 1; min-width: 0; color: var(--om-muted); font-size: 12px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-panel-chevron { flex: none; color: var(--om-muted); transition: transform .15s ease; }
@@ -229,6 +245,12 @@ style.textContent = `
 .om-ver { font-weight: 600; font-family: ui-monospace, monospace; }
 .om-badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; color: var(--om-input); display: inline-block; }
+.om-marks { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.om-badge-deprecated { background: #8957e5; }
+/* Amber, not red: the version installs, and the declaration may well be the publisher's
+   mistake rather than a real limit. */
+.om-ver-flag { margin-left: 6px; color: #d29922; font-weight: 700; cursor: help; }
+.om-chip.om-chip-differs { border-color: #d29922; }
 .om-why { color: var(--om-muted); }
 .om-btn { background: var(--om-surface); color: var(--om-text); border: 1px solid var(--om-border);
   border-radius: 6px; padding: 6px 16px; cursor: pointer; font-size: 13px; }
@@ -285,7 +307,11 @@ const badge = (status) => {
   return node;
 };
 
-function closeOn(backdrop) {
+// `dismiss` is for a backdrop whose closing has to do more than remove the node: a panel has
+// its size and place to write away and an onClose to run. Defaults to removing it, which is
+// all a plain dialog needs.
+function closeOn(backdrop, dismiss) {
+  const shut = dismiss || (() => backdrop.remove());
   // A click is dispatched on the nearest ancestor shared by the press and the release, so a
   // drag that starts inside the dialog and finishes outside it reports the backdrop as the
   // target. Selecting text or moving a scrollbar would then shut the window. Both ends of
@@ -295,7 +321,7 @@ function closeOn(backdrop) {
     pressedAway = event.target === backdrop;
   });
   backdrop.addEventListener("click", (event) => {
-    if (pressedAway && event.target === backdrop) backdrop.remove();
+    if (pressedAway && event.target === backdrop) shut();
     pressedAway = false;
   });
   const onKey = (event) => {
@@ -305,7 +331,7 @@ function closeOn(backdrop) {
       return;
     }
     if (event.key === "Escape") {
-      backdrop.remove();
+      shut();
       window.removeEventListener("keydown", onKey);
     }
   };
@@ -662,7 +688,8 @@ function chooseAction(title, message, choices, { wide = false, facts = [] } = {}
     cancel.onclick = () => { backdrop.remove(); resolve(""); };
     foot.appendChild(cancel);
     for (const choice of choices) {
-      const button = el("button", `om-btn ${choice.primary ? "om-go" : ""}`, choice.label);
+      const button = el("button",
+        `om-btn ${choice.danger ? "om-danger" : choice.primary ? "om-go" : ""}`, choice.label);
       if (choice.hint) button.title = choice.hint;
       button.onclick = () => { backdrop.remove(); resolve(choice.key); };
       foot.appendChild(button);
@@ -699,8 +726,12 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
     return caret;
   };
 
-  control.setInstall = () => {
-    const label = button("Install", "om-btn", onInstall || (() => install({ packId, entry, control, rowsRoot })));
+  control.setInstall = (verb) => {
+    // `verb` names the move where one is being made: installing 3.1.0 over 3.2.0 is a
+    // downgrade, and calling it "Install" hides the thing worth knowing.
+    const label = button(verb || "Install", "om-btn",
+      onInstall || (() => install({ packId, entry, control, rowsRoot })));
+    if (verb) label.title = `${verb} to ${entry?.version || ""}`.trim();
     if (!withMenu || !items?.length) { wrap.replaceChildren(label); return; }
     wrap.replaceChildren(label, caretFor(""));
   };
@@ -786,12 +817,29 @@ const foldId = (value) => String(value ?? "").trim().toLowerCase().replace(/_/g,
 
 // Index one /installed payload. Keyed every way a row might ask: registry id, pyproject
 // name and directory name, because a row only knows the registry's spelling.
+// Build the lookup from pack id to the copy on disk.
+//
+// Several directories can carry the same id: a pack switched off keeps its pyproject, so
+// `thing`, `thing.dev.disabled` and `thing.v3.disabled` all answer to `thing`. Taking the last
+// one seen meant a row could report the version of a copy that is switched off, and offer to
+// switch it on alongside the live one. The copy actually in use wins, and among equals the
+// higher version does.
 function indexInstalled(packs) {
   installedIndex.clear();
+  const better = (candidate, held) => {
+    if (!held) return true;
+    if (Boolean(held.disabled) !== Boolean(candidate.disabled)) return !candidate.disabled;
+    return compareVersions(candidate.version || "", held.version || "") > 0;
+  };
   for (const pack of packs || []) {
     for (const key of [pack.registry_id, pack.id, pack.dir]) {
       const folded = foldId(key);
-      if (folded) installedIndex.set(folded, pack);
+      if (!folded) continue;
+      // A directory name is unambiguous, so it always names its own copy; the shared ids are
+      // the ones that have to be judged between.
+      if (folded === foldId(pack.dir) || better(pack, installedIndex.get(folded))) {
+        installedIndex.set(folded, pack);
+      }
     }
   }
 }
@@ -810,13 +858,97 @@ function installedPack(packId) {
   return installedIndex.get(foldId(packId)) || null;
 }
 
-// The menu a registry row offers once its pack is on disk: the same actions the Installed
-// tab gives, so the two do not disagree about what can be done.
-// `getControl` rather than the control itself: the caller builds these while its own
+// The install control a registry row carries, in whichever view is on screen.
+//
+// The list, the table and the cards each built this themselves, nine identical lines apiece
+// differing only in the class appended at the end. Three copies of a thing that has to agree
+// is three chances for it to stop agreeing, which is how the menus drifted apart.
+//
+// Args:
+//   entry: The catalogue entry the row is for.
+//   cls: The view's own class for the control.
+// Returns:
+//   The control, already restored to whatever state its pack is actually in.
+function registryControl(entry, cls) {
+  // Open Manager's own entry is listed so it can be found and read, but a manager cannot be
+  // installed through itself: the control says what it is and sends the reader to the place
+  // that does know how to update it.
+  if (entry.is_self) {
+    const here = el("div", `om-ictl ${cls}`);
+    const button = el("button", "om-btn", "About");
+    button.title = "This is Open Manager. Updating it is under About and updates.";
+    button.onclick = (event) => { event.stopPropagation(); openAboutDialog(); };
+    here.appendChild(button);
+    return { el: here, setInstall() {}, setInstalled() {}, setQueued() {}, setInstalling() {},
+             setUpdate() {}, setStatusInstalled() {} };
+  }
+  const onDisk = installedPack(entry.id);
+  let control;
+  control = makeInstallControl({
+    packId: entry.id,
+    entry,
+    withMenu: Boolean(onDisk),
+    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
+    onInstall: () => quickInstall(entry.id, control),
+  });
+  restoreInstall(entry.id, control);
+  control.el.classList.add(cls);
+  return control;
+}
+
+// Everything that can be done to a pack already on disk.
+//
+// There were three of these: one here for registry rows, one written inline in the Installed
+// tab, and a two-item fallback inside makeInstallControl that the version rows on a pack page
+// fell through to. They disagreed -- the comment on this one used to claim it matched the
+// Installed tab while offering neither Reinstall, Hold nor Switch off -- so which actions you
+// were given depended on which list you happened to open the menu from. One list now, with
+// each entry present only where it can actually be carried out.
+//
+// `getControl` rather than the control itself: a caller builds these while its own
 // `const control` is still being initialised, so reading it here would throw.
-function installedMenu(record, entry, getControl, rowsRoot) {
+//
+// Args:
+//   record: The installed pack, as the installed index holds it. Null for a pack not on disk.
+//   entry: The specific version the menu was opened against, where there is one.
+//   getControl: Returns the control the actions should drive.
+//   rowsRoot: The container whose sibling rows an install should update.
+//   refresh: Called after an action that changes the list it was opened from.
+// Returns:
+//   Menu items, in the order they should read.
+function installedMenu(record, entry, getControl, rowsRoot, refresh) {
   const items = [];
+  if (!record) return items;
+  const again = refresh || refreshInstalledIfActive;
+  const current = entry
+    || { version: record.version, status: "active", name: record.registry_id || record.id };
+
+  if (isInstalledUpdatable(record)) {
+    items.push({ label: `Update to ${record.latest}`,
+                 fn: () => updateInstalled(record, rowsRoot, getControl()) });
+  }
+  // A pack can be reinstalled from wherever it came from. The registry is one source; a
+  // repository is the other, and a pack that was placed by hand has neither, which is why
+  // this is a question rather than an assumption.
+  if (record.registry_id) {
+    items.push({ label: "Reinstall",
+                 fn: () => install({ packId: record.registry_id, entry: current,
+                                     control: getControl(), rowsRoot, overwrite: true }) });
+  } else if (record.repository) {
+    items.push({ label: "Reinstall from GitHub",
+                 fn: () => installFromRepo({ repo: record.repository, title: record.id,
+                                             overwrite: true, classes: [] }, getControl()) });
+  }
   if (vtReady()) items.push({ label: "Scan install", fn: () => openScanDialog(record.id) });
+  if (record.registry_id) {
+    items.push({ label: isHeld(record) ? "Stop holding this version"
+                                       : `Hold at ${record.version}`,
+                 fn: () => toggleHold(record, again) });
+  }
+  if (record.dir) {
+    items.push({ label: record.disabled ? "Switch on" : "Switch off",
+                 fn: () => togglePack(record, again) });
+  }
   items.push({
     label: "Uninstall",
     danger: true,
@@ -861,6 +993,11 @@ function enqueueInstall(job) {
 
 async function runInstallQueue() {
   queueRunning = true;
+  //: Installs that left the Python environment changed and did not finish cleanly. Collected
+  //: through the run and offered once at the end.
+  const restoreOffers = [];
+  //: Requirements failures, shown one dialog each after the run rather than interrupting it.
+  const failures = [];
   const progress = toast("", { sticky: true });
   let done = 0;
   const issues = [];
@@ -899,16 +1036,33 @@ async function runInstallQueue() {
       loadInstalledIndex();
       if (job.scanFirst) await scanThenFinish(job.packId);
       if (result.pip_ran && !result.pip_ok) {
-        issues.push(`${job.name}: requirements did not install cleanly`);
+        const summary = environmentSummary(result.environment);
+        const first = (result.pip_errors || [])[0];
+        // The list at the end of a run is a summary; it now carries the first thing pip
+        // complained about, so even the summary says something.
+        issues.push(`${job.name}: ${first || "requirements did not install cleanly"}`);
+        failures.push({ job, result, summary });
       }
     } else {
       job.control?.setInstall();
       rememberInstall(job.packId, null);
       issues.push(`${job.name} ${job.entry.version}: ${result.reason}`);
+      if (result.environment_id) restoreOffers.push({ id: result.environment_id, name: job.name });
     }
   }
   queueTotal = 0;
   queueRunning = false;
+  // Shown at the end rather than one per pack mid-queue, so a run of ten installs does not
+  // stop ten times to ask.
+  for (const failure of failures) {
+    const choice = await showInstallFailure(failure.job, failure.result).catch(() => "");
+    if (choice === "restore" && failure.result.environment_id) {
+      await offerRestore(failure.result.environment_id, failure.job.name).catch(() => {});
+    }
+  }
+  for (const offer of restoreOffers) {
+    await offerRestore(offer.id, offer.name).catch(() => {});
+  }
   if (issues.length) {
     progress.settle(`Finished with ${issues.length} issue(s).`, "warn", 9000);
     notify("Install issues", issues.join("\n"));
@@ -916,6 +1070,254 @@ async function runInstallQueue() {
     progress.settle(`${done} pack(s) installed.`, "ok", 6000);
   }
   if (done > issues.length) remindRestart();
+}
+
+// What recent installs did to the Python environment, and the offer to undo one.
+//
+// This exists because the install that breaks something is rarely the one you are watching.
+// A pack installs, ComfyUI restarts a day later and something else has stopped working; the
+// answer is usually a package an install moved, and without a record there is nothing to
+// point at. The record survives the restart, so the question can still be asked afterwards.
+async function openEnvironmentDialog() {
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-note-wide");
+  box.appendChild(el("div", "om-note-title", "Environment changes"));
+  box.appendChild(el("div", "om-dl-note",
+    "Package lists taken either side of each install, newest first. An install that changed "
+    + "nothing is not listed. Restoring runs pip and needs a restart afterwards."));
+  const list = el("div", "om-keys");
+  list.appendChild(loadingBlock("Reading the record"));
+  box.appendChild(list);
+
+  const foot = el("div", "om-note-foot");
+  const close = el("button", "om-btn", "Close");
+  close.onclick = () => backdrop.remove();
+  foot.appendChild(close);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+
+  const paint = async () => {
+    let data;
+    try {
+      data = await (await api.fetchApi(`${API}/environment`)).json();
+    } catch (error) {
+      list.replaceChildren(el("div", "om-side-status",
+        `The record could not be read: ${error.message}`));
+      return;
+    }
+    const entries = data?.entries || [];
+    if (!entries.length) {
+      list.replaceChildren(el("div", "om-side-status",
+        "Nothing recorded. Either no pack has been installed through Open Manager yet, or "
+        + "none of them changed a package."));
+      return;
+    }
+    list.replaceChildren();
+    for (const entry of entries) {
+      const row = el("div", "om-keys-row");
+      const head = el("div", "om-dl-top");
+      head.appendChild(el("span", "om-dl-name", `${entry.pack} ${entry.version}`));
+      head.appendChild(el("span", "om-dl-src", sinceText(entry.at)));
+      row.appendChild(head);
+      row.appendChild(el("div", "om-dl-note", environmentSummary(entry.diff) || "no change"));
+
+      // The detail, closed by default: a pack pulling in forty packages would otherwise bury
+      // the rest of the list.
+      const changed = [...(entry.diff?.changed || [])]
+        .map((c) => `${c.name} ${c.was} \u2192 ${c.now}`);
+      const added = (entry.diff?.added || []).map((a) => `${a.name} ${a.version}`);
+      const removed = (entry.diff?.removed || []).map((r) => `${r.name} ${r.version}`);
+      const detail = panel("What changed",
+        countNote((entry.diff?.total) || 0, "package"), { open: false });
+      const body = el("div", "om-chg");
+      for (const [label, items] of [["Changed", changed], ["Added", added],
+                                    ["Removed", removed]]) {
+        if (!items.length) continue;
+        const part = el("div", "om-chg-item");
+        part.appendChild(el("div", "om-node-name", label));
+        part.appendChild(el("div", "om-chg-text", items.join("\n")));
+        body.appendChild(part);
+      }
+      detail.body.appendChild(body);
+      row.appendChild(detail);
+
+      const line = el("div", "om-keys-line");
+      const undo = el("button", "om-btn om-danger", "Restore packages");
+      undo.title = "Put these packages back as they were before this install";
+      undo.onclick = async () => {
+        backdrop.remove();
+        await offerRestore(entry.id, `${entry.pack} ${entry.version}`);
+      };
+      line.appendChild(undo);
+      const drop = el("button", "om-btn", "Forget");
+      drop.title = "Remove this record. Nothing is uninstalled.";
+      drop.onclick = async () => {
+        await dlPost("/environment/forget", { id: entry.id });
+        await paint();
+      };
+      line.appendChild(drop);
+      row.appendChild(line);
+      list.appendChild(row);
+    }
+  };
+  paint();
+}
+
+// Why a pack's requirements did not install, with what pip said and what it left behind.
+//
+// The one-line "requirements did not install cleanly" that used to appear said nothing a
+// reader could act on: not which requirement, not why, not whether anything was left changed.
+// All of that was already coming back from the server and being discarded here.
+//
+// Returns the reader's choice, so the caller can offer a restore without asking twice.
+async function showInstallFailure(job, result) {
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-note-wide");
+  box.appendChild(el("div", "om-note-title",
+    `${job.name}: requirements did not install`));
+  box.appendChild(el("div", "om-dl-note",
+    "The pack itself is on disk. Its Python requirements are what failed, so it may not load "
+    + "or may load with parts missing until they are resolved."));
+
+  // pip's own words for what went wrong, first, because that is the answer.
+  const errors = result.pip_errors || [];
+  if (errors.length) {
+    const why = el("div", "om-keys-row");
+    why.appendChild(el("div", "om-dl-name", "What pip said"));
+    const lines = el("div", "om-chg-text om-pip-errors");
+    lines.textContent = errors.join("\n");
+    why.appendChild(lines);
+    box.appendChild(why);
+  }
+
+  const asked = result.pip_requirements || [];
+  if (asked.length) {
+    const what = panel("What it asked for", countNote(asked.length, "requirement"),
+      { open: false });
+    const body = el("div", "om-chg-text");
+    body.textContent = asked.join("\n");
+    what.body.appendChild(body);
+    box.appendChild(what);
+  }
+
+  if (result.pip_output) {
+    const log = panel("pip output", "the last of it", { open: !errors.length });
+    const body = el("div", "om-chg-text");
+    body.textContent = result.pip_output;
+    log.body.appendChild(body);
+    box.appendChild(log);
+  }
+
+  const summary = environmentSummary(result.environment);
+  box.appendChild(el("div", "om-dl-note", summary
+    ? `Your Python environment changed on the way: ${summary}. That can be put back.`
+    : "Nothing in your Python environment was changed."));
+
+  const foot = el("div", "om-note-foot");
+  let choice = "";
+  const copy = el("button", "om-btn", "Copy output");
+  copy.onclick = () => {
+    const all = [errors.join("\n"), result.pip_output].filter(Boolean).join("\n\n");
+    navigator.clipboard?.writeText(all)
+      .then(() => toast("Output copied.", { kind: "ok" }))
+      .catch(() => notify("Not copied", "The clipboard is not available here."));
+  };
+  foot.appendChild(copy);
+  if (result.environment_id && summary) {
+    const undo = el("button", "om-btn om-danger", "Restore packages");
+    undo.title = "Put the packages back as they were before this install";
+    undo.onclick = () => { choice = "restore"; backdrop.remove(); };
+    foot.appendChild(undo);
+  }
+  const keep = el("button", "om-btn om-go", "Leave it");
+  keep.onclick = () => { choice = "keep"; backdrop.remove(); };
+  foot.appendChild(keep);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+
+  await new Promise((resolve) => {
+    const watch = new MutationObserver(() => {
+      if (!backdrop.isConnected) { watch.disconnect(); resolve(); }
+    });
+    watch.observe(document.body, { childList: true });
+  });
+  return choice;
+}
+
+// What an install did to the Python environment, said plainly.
+//
+// Args:
+//   diff: The `environment` block an install returns.
+// Returns:
+//   A sentence, or empty where nothing changed.
+function environmentSummary(diff) {
+  if (!diff?.total) return "";
+  const parts = [];
+  if (diff.added.length) parts.push(countNote(diff.added.length, "package") + " added");
+  const down = diff.changed.filter((c) => c.direction === "downgraded").length;
+  if (diff.changed.length) {
+    parts.push(`${diff.changed.length} changed${down ? ` (${down} downgraded)` : ""}`);
+  }
+  if (diff.removed.length) parts.push(`${diff.removed.length} removed`);
+  return parts.join(", ");
+}
+
+// Offer to put the environment back as it was before one install.
+//
+// Destructive, so the exact commands are shown first and the reader has to say yes to them
+// rather than to a description of them. Packages the restore will not touch are named too: a
+// restore that silently leaves numpy where an install moved it is not the undo it looks like.
+async function offerRestore(entryId, packName) {
+  let preview;
+  try {
+    preview = await dlPost("/environment/restore", { id: entryId });
+  } catch (error) {
+    notify("Could not read the record", error.message);
+    return;
+  }
+  if (!preview?.ok) {
+    notify("Could not read the record", preview?.reason || "The record could not be read.");
+    return;
+  }
+  const plan = preview.plan || {};
+  const facts = [];
+  if (plan.uninstall?.length) facts.push(["Uninstall", plan.uninstall.join(", ")]);
+  if (plan.install?.length) facts.push(["Put back", plan.install.join(", ")]);
+  for (const one of plan.refused || []) {
+    facts.push([`Left alone: ${one.name}`, one.reason]);
+  }
+  facts.push(["Afterwards", "ComfyUI has to restart. Packages already imported stay loaded "
+    + "until it does."]);
+  if (!plan.uninstall?.length && !plan.install?.length) {
+    notify("Nothing to put back",
+      "Everything this install changed is on the list Open Manager will not touch, because "
+      + "pip or ComfyUI depends on it.");
+    return;
+  }
+
+  const go = await chooseAction(`Restore packages to before ${packName}?`,
+    "This runs pip with the commands below. Other packs installed since may depend on what "
+    + "is about to be changed, and this does not check for that.",
+    [{ key: "go", label: "Restore packages", primary: true, danger: true }],
+    { wide: true, facts });
+  if (!go) return;
+
+  const progress = toast("Restoring packages...", { sticky: true });
+  const outcome = await dlPost("/environment/restore", { id: entryId, confirm: true });
+  const failed = (outcome?.steps || []).filter((step) => !step.ok);
+  if (outcome?.ok) {
+    progress.settle("Packages restored.", "ok", 7000);
+  } else {
+    progress.settle("The restore did not finish.", "warn", 9000);
+    notify("Restore incomplete",
+      "The environment is part way between the two states. What failed:\n\n"
+      + failed.map((step) => `${step.action}: ${step.output}`).join("\n\n"));
+  }
+  if (outcome?.restart_required) remindRestart();
 }
 
 async function install({ packId, entry, control, rowsRoot, overwrite }) {
@@ -1186,7 +1588,12 @@ async function installFromRepo(pack, control) {
   if (result.ok) {
     control?.setInstalled?.();
     progress.settle(`Installed ${pack.title}.`, "ok", 6000);
-    if (result.pip_ran && !result.pip_ok) notify("Requirements", result.pip_output || "did not install cleanly");
+    if (result.pip_ran && !result.pip_ok) {
+      const choice = await showInstallFailure({ name: pack.title || pack.repo }, result);
+      if (choice === "restore" && result.environment_id) {
+        await offerRestore(result.environment_id, pack.title || pack.repo).catch(() => {});
+      }
+    }
     remindRestart();
   } else {
     control?.setInstall?.();
@@ -1285,6 +1692,30 @@ async function starRepo(repository, button) {
   toast(answer.starred ? "Starred on GitHub." : "Unstarred on GitHub.", { kind: "ok" });
 }
 
+// One tag, as a button that searches for it.
+//
+// A tag names something a pack does, and the obvious question on reading one is which other
+// packs do the same. It fills the registry search with `topic:<name>`, which is a query that
+// can be seen, edited and cleared, rather than putting the list into a state with no handle
+// on it.
+function tagChip(tag) {
+  const chip = el("button", "om-tag om-tag-go", tag);
+  chip.title = `Find other packs tagged ${tag}`;
+  chip.onclick = () => browseTopic(String(tag).toLowerCase());
+  return chip;
+}
+
+// The element a pack page was built into, whichever shape it took.
+//
+// The page goes into a modal's `.om-dialog` or into a window's `.om-float` depending on a
+// setting, so anything reaching back out of the page for another part of it -- the header
+// chips, the version list -- has to ask for both. Asking for the dialog alone is how the
+// repository metadata ended up in a row of its own at the foot of the page instead of beside
+// the publisher and the licence where it belongs.
+function packRoot(node) {
+  return node?.closest(".om-dialog, .om-float") || null;
+}
+
 async function openPack(packId) {
   const backdrop = el("div", "om-backdrop");
   const dialog = el("div", "om-dialog");
@@ -1298,9 +1729,26 @@ async function openPack(packId) {
     const answer = await api.fetchApi(
       `${API}/pack/${encodeURIComponent(packId)}?${new URLSearchParams(licenseOptions())}`);
     data = await answer.json();
-    if (!answer.ok) throw new Error(data.detail || `HTTP ${answer.status}`);
+    if (!answer.ok) throw new Error(registryReason(data, answer.status));
   } catch (error) {
-    dialog.replaceChildren(el("div", "om-body", `Could not read the registry: ${error.message}`));
+    // The registry not having an entry is not the same as there being nothing to show. A
+    // pack sitting in custom_nodes doing its job has a page's worth of information in it.
+    const local = await localPack(packId);
+    if (local) {
+      if (asWindow("packs")) {
+        backdrop.remove();
+        showLocalPackWindow(packId, local);
+      } else {
+        dialog.replaceChildren();
+        const close = el("button", "om-x", "×");
+        close.title = "Close";
+        close.onclick = () => backdrop.remove();
+        dialog.appendChild(close);
+        buildLocalPackBody(dialog, local);
+      }
+      return;
+    }
+    dialog.replaceChildren(packProblem(`Could not read ${packId}`, error, backdrop));
     return;
   }
 
@@ -1312,6 +1760,312 @@ async function openPack(packId) {
   close.title = "Close";
   close.onclick = () => backdrop.remove();
   dialog.appendChild(close);
+
+  // Everything below builds the page from whatever the registry returned. A pack with a shape
+  // nothing else has -- no versions, a field the registry stopped sending -- would otherwise
+  // throw partway through and leave a window containing nothing but the close button, which
+  // reads as the interface being broken rather than as one pack being odd.
+  // A modal is right for a quick look and wrong for reading a README while building a graph.
+  // The same page goes into one of the floating windows instead, keyed per pack so several
+  // can be open at once and each remembers where it was put.
+  if (asWindow("packs")) {
+    backdrop.remove();
+    showPackWindow(packId, { pack, resolution, versions });
+    return;
+  }
+
+  try {
+    buildPackBody(dialog, { pack, resolution, versions });
+  } catch (error) {
+    dialog.replaceChildren(close, packProblem(`Could not show ${packId}`, error, backdrop));
+  }
+}
+
+//: The setting behind each surface that can be either a window or a modal.
+const WINDOW_SETTINGS = {
+  manager: "openManager.windowManager",
+  packs: "openManager.windowPacks",
+  downloads: "openManager.windowDownloads",
+  library: "openManager.windowLibrary",
+  memory: "openManager.windowMemory",
+};
+
+// Whether one surface opens as a window. Each is asked separately because they are not used
+// the same way: a Memory panel is glanced at and dismissed, while a pack README is read
+// alongside the graph it is about.
+function asWindow(surface) {
+  return panelSetting(WINDOW_SETTINGS[surface], true) !== false;
+}
+
+//: How much bigger or smaller than its own default a window opens.
+const WINDOW_SCALE = { compact: 0.8, standard: 1, large: 1.25 };
+
+//: What each window asks for by default, as a share of the viewport rather than a count of
+//: pixels: a figure that suits a laptop is a postage stamp on a 4K monitor, and one that suits
+//: the monitor does not fit the laptop at all.
+//:
+//: `vh` is the share of the whole window, title bar included, because that is what the reader
+//: sees; the body is worked out from it. The bounds keep it honest at the extremes: the floor
+//: stops a window becoming unusable in a narrow browser, and the ceiling stops one spanning an
+//: ultrawide, where a README set in a single line across 3,000 pixels is harder to read.
+const WINDOW_SIZES = {
+  manager: { vw: 0.66, vh: 0.70, min: [420, 320], max: [1600, 1200] },
+  pack: { vw: 0.72, vh: 0.74, min: [420, 340], max: [1800, 1300] },
+  downloads: { vw: 0.56, vh: 0.50, min: [380, 280], max: [1300, 900] },
+  library: { vw: 0.62, vh: 0.58, min: [420, 320], max: [1500, 1000] },
+  memory: { vw: 0.44, vh: 0.60, min: [340, 320], max: [1000, 1000] },
+};
+
+//: However large the reader asks for, this much of the screen is left showing. A window that
+//: covers the graph entirely is a modal wearing a title bar, and the point of a window is
+//: being able to see what it is about.
+const WINDOW_ROOM = { width: 0.94, height: 0.88 };
+
+// The size a window opens at before the reader has given it one of their own.
+//
+// Args:
+//   name: Which window, as a key of WINDOW_SIZES.
+// Returns:
+//   `{width, height}` in pixels, taken from the viewport, scaled by the size setting and held
+//   inside that window's bounds.
+function windowSize(name) {
+  const spec = WINDOW_SIZES[name] || WINDOW_SIZES.manager;
+  const scale = windowScale();
+  const pick = (share, extent, low, high, room) => Math.round(
+    // The floor wins last, so a browser too small for the floor gets the floor and scrolls
+    // rather than a window sized to nothing.
+    Math.max(low, Math.min(high, extent * room, extent * share * scale)));
+  const tall = pick(spec.vh, window.innerHeight, spec.min[1], spec.max[1], WINDOW_ROOM.height);
+  return {
+    width: pick(spec.vw, window.innerWidth, spec.min[0], spec.max[0], WINDOW_ROOM.width),
+    // `height` is the body; the bar sits above it and counts towards what the reader sees.
+    height: Math.max(120, tall - headerHeight()),
+  };
+}
+
+// The scale a window's default size is multiplied by. Applied to each window's own figures
+// rather than to a single size for all of them, so the Memory panel stays smaller than a pack
+// page instead of every window becoming the same shape.
+function windowScale() {
+  const asked = String(panelSetting("openManager.windowSize", "standard") || "standard");
+  return WINDOW_SCALE[asked] ?? 1;
+}
+
+//: Bounds for the two text settings. A window whose text is 4px or 90px is not a window.
+const TEXT_LIMITS = { title: [10, 28], body: [10, 22] };
+
+// Push the look settings out as custom properties on the document, so they reach modals and
+// windows alike and take effect on what is already open rather than only on the next thing
+// drawn.
+function applyWindowLook() {
+  const clamp = ([low, high], value, fallback) =>
+    Math.min(high, Math.max(low, Number(value) || fallback));
+  const root = document.documentElement;
+  root.style.setProperty("--om-title-size",
+    `${clamp(TEXT_LIMITS.title, panelSetting("openManager.windowTitleSize", 15), 15)}px`);
+  root.style.setProperty("--om-text-size",
+    `${clamp(TEXT_LIMITS.body, panelSetting("openManager.windowTextSize", 13), 13)}px`);
+  root.style.setProperty("--om-shadow",
+    panelSetting("openManager.windowShadow", true) !== false
+      ? "0 10px 40px rgba(0,0,0,.5)"
+      : "none");
+  // A class rather than a property: the rule it switches on is a filter, and a filter set to
+  // `none` still makes the element its own containing block, which moves fixed children.
+  document.body.classList.toggle("om-blur-inactive",
+    panelSetting("openManager.blurInactive", false) !== false);
+}
+
+// The same page, in a window that outlives a click on the canvas. Keyed by pack, so opening
+// one that is already open raises it instead of drawing a second copy of it.
+function showPackWindow(packId, data) {
+  const panel = createFloatingPanel({
+    key: `pack:${packId}`,
+    title: data.pack?.name || packId,
+    // The largest share of the screen of any of them, because this one is a page: a banner,
+    // the metadata, the version list and a README.
+    ...windowSize("pack"),
+    centred: true,
+  });
+  // An already-open window comes back with its contents; only a fresh one needs filling.
+  if (panel.body.childElementCount) return panel;
+  try {
+    buildPackBody(panel.body, data);
+  } catch (error) {
+    panel.body.replaceChildren(
+      packProblem(`Could not show ${packId}`, error, { remove: panel.destroy }));
+  }
+  return panel;
+}
+
+//: What the disk knows about a pack, or null where nothing is installed under that name.
+async function localPack(packId) {
+  try {
+    const answer = await api.fetchApi(`${API}/local/${encodeURIComponent(packId)}`);
+    const found = await answer.json();
+    return found?.ok ? found : null;
+  } catch {
+    return null;
+  }
+}
+
+// The same page in a window, following the setting every other page follows.
+function showLocalPackWindow(packId, info) {
+  const panel = createFloatingPanel({
+    key: `pack:${packId}`,
+    title: info.pyproject?.display_name || info.pyproject?.name || packId,
+    ...windowSize("pack"),
+    centred: true,
+  });
+  if (panel.body.childElementCount) return panel;
+  buildLocalPackBody(panel.body, info);
+  return panel;
+}
+
+// A clone's remote as something a browser can open.
+//
+// git records `git@host:owner/repo.git` for an SSH remote, which is not a URL. Turning it
+// into one is the difference between a link and a string nobody can use.
+function remoteToUrl(remote) {
+  const text = String(remote || "").trim();
+  if (!text) return "";
+  const ssh = text.match(/^(?:ssh:\/\/)?git@([^:/]+)[:/](.+?)(?:\.git)?$/);
+  if (ssh) return `https://${ssh[1]}/${ssh[2]}`;
+  return safeUrl(text.replace(/\.git$/, "")) || "";
+}
+
+// Build a pack page from the copy on disk.
+//
+// For a pack the registry has no entry for: written locally, pulled, or placed by hand. There
+// is no version list and no registry status, because there is no registry entry; what there
+// is comes from the pack's own files and is labelled as such, so nothing here can be mistaken
+// for something the registry vouched for.
+function buildLocalPackBody(container, info) {
+  const project = info.pyproject || {};
+  const git = info.git || {};
+  const body = el("div", "om-body");
+
+  const hero = el("div", "om-hero");
+  const infoBox = el("div", "om-hero-info");
+  infoBox.appendChild(el("div", "om-title", project.display_name || project.name || info.id));
+  if (project.description) {
+    infoBox.appendChild(el("div", "om-sub", project.description));
+  }
+  infoBox.appendChild(el("div", "om-sub", info.path));
+
+  const actions = el("div", "om-actions om-hero-actions");
+  const remote = remoteToUrl(git.remote) || safeUrl(project.urls?.repository)
+    || safeUrl(project.urls?.source) || safeUrl(project.urls?.homepage);
+  if (remote) {
+    const button = repoButton(remote, `Open ${remote}`);
+    if (button) actions.appendChild(button);
+  }
+
+  const chips = el("div", "om-chips");
+  const chip = (label, value) => {
+    if (!value) return;
+    const node = el("span", "om-chip");
+    node.appendChild(el("b", null, label));
+    node.appendChild(document.createTextNode(" " + value));
+    chips.appendChild(node);
+  };
+  chip("version", info.version && info.version !== "present" ? info.version : project.version);
+  chip("licence", project.license);
+  chip("python", project.requires_python);
+  chip("publisher", project.publisher);
+  chip("directory", info.dir);
+  if (git.branch) chip("branch", git.branch + (git.commit ? ` @ ${git.commit.slice(0, 7)}` : ""));
+  if (info.installed_at) {
+    chip("installed", new Date(info.installed_at * 1000).toISOString().slice(0, 10));
+  }
+  if (info.disabled) chip("state", "switched off");
+  actions.appendChild(chips);
+  infoBox.appendChild(actions);
+  hero.appendChild(infoBox);
+  body.appendChild(hero);
+
+  const notice = el("div", "om-notice");
+  notice.appendChild(el("b", null, "Not in the Comfy Registry"));
+  notice.appendChild(document.createTextNode(
+    " Everything below is read from the files in this directory. There is no published "
+    + "version list, no registry status and no findings, because there is no entry to read "
+    + "them from."));
+  body.appendChild(notice);
+
+  if (info.classes?.length) {
+    const nodes = panel("Nodes", countNote(info.classes.length, "node"), { open: false });
+    const list = el("div", "om-chg");
+    for (const name of info.classes) {
+      const item = el("div", "om-nodelist-item");
+      item.appendChild(el("div", "om-node-name", name));
+      list.appendChild(item);
+    }
+    nodes.body.appendChild(list);
+    body.appendChild(nodes);
+  } else {
+    const nodes = panel("Nodes", "none registered", { open: false });
+    nodes.body.appendChild(el("div", "om-side-status",
+      info.disabled
+        ? "This pack is switched off, so it has registered nothing this session."
+        : "ComfyUI has no node classes attributed to this pack. It may have failed to "
+          + "import, or it may add something other than nodes."));
+    body.appendChild(nodes);
+  }
+
+  if (info.requirements?.length) {
+    const reqs = panel("Requirements", countNote(info.requirements.length, "requirement"),
+      { open: false });
+    const text = el("div", "om-chg-text");
+    text.textContent = info.requirements.join("\n");
+    reqs.body.appendChild(text);
+    body.appendChild(reqs);
+  }
+
+  if (info.readme?.text) {
+    const readme = el("div", "om-readme");
+    readme.appendChild(loadingBlock("Reading the README"));
+    body.appendChild(readme);
+    const view = el("div", "om-readme-body");
+    renderMarkdownInto(view, info.readme.text, { repository: remote || "" }, git.branch || "",
+      "").then(() => readme.replaceChildren(view)).catch(() => {
+        readme.replaceChildren(el("div", "om-side-status", "The README could not be rendered."));
+      });
+  }
+
+  container.appendChild(body);
+}
+
+// The sentence a failed pack page shows, with the close button kept so the window can still be
+// dismissed and the detail kept so it can be reported.
+function packProblem(title, error, backdrop) {
+  const box = el("div", "om-body");
+  box.appendChild(el("div", "om-empty-title", title));
+  box.appendChild(el("div", "om-side-status", String(error?.message || error)));
+  const foot = el("div", "om-note-foot");
+  const close = el("button", "om-btn", "Close");
+  close.onclick = () => backdrop.remove();
+  foot.appendChild(close);
+  box.appendChild(foot);
+  return box;
+}
+
+// What went wrong upstream, in words. The registry answers errors as JSON, and our own route
+// passes that through as `detail`, so without this the reader is shown a wire payload.
+function registryReason(data, status) {
+  const detail = data?.detail ?? data?.reason ?? "";
+  if (typeof detail === "string" && detail.trim().startsWith("{")) {
+    try {
+      const inner = JSON.parse(detail);
+      const said = inner.message || inner.error;
+      if (said) return `the registry says: ${said}`;
+    } catch {
+      // Not JSON after all; the raw text is still better than nothing.
+    }
+  }
+  if (data?.status === 404 || status === 404) return "the registry has no entry for it";
+  return String(detail || `HTTP ${status}`);
+}
+
+function buildPackBody(dialog, { pack, resolution, versions }) {
 
   // Banner left, all metadata inline to its right.
   const hero = el("div", "om-hero");
@@ -1338,9 +2092,11 @@ async function openPack(packId) {
   info.appendChild(titleRow);
 
   const stats = el("div", "om-stats");
+  // Stars are not here: the star control beside these shows the same number and can change
+  // it, so two readings of one figure were on screen at once. Which figure the registry
+  // holds is the registry's business, not something to second-guess here.
   for (const [label, value] of [
     ["downloads", pack.downloads.toLocaleString()],
-    ["stars", pack.stars.toLocaleString()],
     ["versions", String(versions.length)],
   ]) {
     const stat = el("div", "om-stat");
@@ -1352,11 +2108,11 @@ async function openPack(packId) {
 
   // Actions and metadata chips. Status is a colour, not a word.
   const actions = el("div", "om-actions om-hero-actions");
+  const registry = registryButton(pack.id);
+  if (registry) actions.appendChild(registry);
   if (pack.repository) {
-    const repo = el("button", "om-btn", "View on GitHub");
-    repo.title = "Open the repository";
-    repo.onclick = () => openUrl(pack.repository);
-    actions.appendChild(repo);
+    const repo = repoButton(pack.repository, `Open ${pack.repository}`);
+    if (repo) actions.appendChild(repo);
     if (repoOwnerName(pack.repository)) actions.appendChild(makeStarButton(pack.repository, pack.stars));
   }
   const chips = el("div", "om-chips");
@@ -1368,7 +2124,7 @@ async function openPack(packId) {
     chips.appendChild(node);
   };
   // A chip whose value is a registry status, shown as a colour-coded dot.
-  const statusChip = (label, value, status) => {
+  const statusChip = (label, value, status, hint = "") => {
     if (!value) return;
     const node = el("span", "om-chip");
     node.appendChild(el("b", null, label));
@@ -1377,9 +2133,16 @@ async function openPack(packId) {
     dot.style.background = STATUS_COLOUR[status] || STATUS_COLOUR.unknown;
     dot.title = status;
     node.appendChild(dot);
+    if (hint) node.title = hint;
     chips.appendChild(node);
   };
-  statusChip("publisher", pack.publisher, pack.publisher_status);
+  // The registry fills in a display name for almost every publisher and an `author` string
+  // for almost none, so the name is shown and the account id kept for the tooltip: the id is
+  // what Trust the author records, so it still has to be findable.
+  statusChip("publisher", pack.publisher_name || pack.publisher, pack.publisher_status,
+    pack.publisher_name && pack.publisher_name !== pack.publisher
+      ? `Publisher account: ${pack.publisher}`
+      : "");
   statusChip("registry", pack.status, pack.status);
   if (pack.license) {
     const node = el("span", "om-chip");
@@ -1392,17 +2155,31 @@ async function openPack(packId) {
     chips.appendChild(node);
   }
   chip("category", pack.category);
-  chip("author", pack.author);
-  chip("comfyui", pack.supported_comfyui);
-  if (pack.supported_os.length) chip("os", pack.supported_os.join(", "));
-  if (pack.supported_accelerators.length) chip("accel", pack.supported_accelerators.join(", "));
+  // `author` is set on about one pack in ten; the publisher's member list is set on nine, and
+  // names the same people. The declared author wins where there is one.
+  const members = pack.publisher_members || [];
+  chip("author", pack.author || members.join(", "));
+  // These are declared per version, not per pack: the registry's pack-level copies are empty
+  // for every pack that fills them in. The chip therefore describes one particular version,
+  // the newest that declares anything, and says so rather than implying it covers all of them.
+  const declaring = versions.find((entry) => entry.compatibility?.declared);
+  if (declaring) {
+    const node = el("span", "om-chip");
+    node.appendChild(el("b", null, "requires"));
+    node.appendChild(document.createTextNode(" "
+      + declaring.compatibility.notes.map((n) => `${n.label} ${n.declared}`).join(" · ")));
+    if (declaring.compatibility.state === "differs") node.classList.add("om-chip-differs");
+    node.title = `As declared by version ${declaring.version}. Each version declares its own; `
+      + "the list below marks any that do not match this install.";
+    chips.appendChild(node);
+  }
   chip("first published", (pack.created_at || "").slice(0, 10));
   actions.appendChild(chips);
   info.appendChild(actions);
 
   if (pack.tags.length) {
     const tags = el("div", "om-tags");
-    for (const tag of pack.tags) tags.appendChild(el("span", "om-tag", tag));
+    for (const tag of pack.tags) tags.appendChild(tagChip(tag));
     info.appendChild(tags);
   }
 
@@ -1428,13 +2205,34 @@ async function openPack(packId) {
   versionsBox._installedVersion = pack.installed_version || "";
   for (const entry of versions) {
     const row = el("div", "om-row");
-    row.appendChild(el("div", "om-ver", entry.version));
+    const number = el("div", "om-ver", entry.version);
+    // Kept in the version cell rather than beside the status badge: that cell is already
+    // carrying two badges for a deprecated version, and a third turns every such row into
+    // three lines of chrome for one word.
+    if (entry.compatibility?.state === "differs") {
+      const flag = el("span", "om-ver-flag", "!");
+      flag.title = entry.compatibility.notes
+        .filter((n) => n.state === "differs")
+        .map((n) => `Declares ${n.label} ${n.declared}; this install reports ${n.yours}.`)
+        .join("\n")
+        + "\nPublishers often declare a range wider or narrower than a pack needs. It installs "
+        + "either way.";
+      number.appendChild(flag);
+    }
+    row.appendChild(number);
+    const marks = el("div", "om-marks");
     const mark = badge(entry.status);
     mark.dataset.version = entry.version;
     // The registry's reason arrives separately and lands here; until then the badge says
     // only what the status is, which the reader can already see.
     mark.title = `Status: ${entry.status}`;
-    row.appendChild(mark);
+    marks.appendChild(mark);
+    if (entry.deprecated) {
+      const old = el("span", "om-badge om-badge-deprecated", "deprecated");
+      old.title = "The publisher no longer recommends this version. It still installs.";
+      marks.appendChild(old);
+    }
+    row.appendChild(marks);
     row.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
 
     const worst = entry.assessment?.findings?.[0];
@@ -1446,14 +2244,33 @@ async function openPack(packId) {
       blocked.title = entry.blocked_reason || "Blocked by policy";
       row.appendChild(blocked);
     } else {
-      const control = makeInstallControl({
+      // The menu is the installed pack's -- reinstall it, hold it, switch it off, remove it --
+      // so it belongs to the row of the version actually installed. On any other row it
+      // described a different version than the one the row is for: "Hold at 3.2.0" sitting
+      // beside 3.2.1, which is not what that row does.
+      const isInstalledRow = Boolean(pack.installed_version)
+        && entry.version === pack.installed_version;
+      const onDisk = isInstalledRow ? installedPack(pack.id) : null;
+      let control;
+      control = makeInstallControl({
         packId: pack.id,
         entry: { ...entry, name: pack.name || pack.id },
         rowsRoot: versionsBox,
-        withMenu: true,
+        withMenu: Boolean(onDisk),
+        items: onDisk
+          ? installedMenu(onDisk, { ...entry, name: pack.name || pack.id },
+                          () => control, versionsBox)
+          : undefined,
       });
-      if (pack.installed_version && entry.version === pack.installed_version) control.setInstalled();
-      else control.setInstall();
+      if (isInstalledRow) {
+        control.setInstalled();
+      } else {
+        // Named for the move it makes from whatever is installed.
+        const change = versionSwitch(pack.installed_version || "", entry.version);
+        control.setInstall(change
+          ? { downgrade: "Downgrade", upgrade: "Upgrade", reinstall: "Reinstall" }[change.direction]
+          : "");
+      }
       row.appendChild(control.el);
     }
     versionsBox.appendChild(row);
@@ -1468,6 +2285,142 @@ async function openPack(packId) {
   versionsPanel.body.appendChild(versionsBox);
   body.appendChild(versionsPanel);
   attachStatusReasons(pack.id, versionsBox, versions);
+
+  // What the pack adds to the graph. The registry records this per version and holds it for
+  // roughly three packs in five, so the section is offered for every pack and says plainly
+  // when the registry was never told, rather than implying the pack adds nothing.
+  const shownVersion = pack.installed_version || resolution.newest || versions[0]?.version;
+  if (shownVersion) {
+    const nodesPanel = panel("Nodes", "", { open: false, remember: "om-nodes-open" });
+
+    // Which version's list is on screen. The registry keeps one per version and fills it in
+    // for some and not others, so the version that happens to be installed is often the one
+    // with nothing in it while an earlier one has the lot. Pinning the panel to a single
+    // version made that data unreachable; the ref selector above only moves GitHub branches
+    // and has no bearing on what the registry holds.
+    let atVersion = shownVersion;
+
+    const picker = el("select", "om-side-select om-nodes-at");
+    for (const entry of versions) {
+      const option = el("option", null, entry.version);
+      option.value = entry.version;
+      if (entry.version === shownVersion) option.selected = true;
+      picker.appendChild(option);
+    }
+    picker.title = "Which published version's node list to read";
+    picker.onclick = (event) => event.stopPropagation();
+
+    // Fetched when it is first opened, and again whenever the version changes: it is a
+    // request per version, and most readers never look. `loaded` keeps a reopen from asking
+    // for the same version twice.
+    let loaded = false;
+    const fill = async () => {
+      if (loaded) return;
+      loaded = true;
+      nodesPanel.body.replaceChildren(loadingBlock("Reading the node list"));
+      let data;
+      try {
+        const query = new URLSearchParams({ version: atVersion });
+        const answer = await api.fetchApi(
+          `${API}/comfy-nodes/${encodeURIComponent(pack.id)}?${query}`);
+        data = await answer.json();
+        if (!data.ok) throw new Error(data.reason || `HTTP ${answer.status}`);
+      } catch (error) {
+        loaded = false;
+        nodesPanel.body.replaceChildren(nodesBar(), el("div", "om-side-status",
+          `The node list could not be read: ${error.message}`));
+        return;
+      }
+      if (!data.known) {
+        const said = el("div", "om-side-status",
+          `The registry holds no node list for ${atVersion}. That is common, and does not `
+          + "mean the pack adds no nodes: publishing one is optional. Another version may "
+          + "have one.");
+        nodesPanel.body.replaceChildren(nodesBar(), said);
+        nodesPanel.note("no list");
+        return;
+      }
+      const list = el("div", "om-nodelist");
+      for (const one of data.nodes) {
+        const item = el("div", "om-nodelist-item");
+        const head = el("div", "om-chg-head");
+        head.appendChild(el("div", "om-node-name", one.name));
+        if (one.deprecated) head.appendChild(el("span", "om-chg-here", "deprecated"));
+        if (one.experimental) head.appendChild(el("span", "om-chg-here", "experimental"));
+        if (one.category) head.appendChild(el("div", "om-why", one.category));
+        item.appendChild(head);
+        if (one.description) {
+          // Publisher text, set as text for the same reason the changelog is.
+          const note = el("div", "om-chg-text");
+          note.textContent = one.description;
+          item.appendChild(note);
+        }
+        // What the node wires up to, which is the part that decides whether it fits the
+        // graph you had in mind.
+        const ports = [];
+        const inputs = one.inputs || {};
+        if (inputs.required) ports.push(countNote(inputs.required, "required input"));
+        if (inputs.optional) ports.push(`${inputs.optional} optional`);
+        if (one.outputs?.length) ports.push(`outputs ${one.outputs.join(", ")}`);
+        if (ports.length) item.appendChild(el("div", "om-why", ports.join(" · ")));
+        list.appendChild(item);
+      }
+      nodesPanel.note(`${countNote(data.nodes.length, "node")} in ${atVersion}`);
+      nodesPanel.body.replaceChildren(nodesBar(), list);
+    };
+
+    // The picker sits above whatever the panel is showing, so it is in the same place
+    // whether the answer is a list, an emptiness or an error.
+    const nodesBar = () => {
+      const bar = el("div", "om-nodes-bar");
+      bar.appendChild(el("span", "om-ref-label", "version"));
+      bar.appendChild(picker);
+      return bar;
+    };
+    picker.onchange = () => {
+      atVersion = picker.value;
+      loaded = false;
+      fill();
+    };
+    nodesPanel.addEventListener("toggle", () => { if (nodesPanel.open) fill(); });
+    if (nodesPanel.open) fill();
+    body.appendChild(nodesPanel);
+  }
+
+  // The registry carries a changelog per version, which almost nothing fills in. Where it is
+  // filled in it is the only place a reader can find out what an update actually did, so the
+  // section appears when there is something in it and stays out of the way when there is not.
+  const noted = versions.filter((entry) => entry.changelog);
+  {
+    const changes = panel("Changelog",
+      noted.length ? countNote(noted.length, "version") : "none published",
+      { open: false, remember: "om-changelog-open" });
+    const list = el("div", "om-chg");
+    if (!noted.length) {
+      list.appendChild(el("div", "om-side-status",
+        "This pack publishes no changelog. The registry keeps one per version and most "
+        + "publishers leave it empty; there is nothing here to show rather than nothing to "
+        + "read it with."));
+    }
+    for (const entry of noted) {
+      const item = el("div", "om-chg-item");
+      const head = el("div", "om-chg-head");
+      head.appendChild(el("div", "om-ver", entry.version));
+      if (pack.installed_version && entry.version === pack.installed_version) {
+        head.appendChild(el("span", "om-chg-here", "installed"));
+      }
+      head.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
+      item.appendChild(head);
+      // Publisher text, set as text. The registry does not say what format it is in, and
+      // guessing markdown on a field anyone can publish to is how a pack page runs script.
+      const note = el("div", "om-chg-text");
+      note.textContent = entry.changelog;
+      item.appendChild(note);
+      list.appendChild(item);
+    }
+    changes.body.appendChild(list);
+    body.appendChild(changes);
+  }
 
   // README, below the version list, only when enrichment is enabled.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
@@ -1513,9 +2466,8 @@ function openRepoPack(pack) {
   info.appendChild(note);
 
   const actions = el("div", "om-actions om-hero-actions");
-  const repoBtn = el("button", "om-btn", "View on GitHub");
-  repoBtn.onclick = () => openUrl(pack.repo);
-  actions.appendChild(repoBtn);
+  const repoBtn = repoButton(pack.repo, `Open ${pack.repo}`);
+  if (repoBtn) actions.appendChild(repoBtn);
   if (repoOwnerName(pack.repo)) actions.appendChild(makeStarButton(pack.repo, null));
   const control = makeInstallControl({
     packId: pack.repo,
@@ -1586,7 +2538,7 @@ async function renderMetaInto(slot, fetchPromise) {
   // Issue counts, the last push and the rest are facts about the repository, so they join
   // the header's chips rather than sitting under the version list. The metadata arrives
   // after the header is drawn, which is why they are appended to it here.
-  const heroActions = slot.closest(".om-dialog")?.querySelector(".om-hero-actions");
+  const heroActions = packRoot(slot)?.querySelector(".om-hero-actions");
   let facts = heroActions?.querySelector(".om-chips");
   if (heroActions && !facts) {
     facts = el("div", "om-chips");
@@ -1621,13 +2573,24 @@ async function renderMetaInto(slot, fetchPromise) {
   }
   fact("python", meta.requires_python);
   fact("comfyui", meta.requires_comfyui);
+  // GitHub's own count, replacing the registry's on the star control once it arrives. Shown
+  // as GitHub reports it; a figure that looks wrong is the registry's to correct, and a rule
+  // here for spotting one would be guessing at other people's data.
+  if (meta.stars) {
+    const star = packRoot(slot)?.querySelector(".om-star");
+    const label = star?.lastChild;
+    if (label && !star.classList.contains("om-starred")) {
+      label.textContent = `★ ${Number(meta.stars).toLocaleString()}`;
+      star.title = `${Number(meta.stars).toLocaleString()} stars on GitHub. Click to star.`;
+    }
+  }
   fact("open issues", String(meta.open_issues));
   if (meta.open_prs) fact("open PRs", String(meta.open_prs));
   fact("last push", (meta.pushed_at || "").slice(0, 10));
   if (!inHeader && facts.children.length) slot.appendChild(facts);
   if (meta.topics?.length) {
     const tags = el("div", "om-tags");
-    for (const t of meta.topics) tags.appendChild(el("span", "om-tag", t));
+    for (const t of meta.topics) tags.appendChild(tagChip(t));
     (heroActions || slot).appendChild(tags);
   }
 
@@ -1792,6 +2755,11 @@ function buildRefPicker(meta, host) {
   const bar = el("div", "om-refbar");
   const repo = meta.repository || "";
   if (!repo.toLowerCase().includes("github.com")) return bar;
+  //: The versions the registry publishes, read from the list already on the page. Used only
+  //: to mark a tag that matches one, which is the tag a reader is most likely to want.
+  const publishedVersions = () => new Set(
+    [...(packRoot(host)?.querySelectorAll(".om-versions .om-ver") || [])]
+      .map((n) => n.firstChild?.textContent?.trim() || n.textContent.trim()));
 
   const current = meta.default_branch || "main";
   const select = el("select", "om-side-select om-ref-select");
@@ -1833,6 +2801,20 @@ function buildRefPicker(meta, host) {
       };
       group("Branches", (data.branches || []).filter((b) => !seen.has(b.name) && seen.add(b.name))
         .map((b) => { const o = el("option", null, b.name); o.value = b.name; return o; }));
+      // Tags before commits: a tag is where a release was cut, so it is the ref a reader
+      // actually wants when they are asking to see the pack "at" a version. A tag whose name
+      // matches a published version says so, since that is the whole reason to pick it.
+      const known = publishedVersions();
+      group("Tags", (data.tags || []).filter((t) => !seen.has(t.name) && seen.add(t.name))
+        .map((t) => {
+          const published = known.has(t.name.replace(/^v/, ""));
+          const o = el("option", null, published ? `${t.name} · published` : t.name);
+          o.value = t.name;
+          o.title = published
+            ? `${t.name} — the registry publishes this version`
+            : `${t.name} (${t.sha})`;
+          return o;
+        }));
       group("Recent commits", (data.commits || []).map((c) => {
         const subject = (c.message || "(no message)").slice(0, 44);
         const o = el("option", null, `${c.short} · ${subject}`);
@@ -1855,21 +2837,62 @@ function buildRefPicker(meta, host) {
       const query = new URLSearchParams({ repo, ref });
       const data = await (await api.fetchApi(`${API}/readme-at?${query}`)).json();
       if (!data.ok) { status.textContent = data.reason || "could not read that ref"; return; }
-      // The control itself names the ref, so the status is kept for problems only.
       status.textContent = "";
       fitToSelection();
       await paintPackBody(host, meta, data);
+      // Switching ref repaints the README, themes, gallery and workflows in place, which
+      // looks like the page simply changing its mind. This says what is being shown and
+      // offers the way back, so the state is visible rather than inferred from the dropdown.
+      markRef(ref, select.options[select.selectedIndex]?.textContent || ref);
       offerRef(ref, select.options[select.selectedIndex]?.textContent || "");
     } catch (error) {
       status.textContent = "could not read that ref";
     }
   });
 
+  //: A ref short enough for a title bar. A commit sha is unreadable at full length and a
+//: branch or tag name is already what the reader chose.
+function shortRef(ref) {
+  const text = String(ref || "");
+  return /^[0-9a-f]{40}$/i.test(text) ? text.slice(0, 7) : text;
+}
+
+// A banner above the repository content naming the ref it was read at. Removed again when
+  // the default branch is chosen, because that is the state that needs no explaining.
+  const markRef = (ref, caption) => {
+    const page = packRoot(host) || host;
+    page.querySelector(".om-ref-note")?.remove();
+    // In a window, the title bar is the one part always on screen, so the ref goes there too.
+    const holder = page.classList?.contains("om-float") ? page : null;
+    if (holder) {
+      const handle = [...floatPanels.values()].find((one) => one.el === holder);
+      const base = handle?._baseTitle
+        || (handle ? (handle._baseTitle = holder.querySelector(".om-float-title")?.textContent
+          || "") : "");
+      handle?.setTitle?.(ref && ref !== current ? `${base} @ ${shortRef(ref)}` : base);
+    }
+    if (!ref || ref === current) return;
+    const note = el("div", "om-notice om-ref-note");
+    note.appendChild(el("b", null, `Showing ${caption}`));
+    note.appendChild(document.createTextNode(
+      " The README, gallery, themes and example workflows below are read from the repository "
+      + "at this ref, not from the default branch. Versions and registry data are unchanged."));
+    const back = el("button", "om-btn om-ref-back", `Back to ${current}`);
+    back.onclick = () => {
+      select.value = current;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    note.appendChild(back);
+    const readme = page.querySelector(".om-readme");
+    if (readme) readme.parentNode.insertBefore(note, readme);
+    else page.appendChild(note);
+  };
+
   // The registry publishes no build for a branch or a commit, so when one is chosen it is
   // put at the top of the version list and installed from GitHub instead. Choosing the
   // default branch again takes the row away.
   const offerRef = (ref, caption) => {
-    const versions = host.closest(".om-dialog")?.querySelector(".om-versions");
+    const versions = packRoot(host)?.querySelector(".om-versions");
     if (!versions) return;
     versions.querySelector(".om-ref-row")?.remove();
     if (!ref || ref === current) return;
@@ -2039,7 +3062,7 @@ function appendDeveloperBlock(slot, meta) {
   const gallery = panelSetting("openManager.galleryShow", true) ? (dev.gallery || []) : [];
 
   // The author's note on the current release, placed above the version list.
-  const releaseSlot = slot.closest(".om-dialog")?.querySelector(".om-release-slot");
+  const releaseSlot = packRoot(slot)?.querySelector(".om-release-slot");
   if (dev.release_note && releaseSlot) {
     releaseSlot.replaceChildren();
     const note = el("div", "om-release");
@@ -2081,7 +3104,7 @@ function appendDeveloperBlock(slot, meta) {
       b.onclick = () => openUrl(dev.funding);
       links.appendChild(b);
     }
-    const hero = slot.closest(".om-dialog")?.querySelector(".om-hero-actions");
+    const hero = packRoot(slot)?.querySelector(".om-hero-actions");
     if (hero) for (const b of [...links.children]) hero.appendChild(b);
     else block.appendChild(links);
   }
@@ -2136,6 +3159,9 @@ function panel(title, note, { open = true, remember = "" } = {}) {
   const body = el("div", "om-panel-body");
   box.appendChild(body);
   box.body = body;
+  // The header note is written before the contents are known in the sections that load on
+  // demand, so it has to be rewritable once they arrive.
+  box.note = (text) => { head.querySelector(".om-panel-note").textContent = text; };
 
   let start = open;
   if (remember) {
@@ -2214,7 +3240,8 @@ async function migrateKeys() {
   }
   if (moved.length) {
     toast(`${moved.join(" and ")} moved out of ComfyUI's settings into Open Manager's own `
-          + `store. Set them from Open Manager > Keys from now on.`, { kind: "ok", sticky: true });
+          + `store. Set them from Access keys in Open Manager from now on.`,
+          { kind: "ok", sticky: true });
   }
 }
 
@@ -2233,6 +3260,91 @@ function migrateEntryMode() {
   } catch {
     // Left as it was; the flag decides in the meantime.
   }
+}
+
+// Which Open Manager this is, and what updating it takes. The two install shapes update
+// differently and the difference is not something a reader can see, so the server is asked
+// rather than guessed at: a custom node has the ordinary pack update, a package needs a
+// command in a terminal naming the interpreter that is actually running the server.
+async function openAboutDialog() {
+  let info = null;
+  try {
+    const answer = await api.fetchApi(`${API}/self`);
+    if (answer.ok) info = await answer.json();
+  } catch {
+    // Left null; the dialog says so rather than showing nothing.
+  }
+
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-note-wide");
+  box.appendChild(el("div", "om-note-title", "Open Manager"));
+
+  if (!info) {
+    box.appendChild(el("div", "om-dl-note",
+      "The server did not answer, so how this copy is installed is unknown. It is running, "
+      + "so this is most likely a route that predates this panel: restart ComfyUI and try "
+      + "again."));
+  } else {
+    const packaged = info.mode === "package";
+    const facts = el("div", "om-keys-row");
+    const head = el("div", "om-dl-top");
+    head.appendChild(el("span", "om-dl-name", `Version ${info.version}`));
+    head.appendChild(el("span", "om-dl-src",
+      packaged ? "installed as a package" : "installed as a custom node"));
+    facts.appendChild(head);
+    facts.appendChild(el("div", "om-dl-note", info.path));
+    box.appendChild(facts);
+
+    if (packaged) {
+      box.appendChild(el("div", "om-dl-note",
+        "Open Manager is standing in for ComfyUI Manager, from site-packages. A running "
+        + "server cannot rewrite the package it is importing, so it cannot update itself "
+        + "from here. Run this instead:"));
+      for (const step of info.steps || []) {
+        const row = el("div", "om-keys-row");
+        row.appendChild(el("div", "om-dl-note", step.label));
+        const line = el("div", "om-keys-line");
+        // A single-line input showed the interpreter path and hid the rest, which on a
+        // portable build is the half that says what is being installed. This wraps, and a
+        // click selects the whole command for anyone who would rather not use the button.
+        const field = el("div", "om-cmd", step.command);
+        line.appendChild(field);
+        const copy = el("button", "om-btn", "Copy");
+        copy.onclick = () => {
+          navigator.clipboard?.writeText(step.command)
+            .then(() => toast("Command copied.", { kind: "ok" }))
+            .catch(() => notify("Not copied", "The clipboard is not available here."));
+        };
+        line.appendChild(copy);
+        row.appendChild(line);
+        box.appendChild(row);
+      }
+      if (info.note) box.appendChild(el("div", "om-dl-note", info.note));
+    } else {
+      box.appendChild(el("div", "om-dl-note",
+        "Open Manager is a pack in custom_nodes, so it updates the way every other pack "
+        + "does: open its page and install the version you want."));
+      const line = el("div", "om-keys-line");
+      const go = el("button", "om-btn om-go", "Open its page");
+      go.onclick = () => { backdrop.remove(); openPack(info.node_id); };
+      line.appendChild(go);
+      box.appendChild(line);
+      if (info.from_git) {
+        box.appendChild(el("div", "om-dl-note",
+          "This one is a git working copy. Installing over it replaces the directory, so "
+          + "commit or stash anything you have changed there first."));
+      }
+    }
+  }
+
+  const foot = el("div", "om-note-foot");
+  const close = el("button", "om-btn", "Close");
+  close.onclick = () => backdrop.remove();
+  foot.appendChild(close);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
 }
 
 // Where a key is set, and the only place one is typed. The box is a password field, it is
@@ -2405,7 +3517,7 @@ function buildGallery(meta, entries) {
     cell._url = galleryUrl(entry, meta);
     cell._label = entry.split("/").pop() || entry;
     // A gallery entry may be a clip. Authors list them, and a still cannot show motion.
-    const moving = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(entry);
+    const moving = isMovingMedia(entry);
     const img = moving ? el("video", "om-gal-img") : el("img", "om-gal-img");
     if (moving) {
       img.muted = true;
@@ -2447,21 +3559,48 @@ function buildGallery(meta, entries) {
 
 // The full view over a gallery: one image at a time, with the keyboard, the arrows, or the
 // backdrop to leave. It sits above the pack dialog and restores focus on the way out.
+//: Whether a gallery entry is a clip rather than a still. One test, used by the grid and by
+//: the full view, so the two cannot disagree about what they are showing.
+function isMovingMedia(url) {
+  return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(url || ""));
+}
+
 function openLightbox(items, index) {
   if (!items.length) return;
   let at = index;
   const back = el("div", "om-lb");
   const figure = el("figure", "om-lb-fig");
-  const img = el("img", "om-lb-img");
   const caption = el("figcaption", "om-lb-cap");
-  figure.appendChild(img);
+  // The grid already knows a gallery entry may be a clip and draws a <video> for one. The
+  // full view did not, so opening a clip put its URL into an <img> and showed nothing. The
+  // element is chosen per item rather than once, because a gallery mixes the two.
+  let media = el("img", "om-lb-img");
+  figure.appendChild(media);
   figure.appendChild(caption);
   back.appendChild(figure);
 
   const show = (to) => {
     at = (to + items.length) % items.length;
-    img.src = items[at].url;
-    img.alt = items[at].label;
+    const url = items[at].url;
+    const moving = isMovingMedia(url);
+    if (moving !== (media.tagName === "VIDEO")) {
+      const next = moving ? el("video", "om-lb-img") : el("img", "om-lb-img");
+      // Paused and detached first: a <video> left playing after being replaced keeps its
+      // audio going with nothing on screen to stop it.
+      if (media.tagName === "VIDEO") { try { media.pause(); } catch {} }
+      media.replaceWith(next);
+      media = next;
+    }
+    if (moving) {
+      media.controls = true;
+      media.loop = true;
+      media.playsInline = true;
+      media.preload = "metadata";
+    } else {
+      media.alt = items[at].label;
+    }
+    media.src = url;
+    if (moving) media.play?.().catch(() => {});
     caption.textContent = items.length > 1
       ? `${items[at].label} · ${at + 1} of ${items.length}`
       : items[at].label;
@@ -2470,6 +3609,7 @@ function openLightbox(items, index) {
   const previous = document.activeElement;
   const close = () => {
     document.removeEventListener("keydown", onKey, true);
+    if (media.tagName === "VIDEO") { try { media.pause(); } catch {} }
     back.remove();
     try { previous?.focus(); } catch {}
   };
@@ -2523,10 +3663,27 @@ async function addPackTheme(repository, branch, path, button) {
   if (!(await confirmAction("Add theme", `Add "${name}" to your themes?`, "Add"))) return;
   try {
     const setting = app.extensionManager.setting;
+    const service = app.extensionManager.colorPalette;
     const store = setting.get("Comfy.CustomColorPalettes") || {};
+    const replacing = Boolean(store[theme.id]);
     await setting.set("Comfy.CustomColorPalettes", { ...store, [theme.id]: theme });
     button.classList.add("om-wf-added");
-    toast(`Added ${name}. Reload to use it.`, { kind: "ok" });
+
+    // Writing the store is not enough when this is the palette already in use: what is on the
+    // canvas was drawn from the old copy, so a pack shipping an updated theme would appear to
+    // install and change nothing. Loading it again re-reads the store and re-applies extras.
+    const active = service?.getActiveColorPalette?.()?.id === theme.id;
+    if (active) {
+      try {
+        await service.loadColorPalette(theme.id);
+        toast(`Updated ${name}.`, { kind: "ok" });
+      } catch {
+        toast(`Updated ${name}. Reload to see the change.`, { kind: "ok" });
+      }
+    } else {
+      toast(`${replacing ? "Updated" : "Added"} ${name}. Pick it in Settings > Appearance.`,
+        { kind: "ok" });
+    }
   } catch (error) {
     notify("Could not add theme", error.message);
   }
@@ -2800,6 +3957,10 @@ async function workflowInImage(url) {
 // as "workflow included" screenshots, and ComfyUI writes the graph into the file.
 // Nothing is fetched until asked: the images on a page run to tens of megabytes.
 function offerImageWorkflows(view) {
+  //: Whether a read is already running. Pulling a workflow out of an image means fetching the
+  //: whole file and scanning its metadata, which for a large screenshot takes long enough to
+  //: right-click again -- and each of those started another read and stacked another dialog.
+  let reading = false;
   view.addEventListener("contextmenu", async (event) => {
     // Off leaves the browser's own menu alone, which is what someone who wants to copy or
     // save the image is reaching for.
@@ -2807,22 +3968,33 @@ function offerImageWorkflows(view) {
     const image = event.target instanceof HTMLImageElement ? event.target : null;
     if (!image || !safeUrl(image.src)) return;
     event.preventDefault();
+    if (reading) {
+      toast("Still reading the last image.", { kind: "warn" });
+      return;
+    }
+    reading = true;
     const progress = toast("Reading the image...", { sticky: true });
-    let workflow = null;
+    // `finally` rather than a clear on each path out: there are four ways out of this and one
+    // of them forgetting would leave the feature switched off until the page is rebuilt.
     try {
-      workflow = await workflowInImage(image.src);
-    } catch (error) {
+      let workflow = null;
+      try {
+        workflow = await workflowInImage(image.src);
+      } catch (error) {
+        progress.remove();
+        notify("Could not read the image", error.message);
+        return;
+      }
       progress.remove();
-      notify("Could not read the image", error.message);
-      return;
+      if (!workflow) {
+        notify("No workflow in this image", "The file carries no workflow to load.");
+        return;
+      }
+      await loadWorkflowGraph(workflow, image.getAttribute("alt") || "this image",
+                              "an image in this README", view._repository || "");
+    } finally {
+      reading = false;
     }
-    progress.remove();
-    if (!workflow) {
-      notify("No workflow in this image", "The file carries no workflow to load.");
-      return;
-    }
-    await loadWorkflowGraph(workflow, image.getAttribute("alt") || "this image",
-                            "an image in this README", view._repository || "");
   });
 }
 
@@ -3068,10 +4240,139 @@ function countText(value) {
 // A link to the pack's repository, as an anchor rather than a click handler: readers open
 // many at once with the middle button or a modifier, which a handler cannot offer.
 // Null where the registry names no usable repository.
+//: GitHub's own mark, taken from Octicons (`mark-github-16`), which GitHub publishes under
+//: the MIT licence: Copyright (c) GitHub Inc. Kept as path data rather than a file so it
+//: inherits the colour of whatever it sits in and costs no extra request.
+//:
+//: Used only for links that really do go to github.com. It is a trademark, and putting it on
+//: a GitLab or Codeberg link would be saying something untrue about where the link goes.
+const GITHUB_MARK = "M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656";
+
+//: Whether a URL is a GitHub one, and so may carry the mark.
+function isGithubUrl(url) {
+  try {
+    return new URL(url, window.location.href).hostname.toLowerCase()
+      .replace(/^www\./, "") === "github.com";
+  } catch {
+    return false;
+  }
+}
+
+// The mark as an inline SVG.
+//
+// Args:
+//   size: Edge length in pixels.
+// Returns:
+//   An `<svg>`, hidden from assistive technology: every caller gives the control itself a
+//   name, and a second reading of "github" after "Open the repository" is noise.
+function githubMark(size = 15) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.classList.add("om-gh-mark");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", GITHUB_MARK);
+  path.setAttribute("fill", "currentColor");
+  svg.appendChild(path);
+  return svg;
+}
+
+// A button that opens a repository, wearing the mark when the repository is on GitHub.
+//
+// Args:
+//   url: The repository URL.
+//   label: What the control is called, for the tooltip and for screen readers.
+// Returns:
+//   A button, or null where the URL is not one worth offering.
+function repoButton(url, label) {
+  const safe = safeUrl(url);
+  if (!safe) return null;
+  const github = isGithubUrl(safe);
+  // An anchor rather than a button: middle-click, ctrl-click and the browser's own "open in
+  // new tab" all work on a link and none of them work on a button. Someone researching packs
+  // opens a dozen in tabs, and a button makes them click through one at a time.
+  const button = el("a", `om-btn om-icon-btn${github ? " om-gh-btn" : ""}`);
+  if (github) {
+    button.appendChild(githubMark(16));
+  } else {
+    button.appendChild(el("span", "om-gh-fallback", "\u2197"));
+  }
+  button.href = safe;
+  button.target = "_blank";
+  button.rel = "noopener noreferrer";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+//: Comfy's logomark, shipped beside this file. Kept as a file rather than inlined like the
+//: GitHub one because it is a fixed brand colour: it should look the same on every theme,
+//: which is exactly what inheriting the text colour would stop it doing.
+const COMFY_MARK = "comfy-logomark-yellow.svg";
+
+//: A pack's page on the Comfy Registry.
+function registryUrl(packId) {
+  return `https://registry.comfy.org/nodes/${encodeURIComponent(packId)}`;
+}
+
+// A link to a pack's registry page, wearing Comfy's mark.
+//
+// Only for packs the registry actually lists. Open Manager also finds packs by matching a
+// GitHub repository, and for those there is no registry page to open: a link to one would be
+// a guess, and the guess would be wrong often enough to matter.
+//
+// Args:
+//   entry: The catalogue entry, or anything carrying the registry `id`.
+//   extra: An extra class for the view it sits in.
+// Returns:
+//   An anchor, or null where the pack is not a registry one.
+function registryLink(entry, extra) {
+  const packId = entry?.registry_id || entry?.id || "";
+  if (!packId || entry?.borrowed) return null;
+  const link = el("a", `om-repo-link om-registry-link ${extra || ""}`.trim());
+  const mark = el("img", "om-comfy-mark");
+  mark.src = new URL(COMFY_MARK, import.meta.url).href;
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  link.appendChild(mark);
+  link.href = registryUrl(packId);
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.title = `Open ${packId} on the Comfy Registry`;
+  link.setAttribute("aria-label", link.title);
+  // The row opens the pack page; this opens the registry and nothing else.
+  link.onclick = (event) => event.stopPropagation();
+  return link;
+}
+
+// A button opening a pack's registry page, for the pack page's header.
+function registryButton(packId) {
+  if (!packId) return null;
+  // An anchor, for the same reason the repository control is one.
+  const button = el("a", "om-btn om-icon-btn om-registry-btn");
+  const mark = el("img", "om-comfy-mark");
+  mark.src = new URL(COMFY_MARK, import.meta.url).href;
+  mark.alt = "";
+  mark.setAttribute("aria-hidden", "true");
+  button.appendChild(mark);
+  button.href = registryUrl(packId);
+  button.target = "_blank";
+  button.rel = "noopener noreferrer";
+  button.title = `Open ${packId} on the Comfy Registry`;
+  button.setAttribute("aria-label", button.title);
+  return button;
+}
+
 function repoLink(entry, extra) {
   const url = safeUrl(entry.repository);
   if (!url) return null;
-  const link = el("a", `om-repo-link ${extra || ""}`.trim(), "↗");
+  const link = el("a", `om-repo-link ${extra || ""}`.trim());
+  if (isGithubUrl(url)) link.appendChild(githubMark(14));
+  else link.appendChild(el("span", "om-gh-fallback", "\u2197"));
   link.href = url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
@@ -3112,21 +4413,14 @@ function buildResultRow(entry) {
   meta.appendChild(lic);
   const trusted = trustBadge(entry);
   if (trusted) meta.appendChild(trusted);
+  const linkRegistry = registryLink(entry);
+  if (linkRegistry) meta.appendChild(linkRegistry);
   const link = repoLink(entry);
   if (link) meta.appendChild(link);
   text.appendChild(meta);
   text.onclick = () => openPack(entry.id);
   row.appendChild(text);
-  const onDisk = installedPack(entry.id);
-  const control = makeInstallControl({
-    packId: entry.id,
-    entry,
-    withMenu: !!onDisk,
-    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
-    onInstall: () => quickInstall(entry.id, control),
-  });
-  restoreInstall(entry.id, control);
-  control.el.classList.add("om-side-ictl");
+  const control = registryControl(entry, "om-side-ictl");
   row.appendChild(control.el);
   return row;
 }
@@ -3152,22 +4446,15 @@ function buildResultTableRow(entry, index) {
   title.onclick = () => openPack(entry.id);
   const tableTrusted = trustBadge(entry);
   if (tableTrusted) title.appendChild(tableTrusted);
+  const tableLinkRegistry = registryLink(entry);
+  if (tableLinkRegistry) title.appendChild(tableLinkRegistry);
   const tableLink = repoLink(entry);
   if (tableLink) title.appendChild(tableLink);
   row.appendChild(title);
 
   row.appendChild(el("div", "om-tcell om-tcell-ver", entry.advertised || "-"));
 
-  const onDisk = installedPack(entry.id);
-  const control = makeInstallControl({
-    packId: entry.id,
-    entry,
-    withMenu: !!onDisk,
-    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
-    onInstall: () => quickInstall(entry.id, control),
-  });
-  restoreInstall(entry.id, control);
-  control.el.classList.add("om-table-ictl");
+  const control = registryControl(entry, "om-table-ictl");
   const action = el("div", "om-tcell om-tcell-action");
   action.appendChild(control.el);
   row.appendChild(action);
@@ -3228,20 +4515,13 @@ function buildResultCard(entry) {
   meta.appendChild(lic);
   const cardTrusted = trustBadge(entry);
   if (cardTrusted) meta.appendChild(cardTrusted);
+  const cardLinkRegistry = registryLink(entry);
+  if (cardLinkRegistry) meta.appendChild(cardLinkRegistry);
   const cardLink = repoLink(entry);
   if (cardLink) meta.appendChild(cardLink);
   card.appendChild(meta);
 
-  const onDisk = installedPack(entry.id);
-  const control = makeInstallControl({
-    packId: entry.id,
-    entry,
-    withMenu: !!onDisk,
-    items: onDisk ? installedMenu(onDisk, entry, () => control, null) : [],
-    onInstall: () => quickInstall(entry.id, control),
-  });
-  restoreInstall(entry.id, control);
-  control.el.classList.add("om-card-ictl");
+  const control = registryControl(entry, "om-card-ictl");
   card.appendChild(control.el);
   return card;
 }
@@ -3294,6 +4574,19 @@ function refreshMissingIfActive() {
 // The same panel as the sidebar tab, as a window. The legacy menu has no sidebar to put a
 // tab in, so this is how it is reached there.
 function openPanelWindow(view) {
+  // The manager is a page like any other, so it follows the same setting. Its own window is
+  // keyed once rather than per view: the four tabs are one browser, not four windows.
+  if (asWindow("manager")) {
+    const panel = createFloatingPanel({
+      key: "manager", title: "Open Manager", ...windowSize("manager"), centred: true,
+    });
+    const host = panel.body.querySelector(".om-side")
+      || panel.body.appendChild(el("div"));
+    renderSidebar(host, view);
+    panel.raise();
+    return panel.el;
+  }
+
   const existing = document.querySelector(".om-backdrop .om-panel-window");
   if (existing) return existing;
   const backdrop = el("div", "om-backdrop");
@@ -3314,6 +4607,7 @@ function openPanelWindow(view) {
 
 // Toggles, because the commands the interface dispatches are named ToggleVisibility.
 function togglePanelWindow(view) {
+  if (floatingPanel("manager")) { closeFloatingPanel("manager"); return null; }
   const existing = document.querySelector(".om-backdrop .om-panel-window");
   if (existing) {
     existing.closest(".om-backdrop").remove();
@@ -3475,6 +4769,14 @@ function renderSidebar(root, initial) {
     buttons[key] = button;
     nav.appendChild(button);
   }
+
+  // Access keys and About are dialogs, not views, so they have no tab. Without this they are
+  // reachable only from the classic menu, which the panel is the alternative to: the setting
+  // tooltips that say "under Open Manager" would be pointing at nothing.
+  const more = el("button", "om-nav-btn om-nav-more", "\u22ef");
+  more.title = "Access keys, and what updating Open Manager takes";
+  more.onclick = () => openManagerMenu();
+  nav.appendChild(more);
   // Own keys only: "constructor" and friends are truthy on any object literal.
   select(Object.hasOwn(views, initial ?? "") ? initial : "registry");
 }
@@ -3689,6 +4991,8 @@ async function renderInstalled(container) {
     ["updatable", "Updatable first"],
     ["stars", "Most stars"],
     ["slowest", "Slowest to load"],
+    ["newest", "Newest installed"],
+    ["oldest", "Oldest installed"],
     ["trusted", "Trusted authors first"],
   ]);
   const filterSel = dropdown("om-installed-filter", "all", [
@@ -3726,6 +5030,7 @@ async function renderInstalled(container) {
 
   const cost = (pack) =>
     (pack.disabled ? null : startupCost.get(foldId(pack.dir)))?.seconds ?? -1;
+  const age = (pack) => Number(pack.installed_at) || 0;
 
   const apply = () => {
     const mode = filterSel.value;
@@ -3748,6 +5053,10 @@ async function renderInstalled(container) {
       updatable: (a, b) => (isInstalledUpdatable(b) - isInstalledUpdatable(a)) || a.id.localeCompare(b.id),
       stars: (a, b) => (b.stars || 0) - (a.stars || 0) || a.id.localeCompare(b.id),
       slowest: (a, b) => cost(b) - cost(a) || a.id.localeCompare(b.id),
+      // A pack the server could date nothing for sorts last either way rather than claiming
+      // to be the oldest thing on disk, which is what a zero would do.
+      newest: (a, b) => (age(b) || -Infinity) - (age(a) || -Infinity) || a.id.localeCompare(b.id),
+      oldest: (a, b) => (age(a) || Infinity) - (age(b) || Infinity) || a.id.localeCompare(b.id),
       trusted: (a, b) => (byTrustedAuthor(b) - byTrustedAuthor(a)) || a.id.localeCompare(b.id),
     };
     rows.sort(sorters[sortSel.value] || sorters.name);
@@ -3886,6 +5195,18 @@ async function togglePack(pack, refresh) {
   refresh?.();
 }
 
+// How long a pack has been here, in the coarsest unit that still says something. An exact
+// date is in the tooltip; the list is for spotting the one that has been sat there for years.
+function installedText(when) {
+  const days = Math.floor((Date.now() - when.getTime()) / 86400000);
+  if (!Number.isFinite(days) || days < 0) return "installed";
+  if (days < 1) return "installed today";
+  if (days < 30) return `installed ${days}d ago`;
+  if (days < 365) return `installed ${Math.floor(days / 30)}mo ago`;
+  const years = Math.floor(days / 365);
+  return `installed ${years}y ago`;
+}
+
 function buildInstalledRow(pack) {
   const updatable = isInstalledUpdatable(pack);
   const row = el("div", "om-side-row");
@@ -3899,6 +5220,25 @@ function buildInstalledRow(pack) {
   meta.appendChild(document.createTextNode(`${pack.version}${shownDir !== pack.id ? " · " + shownDir : ""}`));
   const istars = starCount(pack.stars);
   if (istars) meta.appendChild(istars);
+  const SOURCES = {
+    github: ["from a repository", "cloned or installed from a Git URL; it updates from there"],
+    registry: ["from the registry", "installed from the Comfy Registry"],
+    disk: ["on disk only", "placed by hand: no registry entry and no repository to update "
+           + "from"],
+  };
+  const origin = SOURCES[pack.source];
+  if (origin) {
+    const mark = el("span", `om-src om-src-${pack.source}`, origin[0]);
+    mark.title = origin[1];
+    meta.appendChild(mark);
+  }
+  if (pack.installed_at) {
+    const when = new Date(pack.installed_at * 1000);
+    const since = el("span", "om-side-when", installedText(when));
+    since.title = `Installed ${when.toLocaleString()}. Taken from this pack's install record `
+      + "where it has one, otherwise from the directory on disk.";
+    meta.appendChild(since);
+  }
   if (pack.disabled) meta.appendChild(el("span", "om-disabled", "disabled"));
   if (isHeld(pack)) {
     const badge = el("span", "om-held", `held at ${pack.version}`);
@@ -3922,22 +5262,10 @@ function buildInstalledRow(pack) {
   else if (pack.repository) text.onclick = () => openRepoPack({ repo: pack.repository, title: pack.id, classes: [] });
   row.appendChild(text);
 
-  const current = { version: pack.version, status: "active", name: pack.registry_id || pack.id };
-  const items = [];
-  if (updatable) items.push({ label: `Update to ${pack.latest}`, fn: () => updateInstalled(pack, row, control) });
-  if (pack.registry_id) {
-    items.push({ label: "Reinstall", fn: () => install({ packId: pack.registry_id, entry: current, control, rowsRoot: row, overwrite: true }) });
-  }
-  if (vtReady()) items.push({ label: "Scan install", fn: () => openScanDialog(pack.id) });
-  if (pack.registry_id) {
-    items.push({ label: isHeld(pack) ? "Stop holding this version"
-                                     : `Hold at ${pack.version}`,
-                 fn: () => toggleHold(pack, () => refreshInstalledIfActive()) });
-  }
-  items.push({ label: pack.disabled ? "Switch on" : "Switch off",
-               fn: () => togglePack(pack, () => refreshInstalledIfActive()) });
-  items.push({ label: "Uninstall", danger: true, fn: () => uninstall({
-    packId: pack.id, registryId: pack.registry_id, entry: { name: pack.id }, control, rowsRoot: row }) });
+  const current = { version: pack.version, status: "active",
+                    name: pack.registry_id || pack.id };
+  const items = installedMenu(pack, null, () => control, row,
+    () => refreshInstalledIfActive());
 
   const control = makeInstallControl({
     packId: pack.registry_id || pack.id,
@@ -4196,6 +5524,63 @@ function syncOptions() {
 
 // The registry browser over the cached catalogue: search, a chosen sort, and a licence
 // filter. Only a sync, an update or an install reaches the network.
+//: Topics already looked up, so retyping or reopening does not ask GitHub again. The server
+//: caches too; this saves the round trip.
+const topicPacks = new Map();
+
+//: What a search has to start with to be read as a topic rather than as words.
+const TOPIC_PREFIX = "topic:";
+
+// The pack ids carrying a GitHub topic, or null where it could not be answered.
+//
+// Args:
+//   topic: The topic, as GitHub spells it.
+// Returns:
+//   `{ids, found, partial}` with `ids` a Set, or `{error}` with a sentence to show.
+async function packsForTopic(topic) {
+  if (topicPacks.has(topic)) return topicPacks.get(topic);
+  let answer;
+  try {
+    const query = new URLSearchParams({ name: topic });
+    answer = await (await api.fetchApi(`${API}/topic?${query}`)).json();
+  } catch (error) {
+    return { error: `The topic could not be looked up: ${error.message}` };
+  }
+  if (!answer.ok) return { error: answer.reason || "GitHub did not answer." };
+  const result = { ids: new Set(answer.ids || []), found: answer.found || 0,
+                   partial: Boolean(answer.partial) };
+  topicPacks.set(topic, result);
+  return result;
+}
+
+//: The topic a search box is asking for, or empty where it is asking for words.
+function topicInQuery(value) {
+  const text = String(value || "").trim().toLowerCase();
+  return text.startsWith(TOPIC_PREFIX) ? text.slice(TOPIC_PREFIX.length).trim() : "";
+}
+
+// Open the pack manager and search it for a GitHub topic.
+//
+// Follows the same setting every other way in does, so a reader who has chosen modals gets a
+// modal. Nothing new is introduced: the search box ends up holding `topic:<name>`, which is a
+// query they could have typed, so what happened is visible and undoable.
+function browseTopic(topic) {
+  const root = openPanelWindow("registry");
+  // The list is built asynchronously, so the search box is waited for rather than assumed.
+  let tries = 0;
+  const fill = () => {
+    const box = (root?.querySelector?.(".om-search"))
+      || document.querySelector(".om-float .om-search, .om-panel-window .om-search");
+    if (!box) {
+      if (tries++ < 40) setTimeout(fill, 150);
+      return;
+    }
+    box.value = `${TOPIC_PREFIX}${topic}`;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  fill();
+}
+
 function renderRegistry(container) {
   const generation = viewGeneration;
   container.replaceChildren();
@@ -4271,7 +5656,10 @@ function renderRegistry(container) {
 
     const search = el("input", "om-search");
     search.type = "search";
-    search.placeholder = "Search the registry";
+    search.placeholder = "Search the registry, or topic:name";
+    search.title = "Words match a pack's name, id, description and publisher. `topic:animation`"
+      + " asks GitHub which repositories carry that tag and shows the packs among them, which"
+      + " is what clicking a tag on a pack's page does.";
     search.spellcheck = false;
     container.appendChild(search);
 
@@ -4279,7 +5667,7 @@ function renderRegistry(container) {
     // The sidebar and the window are different widths, so they remember the view apart.
     // Sort and licence stay shared. The old shared key belongs to neither.
     try { localStorage.removeItem("om-registry-view"); } catch {}
-    const viewKey = container.closest(".om-panel-window")
+    const viewKey = container.closest(".om-panel-window, .om-float")
       ? "om-registry-view-window" : "om-registry-view-side";
     const viewSel = dropdown(viewKey, "list", [
       ["list", "List view"],
@@ -4448,12 +5836,20 @@ function renderRegistry(container) {
 
     // One predicate, used by the full apply below and by the re-filter a resolved licence
     // triggers, so the two can never disagree about what belongs on screen.
+    //: The topic being shown, and the ids it resolved to. Held here rather than looked up
+    //: inside the predicate, which runs once per pack per keystroke.
+    let topicNow = "";
+    let topicIds = null;
+
     const matches = (node) => {
       const query = search.value.trim().toLowerCase();
       const tier = licSel.value;
       if (filterBox.checked && !node.advertised) return false;
       if (trustBox.checked && !byTrustedAuthor(node)) return false;
       if (tier !== "all" && node.license_tier !== tier) return false;
+      // A topic search is a different question: it asks GitHub which repositories carry a
+      // tag, so the words in a pack's name and description have no bearing on it.
+      if (topicInQuery(query)) return topicIds ? topicIds.has(node.id) : false;
       if (!query) return true;
       return (node.name || "").toLowerCase().includes(query)
         || node.id.toLowerCase().includes(query)
@@ -4461,9 +5857,40 @@ function renderRegistry(container) {
         || (node.publisher || "").toLowerCase().includes(query);
     };
 
-    const apply = () => {
+    // Asynchronous because a topic search has to be resolved first. The listeners call the
+    // wrapper below rather than this, so a failure cannot surface as an unhandled rejection
+    // in the console of a reader who only changed a dropdown.
+    const applyNow = async () => {
+      // A topic has to be resolved before anything can be filtered by it. The count says so
+      // meanwhile, because a GitHub search takes a moment and an empty list would otherwise
+      // read as "no packs carry this".
+      const wantedTopic = topicInQuery(search.value);
+      if (wantedTopic && wantedTopic !== topicNow) {
+        topicNow = wantedTopic;
+        topicIds = null;
+        count.textContent = `Asking GitHub which packs are tagged ${wantedTopic}...`;
+        const answer = await packsForTopic(wantedTopic);
+        // Abandoned: the reader typed on, and a later apply owns the list now.
+        if (topicInQuery(search.value) !== wantedTopic) return;
+        if (answer.error) {
+          topicIds = new Set();
+          count.textContent = answer.error;
+          filtered = [];
+          from = to = -1;
+          repaint();
+          return;
+        }
+        topicIds = answer.ids;
+        topicNow = wantedTopic;
+      } else if (!wantedTopic) {
+        topicNow = "";
+        topicIds = null;
+      }
+
       filtered = nodes.filter(matches).sort(comparators[sortSel.value] || comparators.downloads);
-      count.textContent = `${filtered.length.toLocaleString()} shown`;
+      count.textContent = wantedTopic
+        ? `${filtered.length.toLocaleString()} tagged ${wantedTopic}`
+        : `${filtered.length.toLocaleString()} shown`;
       win.className = `om-virt-win ${
         cardsOn() ? "om-card-grid" : tableOn() ? "om-table-win" : "om-list-win"}`;
       head.style.display = tableOn() ? "" : "none";
@@ -4472,6 +5899,11 @@ function renderRegistry(container) {
       from = to = -1;
       repaint();
       queueVisibleLicences();
+    };
+    const apply = () => {
+      applyNow().catch((error) => {
+        count.textContent = `The list could not be filtered: ${error.message}`;
+      });
     };
 
     // A licence read from a repository can move a pack out of the tier it was filtered by:
@@ -4543,6 +5975,7 @@ sidebarStyle.textContent = `
 .om-nav-btn { flex: 1; padding: 6px 4px; background: var(--om-surface); border: 1px solid var(--om-border);
   border-radius: 6px; color: var(--om-muted); cursor: pointer; font-size: 12px; }
 .om-nav-btn:hover { background: var(--om-hover); }
+.om-nav-more { flex: none; width: 28px; padding: 6px 0; font-size: 14px; line-height: 1; }
 .om-nav-btn.active { background: var(--om-border); color: var(--om-text); border-color: var(--om-border); }
 .om-content { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .om-cat-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
@@ -4553,6 +5986,12 @@ sidebarStyle.textContent = `
 .om-search { width: 100%; padding: 7px 10px; border-radius: 6px; box-sizing: border-box;
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); }
 .om-side-status { color: var(--om-muted); font-size: 11px; }
+.om-side-when { color: var(--om-muted); }
+/* Where a pack came from, which decides how it updates. Quiet: it is a fact about the row,
+   not a warning about it. */
+.om-src { font-size: 11px; padding: 0 7px; border-radius: 999px; line-height: 17px;
+  color: var(--om-text-2); background: var(--om-input); }
+.om-src-disk { color: #d29922; }
 .om-side-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex;
   flex-direction: column; gap: 4px; padding-right: 8px; }
 /* Windowed list. The host is a plain block because the sizer inside it, not the host,
@@ -4788,6 +6227,32 @@ sidebarStyle.textContent = `
   max-height: 40vh; overflow-y: auto; padding: 2px 2px 2px 0; }
 /* Inside a panel the border is drawn for it, so the list sits in from that edge. */
 .om-panel-body > .om-wf-list, .om-panel-body > .om-gal { padding: 10px 12px; }
+/* A section that has nothing to show still has something to say, and was saying it hard
+   against both edges. The same room the contents would have had. */
+.om-panel-body > .om-side-status, .om-panel-body > .om-body,
+.om-panel-body > .om-dl-note { padding: 12px; line-height: 1.5; }
+.om-nodes-bar + .om-side-status { padding: 12px; }
+.om-chg { display: flex; flex-direction: column; }
+.om-chg-item { padding: 10px 12px; border-bottom: 1px solid var(--om-surface); }
+.om-chg-item:last-child { border-bottom: none; }
+.om-chg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.om-chg-here { font-size: 11px; font-weight: 600; color: var(--om-text-2);
+  border: 1px solid var(--om-border); border-radius: 999px; padding: 1px 8px; }
+/* Publisher text, so it keeps the line breaks they wrote and wraps rather than overflowing. */
+.om-chg-text { color: var(--om-text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* pip's own words, set apart and set in the font pip wrote them for. */
+.om-pip-errors { font-family: ui-monospace, monospace; font-size: 12px; color: #f0883e;
+  background: var(--om-input); border-radius: 6px; padding: 8px 10px; margin-top: 4px;
+  max-height: 30vh; overflow: auto; }
+.om-panel-body > .om-chg-text { padding: 10px 12px; font-family: ui-monospace, monospace;
+  font-size: 12px; max-height: 34vh; overflow: auto; }
+.om-nodes-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--om-surface); }
+.om-nodes-at { flex: none; min-width: 110px; }
+.om-nodelist { display: flex; flex-direction: column; max-height: 46vh; overflow-y: auto; }
+.om-nodelist-item { padding: 8px 12px; border-bottom: 1px solid var(--om-surface); }
+.om-nodelist-item:last-child { border-bottom: none; }
+.om-node-name { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
 .om-wf-item { display: flex; align-items: baseline; gap: 10px; text-align: left;
   background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px; padding: 8px 12px;
   color: var(--om-text); cursor: pointer; font: inherit; }
@@ -4809,6 +6274,8 @@ sidebarStyle.textContent = `
   display: flex; align-items: center; justify-content: center; }
 .om-lb-fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .om-lb-img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 6px; }
+/* A clip letterboxes against black rather than showing the backdrop through it. */
+video.om-lb-img { background: #000; }
 .om-lb-cap { color: var(--om-text-2); font-size: 12px; text-align: center;
   max-width: 92vw; overflow-wrap: anywhere; }
 .om-lb-nav { position: absolute; border: none; border-radius: 8px; cursor: pointer;
@@ -4829,6 +6296,9 @@ sidebarStyle.textContent = `
 }
 /* The ref picker sits inline among the header's buttons and chips. */
 .om-refbar { display: inline-flex; gap: 6px; align-items: center; position: relative; }
+.om-ref-note { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.om-ref-note b { flex: none; }
+.om-ref-back { flex: none; margin-left: auto; padding: 4px 12px; font-size: 12px; }
 .om-ref-label { color: var(--om-muted); font-size: 12px; }
 /* Scoped so it beats the generic .om-side-select sizing defined further down, which would
    otherwise stretch the picker across the dialog. The width is set from the selected text. */
@@ -4925,6 +6395,10 @@ sidebarStyle.textContent = `
 /* A button label that carries an account name is never broken across lines; where they do
    not fit side by side the row wraps and each button stays whole. */
 .om-note-wide { width: min(94vw, 640px); }
+.om-cmd { flex: 1; min-width: 0; background: var(--om-input); color: var(--om-text);
+  border: 1px solid var(--om-border); border-radius: 6px; padding: 7px 10px;
+  font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: all; }
 .om-note-foot { flex-wrap: wrap; }
 .om-note-foot .om-btn { white-space: nowrap; }
 /* Labelled values, label column sized to its longest label. */
@@ -4965,11 +6439,22 @@ sidebarStyle.textContent = `
 /* A remembered size belongs to the window it was chosen in. Opened on a narrower screen --
    a laptop after a desktop, a tablet, a browser window dragged small -- it is capped to what
    is actually there, so the right-hand controls never sit off the edge. */
+/* A window that is not in front recedes: its chrome lightens towards the background and its
+   contents lose a little contrast. Only ever a difference in degree, because an inactive
+   window is still there to be read. */
+.om-float:not(.om-float-active) .om-float-bar { background: var(--om-hover);
+  color: var(--om-muted); }
+.om-float:not(.om-float-active) .om-float-body { opacity: .82; }
+.om-float:not(.om-float-active) { border-color: color-mix(in srgb, var(--om-border) 60%, transparent); }
+/* Off by default: blurring text costs a repaint on every stacking change, and on a weak GPU
+   with several windows open that is felt. */
+.om-blur-inactive .om-float:not(.om-float-active) .om-float-body { filter: blur(1.5px); }
 .om-float { position: fixed; display: flex; flex-direction: column;
   max-width: calc(100vw - 16px);
   background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border);
-  border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.5); overflow: hidden;
-  font: 14px/1.5 system-ui, sans-serif; }
+  border-radius: 10px; box-shadow: var(--om-shadow, 0 10px 40px rgba(0,0,0,.5));
+  overflow: hidden;
+  font: var(--om-text-size, 14px)/1.5 system-ui, sans-serif; }
 .om-float-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px;
   min-height: var(--om-hdr, 44px);
   border-bottom: 1px solid var(--om-border); background: var(--om-surface);
@@ -4985,7 +6470,7 @@ sidebarStyle.textContent = `
    the window itself rather than on its contents. */
 .om-float-folded .om-float-tools { display: none; }
 /* Still shortens before the close button does, because a summary can be long. */
-.om-float-title { font-size: calc(var(--om-hdr, 44px) * 0.36); font-weight: 600;
+.om-float-title { font-size: var(--om-title-size, 15px); font-weight: 600;
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .om-float-badge { color: var(--om-muted); font-size: 13px; flex: 1; min-width: 0;
@@ -5283,7 +6768,19 @@ function floatRemember(key, state) {
 //
 // Returns a handle rather than an element: the caller fills `body` and leaves placement,
 // persistence and stacking to this.
-function createFloatingPanel({ key, title, width = 820, height = 520, onClose } = {}) {
+// Say which window is in front.
+//
+// With several open, the one being typed into is not otherwise distinguishable from the three
+// behind it: they are the same colour, at the same size, and only the stacking order says
+// anything. This is the only signal that the keyboard is going somewhere in particular.
+function markActive(panel) {
+  for (const other of document.querySelectorAll(".om-float")) {
+    other.classList.toggle("om-float-active", other === panel);
+  }
+}
+
+function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
+                               centred = false, modal = false } = {}) {
   const open = floatingPanel(key);
   if (open) { open.raise(); return open; }
 
@@ -5294,7 +6791,9 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
   // Presentation only. A panel that does not float still opens, folds, resizes to the size
   // it is given and closes the same way; it simply always appears in the middle and cannot
   // be dragged off somewhere and lost.
-  const wantsFloat = panelSetting("openManager.floatingPanels", true) !== false;
+  // A modal never floats whatever the dragging setting says: it is centred over a backdrop,
+  // which is the whole of what makes it a modal rather than a window.
+  const wantsFloat = !modal && panelSetting("openManager.floatingPanels", true) !== false;
   const panel = el("div", "om-float");
   // Asked for every time rather than settled at open, so a window resized down to a laptop
   // or a tablet stops being draggable there and then, and a window opened up again goes
@@ -5314,6 +6813,9 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
     }
     panel.classList.toggle("om-float-fixed", !now);
   };
+  // A remembered size is the reader's decision and is used as it stands. The figure passed in
+  // has already been sized to the viewport and scaled by the setting, so nothing is applied to
+  // it a second time here.
   panel.style.width = `${fits(saved.width || width, 280, window.innerWidth - 16)}px`;
   panel.style.setProperty("--om-hdr", `${headerHeight()}px`);
 
@@ -5346,7 +6848,15 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
   grip.title = "Resize";
   panel.appendChild(grip);
 
-  document.body.appendChild(panel);
+  // A modal is the same panel inside a backdrop, so everything below -- folding, resizing,
+  // the remembered size, the header -- works identically and only the framing differs.
+  const backdrop = modal ? el("div", "om-backdrop om-backdrop-panel") : null;
+  if (backdrop) {
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+  } else {
+    document.body.appendChild(panel);
+  }
 
   // Placement, clamped into the viewport. A position saved on a monitor that is no longer
   // attached would otherwise restore a panel nobody can reach.
@@ -5385,9 +6895,14 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
   );
   applyMode();
   if (floating()) {
+    // A panel the reader has placed goes back where they put it. One they have not is placed
+    // by its own default: the utility windows sit high, where they overlap least of the
+    // graph, while a full page opens in the middle because it is the thing being read.
     settle(
       saved.left ?? Math.max(16, (window.innerWidth - panel.offsetWidth) / 2),
-      saved.top ?? Math.max(56, window.innerHeight * 0.18),
+      saved.top ?? (centred
+        ? Math.max(16, (window.innerHeight - panel.offsetHeight) / 2)
+        : Math.max(56, window.innerHeight * 0.18)),
     );
   } else {
     centre();
@@ -5410,10 +6925,16 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
   };
 
   const raise = () => {
+    // Marked before the early return: a panel can already be on top and still not be the one
+    // wearing the class, which is what happens when another window is destroyed.
+    markActive(panel);
     if (Number(panel.style.zIndex) === floatTop && floatTop > FLOAT_Z) return;
     floatTop = floatTop >= FLOAT_Z_TOP ? FLOAT_Z : floatTop + 1;
     panel.style.zIndex = String(floatTop);
   };
+  // Clicking anywhere in a window brings it forward, which is what makes it the active one.
+  panel.addEventListener("pointerdown", raise, true);
+  markActive(panel);
   panel.style.zIndex = String(FLOAT_Z);
   raise();
   panel.addEventListener("pointerdown", raise, true);
@@ -5480,10 +7001,18 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
 
   const destroy = () => {
     remember();
-    panel.remove();
+    (backdrop || panel).remove();
     floatPanels.delete(key);
     onClose?.();
+    // Whatever is highest now is the one in front; without this every window is left inactive.
+    const rest = [...document.querySelectorAll(".om-float")]
+      .sort((a, b) => (Number(a.style.zIndex) || 0) - (Number(b.style.zIndex) || 0));
+    if (rest.length) markActive(rest[rest.length - 1]);
   };
+  // Clicking away closes a modal, as it does everywhere else in the interface. closeOn is
+  // used rather than a plain click handler because it ignores a drag that began inside and
+  // ended outside, which is what selecting text or using a scrollbar looks like.
+  if (backdrop) closeOn(backdrop, destroy);
   close.onclick = destroy;
 
   // A window left half off-screen after the browser is resized is brought back.
@@ -5500,6 +7029,12 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose } 
 
   const handle = {
     el: panel, body, bar, tools, key,
+    // The title is set again when what the window is showing changes, so a page read at a
+    // branch or a tag says so where the reader is already looking.
+    setTitle: (text) => {
+      const label = bar.querySelector(".om-float-title");
+      if (label) { label.textContent = text; label.title = text; }
+    },
     raise, destroy,
     setTitle: (text) => { heading.textContent = text; },
     setBadge: (text) => { badge.textContent = text || ""; },
@@ -6018,7 +7553,8 @@ function openDownloadManager() {
   if (floatingPanel("downloads")) { closeFloatingPanel("downloads"); return null; }
 
   const panel = createFloatingPanel({
-    key: "downloads", title: "Download Manager", width: 820, height: 460,
+    key: "downloads", title: "Download Manager", ...windowSize("downloads"),
+    modal: !asWindow("downloads"),
     onClose: stopDownloadPolling,
   });
   const dialog = panel.el;
@@ -6640,6 +8176,12 @@ function managerDestinations() {
       hint: "Each installed pack's menu offers a VirusTotal scan of the files it ships",
       open: () => openPanelWindow("installed"),
       available: vtReady },
+    { key: "environment", label: "Environment changes", icon: "\u2317",
+      hint: "What recent installs did to your Python packages, and how to undo one",
+      open: openEnvironmentDialog },
+    { key: "about", label: "About and updates", icon: "\u2139",
+      hint: "Which Open Manager this is, and what updating it takes here",
+      open: openAboutDialog },
     { key: "keys", label: "Access keys", icon: "\u26bf",
       hint: "Hugging Face, GitHub and VirusTotal keys. Kept out of ComfyUI's settings, and "
             + "never shown back.",
@@ -7805,7 +9347,8 @@ function openMemoryPanel() {
   //: The most recent reading, read by the toolbar and the light as well as the graphs.
   let latest = null;
   const panel = createFloatingPanel({
-    key: "memory", title: "Memory", width: 640, height: 560,
+    key: "memory", title: "Memory", ...windowSize("memory"),
+    modal: !asWindow("memory"),
     onClose: () => {
       clearInterval(panel._tick);
       dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
@@ -8455,7 +9998,8 @@ function openModelLibrary() {
   if (floatingPanel("library")) { closeFloatingPanel("library"); return null; }
 
   const panel = createFloatingPanel({
-    key: "library", title: "Model Library", width: 900, height: 520,
+    key: "library", title: "Model Library", ...windowSize("library"),
+    modal: !asWindow("library"),
   });
   const summary = el("div", "om-dl-summary", "Reading...");
   panel.bar.querySelector(".om-float-badge").appendChild(summary);
@@ -8709,6 +10253,127 @@ app.registerExtension({
   name: "openmanager.browser",
   settings: [
     {
+      // Not shown: it records that the one-time link render mode repair has run, so that it
+      // runs once per reader rather than once per browser or once per load.
+      id: "openManager.linkModeRepair",
+      name: "Link render mode repair",
+      category: ["Open Manager", "Internal", "linkModeRepair"],
+      type: "hidden",
+      defaultValue: 0,
+    },
+    {
+      id: "openManager.windowManager",
+      name: "Pack manager as a window",
+      category: ["Open Manager", "Windows", "windowManager"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "The Registry, Installed, GitHub and Missing browser. As a window it is movable, stays put while you build, and a click on "
+        + "the canvas does not shut it. As a modal it opens centred in front of everything "
+        + "and closes when you click away or press Escape. Confirmations are always modal: "
+        + "they are asking you a question.",
+    },
+    {
+      id: "openManager.windowPacks",
+      name: "Pack pages as windows",
+      category: ["Open Manager", "Windows", "windowPacks"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "A pack's own page: its versions, README, nodes and gallery. One window per pack, so several can sit side by side. As a window it is movable, stays put while you build, and a click on "
+        + "the canvas does not shut it. As a modal it opens centred in front of everything "
+        + "and closes when you click away or press Escape. Confirmations are always modal: "
+        + "they are asking you a question.",
+    },
+    {
+      id: "openManager.windowDownloads",
+      name: "Download Manager as a window",
+      category: ["Open Manager", "Windows", "windowDownloads"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "The download queue. As a window it is movable, stays put while you build, and a click on "
+        + "the canvas does not shut it. As a modal it opens centred in front of everything "
+        + "and closes when you click away or press Escape. Confirmations are always modal: "
+        + "they are asking you a question.",
+    },
+    {
+      id: "openManager.windowLibrary",
+      name: "Model Library as a window",
+      category: ["Open Manager", "Windows", "windowLibrary"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "What is on disk: duplicates, unreferenced files and storage. As a window it is movable, stays put while you build, and a click on "
+        + "the canvas does not shut it. As a modal it opens centred in front of everything "
+        + "and closes when you click away or press Escape. Confirmations are always modal: "
+        + "they are asking you a question.",
+    },
+    {
+      id: "openManager.windowMemory",
+      name: "Memory panel as a window",
+      category: ["Open Manager", "Windows", "windowMemory"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "What is loaded and what it weighs. As a window it is movable, stays put while you build, and a click on "
+        + "the canvas does not shut it. As a modal it opens centred in front of everything "
+        + "and closes when you click away or press Escape. Confirmations are always modal: "
+        + "they are asking you a question.",
+    },
+    {
+      id: "openManager.windowSize",
+      name: "Default window size",
+      category: ["Open Manager", "Windows", "windowSize"],
+      type: "combo",
+      options: ["compact", "standard", "large"],
+      defaultValue: "large",
+      tooltip: "How large a window opens before you have sized it yourself. Sizes are taken "
+        + "as a share of the browser window rather than a fixed number of pixels, so they suit "
+        + "a laptop and a large monitor alike, with floors and ceilings so neither extreme "
+        + "becomes unusable. Each window has its own share, so the Memory panel stays smaller "
+        + "than a pack page. A window you have resized keeps the size you gave it, and this "
+        + "does not override it.",
+    },
+    {
+      id: "openManager.blurInactive",
+      onChange: () => applyWindowLook(),
+      name: "Blur inactive windows",
+      category: ["Open Manager", "Windows", "blurInactive"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Soften the contents of every window except the one in front, so the active "
+        + "one reads first with several open. Off by default: blurring text is a repaint on "
+        + "every change of which window is in front, and with several open on a weak GPU that "
+        + "is felt. A window not in front is dimmed slightly either way.",
+    },
+    {
+      id: "openManager.windowShadow",
+      onChange: () => applyWindowLook(),
+      name: "Drop shadow",
+      category: ["Open Manager", "Windows", "windowShadow"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "The shadow that lifts a window off the graph behind it. Turn it off for a "
+        + "flatter interface, or where the blur costs more than it is worth on a weak GPU.",
+    },
+    {
+      id: "openManager.windowTitleSize",
+      onChange: () => applyWindowLook(),
+      name: "Title text size",
+      category: ["Open Manager", "Windows", "windowTitleSize"],
+      type: "number",
+      defaultValue: 15,
+      tooltip: "Size in pixels of the text in a window's title bar and on its section "
+        + "headings. Clamped to 10-28. Independent of the header height, so a taller bar does "
+        + "not have to mean larger text.",
+    },
+    {
+      id: "openManager.windowTextSize",
+      onChange: () => applyWindowLook(),
+      name: "Content text size",
+      category: ["Open Manager", "Windows", "windowTextSize"],
+      type: "number",
+      defaultValue: 13,
+      tooltip: "Size in pixels of the body text inside windows: lists, descriptions and "
+        + "READMEs. Clamped to 10-22. Raise it on a large or distant screen.",
+    },
+    {
       id: "openManager.managerEntry",
       name: "What the Extensions button opens",
       category: ["Open Manager", "Interface", "managerEntry"],
@@ -8829,7 +10494,7 @@ app.registerExtension({
       category: ["Open Manager", "Licences", "licenseUseApi"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Set a GitHub token first, under Open Manager > Access keys: without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
+      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Needs a GitHub token, which is set in Open Manager's own Access keys dialog rather than here: keys are deliberately kept out of ComfyUI's settings. Without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
     },
     {
       id: "openManager.licenseRace",
@@ -8853,13 +10518,13 @@ app.registerExtension({
       category: ["Open Manager", "Scanning", "scanOnInstall"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a VirusTotal key, set under Open Manager > Access keys. Where the day's allowance is spent you are asked whether to install without scanning.",
+      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a VirusTotal key, which is set in Open Manager's own Access keys dialog rather than here: keys are deliberately kept out of ComfyUI's settings. Where the day's allowance is spent you are asked whether to install without scanning.",
     },
     {
       id: "openManager.panelHeaders",
       onChange: () => applyHeaderHeight(),
-      name: "Header height of the Downloads, Models and Memory panels",
-      category: ["Open Manager", "Interface", "panelHeaders"],
+      name: "Header height",
+      category: ["Open Manager", "Windows", "panelHeaders"],
       type: "number",
       defaultValue: 44,
       tooltip: "Height in pixels of the title and section bars in the floating panels, and the size of the text on them. Clamped to 24-80. Raise it on a large or distant screen.",
@@ -8963,13 +10628,14 @@ app.registerExtension({
     },
     {
       id: "openManager.floatingPanels",
-      name: "Downloads, Models and Memory panels can be dragged",
-      category: ["Open Manager", "Interface", "floatingPanels"],
+      name: "Windows can be dragged",
+      category: ["Open Manager", "Windows", "floatingPanels"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Presentation only. On, a panel can be dragged anywhere and reopens where you "
-        + "left it. Off, it always opens in the middle and cannot be moved, which suits a "
-        + "single screen or anyone who would rather not hunt for a window. Either way, a "
+      tooltip: "Presentation only, and only for surfaces set to open as windows. On, a "
+        + "window can be dragged anywhere and reopens where you left it. Off, it always opens "
+        + "in the middle and cannot be moved, which suits a single screen or anyone who would "
+        + "rather not hunt for a window. Either way, a "
         + "window too small to move a panel around in presents it centred, because there is "
         + "nowhere to drag it to and an edge to lose it past. Folding, resizing and closing "
         + "work the same in every case.",
@@ -9155,8 +10821,19 @@ app.registerExtension({
 
     // Themes registered beside the built-ins, each carrying its grid background and its light
     // or dark UI mode.
+    applyWindowLook();
     registerThemes().catch(() => {});
     watchThemeExtras();
+    // One-time, and only for the value an earlier version of this extension wrote.
+    repairLinkMode().then((fixed) => {
+      if (!fixed) return;
+      notify("Link shape put back",
+        `An earlier version of Open Manager set ComfyUI's link render mode to ${fixed.from} `
+        + `for every theme, including ComfyUI's own. It has been set back to ${fixed.to}, `
+        + "which is ComfyUI's default. If you did want "
+        + `${fixed.from}, set it under Settings > Lite Graph > Link Render Mode; this will `
+        + "not change it again.");
+    }).catch(() => {});
     // Renew the offline registry per the configured policy. The backend guards against
     // running more than once per server session.
     const policy = app.extensionManager.setting.get("openManager.autoRenew") ?? "startup";

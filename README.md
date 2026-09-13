@@ -23,7 +23,7 @@ installing before it happens.
 | | |
 | --- | --- |
 | Every version, with its status | Flagged and withheld included, never hidden and never silently swapped for an approved one |
-| Before you install | The findings against that version, and the dependency changes it would make to your environment |
+| Before you install | The findings against that version, the dependency changes it would make, the nodes it adds, and whether the ComfyUI and hardware it asks for match yours |
 | What's in the box | A GitHub install is read first: compiled binaries, pickle data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
 | Licences | Read from each pack, sortable, most permissive first |
 | Your own list | Repositories you add by URL, with an update path and inspection, kept in `user/` so they outlive an uninstall |
@@ -220,3 +220,7 @@ appear on the pack page with an Add button. Copy one of the six in
 ## Licence
 
 MIT, see [`LICENSE`](LICENSE).
+
+The GitHub mark shown on links to github.com is `mark-github` from
+[Octicons](https://github.com/primer/octicons), MIT licensed, Copyright (c) GitHub Inc. It is
+used only for links that go to GitHub.

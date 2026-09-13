@@ -20,7 +20,7 @@ import os
 import time
 from pathlib import Path
 
-from . import downloads, models
+from . import downloads, models, paths
 
 __all__ = [
     "delete",
@@ -63,14 +63,7 @@ KNOWN_FORMATS = frozenset({
 
 def _dir() -> Path:
     """Where the library's own files are kept."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    return paths.store()
 
 
 def _read(name: str, fallback):
@@ -481,13 +474,11 @@ def sweep_partials(paths: list | None = None) -> dict:
 
 def _workflow_dir() -> Path | None:
     """Where ComfyUI keeps saved workflows."""
-    try:
-        import folder_paths
-
-        found = Path(folder_paths.get_user_directory()) / "default" / "workflows"
-        return found if found.is_dir() else None
-    except Exception:
+    root = paths.user_root()
+    if root is None:
         return None
+    found = root / "default" / "workflows"
+    return found if found.is_dir() else None
 
 
 def _names_in(node, found: set, depth: int = 0) -> None:

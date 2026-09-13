@@ -17,7 +17,7 @@ from typing import Iterable
 
 import aiohttp
 
-from . import developer
+from . import developer, paths
 
 __all__ = ["Metadata", "cache_dir", "fetch", "fetch_repo", "signature"]
 
@@ -28,7 +28,8 @@ __all__ = ["Metadata", "cache_dir", "fetch", "fetch_repo", "signature"]
 #: 2: pattern and directory entries in the developer table are resolved against the
 #:    repository's files, and the conventional workflow directories are read.
 #: 3: a workflow's preview image is paired with it, and a gallery may hold clips.
-CACHE_REVISION = 3
+#: 4: the stargazer count travels, so a pack page can show GitHub's own figure.
+CACHE_REVISION = 4
 
 #: Seconds any single request may take.
 TIMEOUT = 20
@@ -54,6 +55,9 @@ class Metadata:
         license: SPDX identifier, empty where unknown.
         requires_python: ``requires-python`` from pyproject, empty where absent.
         requires_comfyui: ``[tool.comfy] requires-comfyui`` from pyproject.
+        stars: Stargazer count as GitHub reports it. The registry keeps its own copy and
+            refreshes it on its own schedule, so where the two differ this is the current one.
+            Reported as found: nothing here second-guesses a figure that looks wrong.
         open_issues: Open issue count, excluding pull requests.
         open_prs: Open pull request count.
         pushed_at: ISO timestamp of the last push.
@@ -69,6 +73,7 @@ class Metadata:
     license: str = ""
     requires_python: str = ""
     requires_comfyui: str = ""
+    stars: int = 0
     open_issues: int = 0
     open_prs: int = 0
     pushed_at: str = ""
@@ -86,6 +91,7 @@ class Metadata:
             "license": self.license,
             "requires_python": self.requires_python,
             "requires_comfyui": self.requires_comfyui,
+            "stars": self.stars,
             "open_issues": self.open_issues,
             "open_prs": self.open_prs,
             "pushed_at": self.pushed_at,
@@ -106,6 +112,7 @@ class Metadata:
             license=data.get("license", ""),
             requires_python=data.get("requires_python", ""),
             requires_comfyui=data.get("requires_comfyui", ""),
+            stars=int(data.get("stars") or 0),
             open_issues=int(data.get("open_issues") or 0),
             open_prs=int(data.get("open_prs") or 0),
             pushed_at=data.get("pushed_at", ""),
@@ -133,14 +140,7 @@ def cache_dir() -> Path:
     Returns:
         A writable directory under ComfyUI's user tree, or beside this module.
     """
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager" / "metadata"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache" / "metadata"
-    base.mkdir(parents=True, exist_ok=True)
-    return base
+    return paths.store("metadata")
 
 
 def _cache_path(node_id: str) -> Path:
@@ -538,6 +538,7 @@ async def _scrape(
         license=(info.get("license") or {}).get("spdx_id", "") or "",
         requires_python=requires_python,
         requires_comfyui=requires_comfyui,
+        stars=int(info.get("stargazers_count") or 0),
         open_issues=open_issues,
         open_prs=open_prs,
         pushed_at=info.get("pushed_at", "") or "",

@@ -16,7 +16,7 @@ from typing import Iterable
 
 import aiohttp
 
-from . import licenses
+from . import licenses, paths
 
 __all__ = ["Options", "cached", "resolve", "resolve_many"]
 
@@ -112,14 +112,7 @@ class Options:
 
 def _cache_path() -> Path:
     """File the resolved licences are written to."""
-    try:
-        import folder_paths
-
-        base = Path(folder_paths.get_user_directory()) / "open_manager"
-    except Exception:
-        base = Path(__file__).resolve().parent.parent / "_cache"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "license_cache.json"
+    return paths.store_file("license_cache.json")
 
 
 def _load() -> dict:

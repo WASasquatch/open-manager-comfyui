@@ -95,12 +95,22 @@ Under **Open Manager → Library**.
 | Let the Model Library read the contents of a file | on | Hashing and full duplicate confirmation read a model end to end — on a large library that is hundreds of gigabytes. Turn it off and the library still reports names, sizes, folders, duplicates by name and what nothing references, and never opens a file. A digest already taken is still shown. |
 | Show what each pack costs to load, on the Installed list | off | Reads ComfyUI's own import timings back out of its log and puts the seconds beside each installed pack. Nothing is measured or run. |
 
-Shared with the other panels, under **Open Manager → Interface**:
+Shared with every window, under **Open Manager → Windows**:
 
 | Setting | Default | What it does |
 |---|---|---|
-| Header height of the Downloads, Models and Memory panels | 44 | 24 to 80. |
-| Downloads, Models and Memory panels can be dragged | on | Presentation only. Off, a panel always opens in the middle and cannot be dragged away. Either way, a window too small to move a panel around in presents it centred, since there is nowhere to drag it to and an edge to lose it past, and goes back to floating when there is room again. Folding, resizing and closing are unchanged. |
+| Model Library as a window | on | Off, it opens as a modal: centred, in front of everything, closing when you click away or press Escape. Each surface has its own toggle, so the Library can be a window while the Memory panel is not. |
+| Default window size | `large` | `compact`, `standard` or `large`. Scales each window's own default, so their relative sizes are kept. A window you have resized keeps the size you gave it. |
+| Header height | 44 | 24 to 80. |
+| Title text size | 15 | 10 to 28. The title bar and section headings, independent of the header height. |
+| Content text size | 13 | 10 to 22. Body text inside windows. |
+| Drop shadow | on | The shadow that lifts a window off the graph behind it. |
+| Windows can be dragged | on | Presentation only. Off, a window always opens in the middle and cannot be dragged away. A screen too small to move a window around in presents it centred whatever this says, and goes back to floating when there is room again. |
+
+And under **Open Manager → Interface**:
+
+| Setting | Default | What it does |
+|---|---|---|
 | Where the Downloads, Models and Memory buttons sit | `topbar` | `topbar` puts Downloads, Models and Memory in the workflow tab strip with their names. `control` puts them in the floating control bar as icons. |
 
 ## Access keys
