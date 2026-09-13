@@ -1,8 +1,5 @@
 name: Publish to PyPI
 
-# Same trigger as the registry workflow, so one version bump publishes to both. Most edits to
-# pyproject.toml are not a release, though, and PyPI refuses a version it already holds, so
-# this asks the index first and stops quietly rather than failing the run.
 on:
   workflow_dispatch:
   push:
@@ -17,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.repository_owner == 'WASasquatch' }}
     permissions:
-      # Trusted Publishing. PyPI verifies this run came from this workflow in this repository,
-      # so there is no API token in the repository to leak or rotate.
       id-token: write
     steps:
       - name: Check out code
@@ -55,8 +50,6 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      # A wheel that imports is worth more than one that merely built. These are the two
-      # checks ComfyUI's main.py runs before it will use a manager at all.
       - name: Check the wheel satisfies ComfyUI's manager contract
         if: steps.check.outputs.new == 'true'
         run: |
