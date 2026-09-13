@@ -265,11 +265,16 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
 .om-versions .om-row { padding-right: 10px; }
 .om-versions .om-row { border: none; border-bottom: 1px solid var(--om-surface); border-radius: 0; margin: 0; background: transparent; }
 .om-versions .om-row:last-child { border-bottom: none; }
+/* A version the publisher no longer recommends recedes, and comes back the moment the pointer
+   is on it. Nothing is disabled: a deprecated version still installs, and a reader looking
+   straight at the row should read it at full strength. */
+.om-versions .om-row-deprecated { opacity: .55; transition: opacity .12s ease; }
+.om-versions .om-row-deprecated:hover,
+.om-versions .om-row-deprecated:focus-within { opacity: 1; }
 .om-ver { font-weight: 600; font-family: ui-monospace, monospace; }
 .om-badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; color: var(--om-input); display: inline-block; }
 .om-marks { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
-.om-badge-deprecated { background: #8957e5; }
 /* Amber, not red: the version installs, and the declaration may well be the publisher's
    mistake rather than a real limit. */
 .om-ver-flag { margin-left: 6px; color: #d29922; font-weight: 700; cursor: help; }
@@ -949,6 +954,44 @@ function packName(name, cls) {
   const holder = el("span", cls, shown);
   if (shown !== text) holder.title = text;
   return holder;
+}
+
+// Everything known about one published version, as the row says it on hover.
+//
+// Args:
+//   entry: One version from the pack route.
+// Returns:
+//   Lines of text, or an empty string where there is nothing beyond what the row shows.
+function versionFacts(entry) {
+  const when = (entry.created_at || "").slice(0, 10);
+  const lines = [[entry.version, entry.status, when && `published ${when}`]
+    .filter(Boolean).join(" · ")];
+  if (entry.deprecated) lines.push("Deprecated by the publisher. It still installs.");
+  for (const note of entry.compatibility?.notes || []) {
+    if (!note.declared) continue;
+    lines.push(note.state === "differs"
+      ? `Declares ${note.label} ${note.declared}; this install reports ${note.yours}.`
+      : `Declares ${note.label} ${note.declared}.`);
+  }
+  const deps = (entry.dependencies || []).length;
+  if (deps) lines.push(`${deps} requirement${deps === 1 ? "" : "s"}.`);
+  // Titles, not details. The findings themselves are a click away in the confirmation, and a
+  // blocked row's own chip carries the reason; repeating either here makes a wall of text.
+  //
+  // Counted rather than repeated: one finding is raised per offending requirement, so a pack
+  // with three git URLs said the same sentence three times.
+  //
+  // The deprecation and compatibility findings are skipped: the lines above already say both,
+  // in more detail than their titles do.
+  const tally = new Map();
+  for (const found of entry.assessment?.findings || []) {
+    if (/^(Marked deprecated|Declared )/.test(found.title)) continue;
+    tally.set(found.title, (tally.get(found.title) || 0) + 1);
+  }
+  for (const [title, count] of [...tally].slice(0, 4)) {
+    lines.push(count > 1 ? `${title} (×${count})` : title);
+  }
+  return lines.join("\n");
 }
 
 function registryControl(entry, cls) {
@@ -2323,10 +2366,14 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   versionsBox._installedVersion = pack.installed_version || "";
   for (const entry of versions) {
     const row = el("div", "om-row");
+    // The row carries what is known about the version, because the row has room for a date
+    // and one finding and this has the rest: what it declares, what it pulls in, why it is
+    // blocked. Set on the row so anywhere in it answers.
+    row.title = versionFacts(entry);
+    if (entry.deprecated) row.classList.add("om-row-deprecated");
     const number = el("div", "om-ver", entry.version);
-    // Kept in the version cell rather than beside the status badge: that cell is already
-    // carrying two badges for a deprecated version, and a third turns every such row into
-    // three lines of chrome for one word.
+    // Kept in the version cell rather than beside the status badge, so the badge cell holds
+    // one thing and every row stays one line high.
     if (entry.compatibility?.state === "differs") {
       const flag = el("span", "om-ver-flag", "!");
       flag.title = entry.compatibility.notes
@@ -2345,11 +2392,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     // only what the status is, which the reader can already see.
     mark.title = `Status: ${entry.status}`;
     marks.appendChild(mark);
-    if (entry.deprecated) {
-      const old = el("span", "om-badge om-badge-deprecated", "deprecated");
-      old.title = "The publisher no longer recommends this version. It still installs.";
-      marks.appendChild(old);
-    }
+    // No second badge for deprecated. A version carrying both wrapped this cell onto a second
+    // line and grew the row, so a handful of old versions set the height of the whole list.
+    // The dimmed row says it instead, and the row's own tooltip spells it out.
     row.appendChild(marks);
     row.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
 

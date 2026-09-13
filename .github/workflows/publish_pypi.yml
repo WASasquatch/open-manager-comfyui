@@ -1,0 +1,79 @@
+name: Publish to PyPI
+
+# Same trigger as the registry workflow, so one version bump publishes to both. Most edits to
+# pyproject.toml are not a release, though, and PyPI refuses a version it already holds, so
+# this asks the index first and stops quietly rather than failing the run.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "pyproject.toml"
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'WASasquatch' }}
+    permissions:
+      # Trusted Publishing. PyPI verifies this run came from this workflow in this repository,
+      # so there is no API token in the repository to leak or rotate.
+      id-token: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Is this version new to PyPI?
+        id: check
+        run: |
+          read -r name version <<< "$(python -c '
+          import pathlib, tomllib
+          p = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          print(p["name"], p["version"])')"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/$name/$version/json")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$code" = "200" ]; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$name $version is already on PyPI. Nothing to publish."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Publishing $name $version."
+          fi
+
+      - name: Build sdist and wheel
+        if: steps.check.outputs.new == 'true'
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+      # A wheel that imports is worth more than one that merely built. These are the two
+      # checks ComfyUI's main.py runs before it will use a manager at all.
+      - name: Check the wheel satisfies ComfyUI's manager contract
+        if: steps.check.outputs.new == 'true'
+        run: |
+          python -m venv /tmp/probe
+          /tmp/probe/bin/python -m pip install --quiet dist/*.whl
+          cd /tmp && /tmp/probe/bin/python -c '
+          import importlib.util, sys
+          assert importlib.util.find_spec("comfyui_manager"), "comfyui_manager not importable"
+          import comfyui_manager as m
+          assert m.__file__.endswith("__init__.py"), m.__file__
+          for name in ("should_be_disabled", "prestartup", "start"):
+              assert callable(getattr(m, name, None)), f"missing {name}"
+          import open_manager, pathlib
+          web = pathlib.Path(open_manager.__file__).parent / "web"
+          assert (web / "open_manager.js").is_file(), "web assets missing from the wheel"
+          print("contract satisfied")'
+
+      - name: Publish
+        if: steps.check.outputs.new == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
