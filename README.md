@@ -4,7 +4,7 @@
 
 <img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-screenshot.png" alt="Open Manager for ComfyUI">
 
-https://github.com/user-attachments/assets/58e5d65e-ce23-464b-8c9a-2a249818a1d1
+https://github.com/user-attachments/assets/5f264d2f-b11b-4ca9-9f69-73a553213e85
 
 ## An alternative package manager for ComfyUI.
 
