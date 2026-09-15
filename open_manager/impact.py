@@ -1,7 +1,8 @@
 """What installing a version would do to the packages already present.
 
-The resolve runs ``pip install --dry-run --report -``, which reports what a requirement set
-would add and what it would replace. Nothing here installs.
+The resolve runs the environment's own installer in dry-run mode, which reports what a
+requirement set would add and what it would replace. Nothing here installs. A ``uv``
+environment has no pip at all, so :mod:`.piptool` decides what is actually run.
 
 ``--dry-run`` alone does not mean nothing runs. To learn what a source distribution requires
 pip executes its build backend, and for a ``git+`` or URL requirement it clones or downloads
@@ -15,6 +16,7 @@ reported. ``--only-binary`` alone is not enough, because it does not cover direc
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -22,6 +24,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+from . import piptool
 
 __all__ = ["CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from"]
 
@@ -187,13 +191,9 @@ def _installed(python: str) -> dict[str, str]:
     Returns:
         ``{name: version}``, empty where the listing failed.
     """
-    command = [python, "-m", "pip", "list", "--format=json", "--disable-pip-version-check"]
     try:
-        finished = subprocess.run(
-            command, capture_output=True, timeout=TIMEOUT, check=False,
-            encoding="utf-8", errors="replace",
-        )
-        if finished.returncode != 0:
+        finished = piptool.run(python, "list", ["--format=json"], timeout=TIMEOUT)
+        if finished is None or finished.returncode != 0:
             return {}
         return {
             _normalise(row.get("name", "")): row.get("version", "")
@@ -223,16 +223,12 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
         return Impact(failure="no interpreter to resolve against",
                       unresolved=tuple(unresolved))
 
-    handle = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as handle:
-            handle.write("\n".join(wanted) + "\n")
-        report = _resolve(interpreter, handle.name)
-    finally:
-        if handle is not None:
-            Path(handle.name).unlink(missing_ok=True)
+    report, skipped = _resolve(interpreter, wanted)
+    if skipped:
+        unresolved = list(unresolved) + [
+            f"{name} (publishes no wheel, so it was left out of this preview)"
+            for name in skipped
+        ]
 
     if isinstance(report, str):
         return Impact(failure=report, checked=True, unresolved=tuple(unresolved))
@@ -295,40 +291,97 @@ def _resolvable(requirements: Sequence[str]) -> tuple[list[str], list[str]]:
     return resolvable, unresolved
 
 
-def _resolve(python: str, path: str) -> list | str:
-    """Ask pip what it would install, without installing.
+_NO_WHEEL = re.compile(
+    r"No matching distribution found for ([A-Za-z0-9][A-Za-z0-9._-]*)"
+    r"|all versions of ([A-Za-z0-9][A-Za-z0-9._-]*) have no usable wheels",
+    re.I,
+)
+
+_UV_WOULD_INSTALL = re.compile(r"^\s*\+\s+([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)\s*$", re.M)
+
+WHEEL_RETRIES = 6
+
+
+def _no_wheel_for(output: str) -> str:
+    match = _NO_WHEEL.search(output or "")
+    if not match:
+        return ""
+    return (match.group(1) or match.group(2) or "").lower()
+
+
+def _without(lines: list[str], names: set[str]) -> list[str]:
+    kept = []
+    for line in lines:
+        head = re.split(r"[<>=!~\[; ]", line.strip(), 1)[0].strip().lower()
+        if head.replace("_", "-") not in names:
+            kept.append(line)
+    return kept
+
+
+def _run_resolver(python: str, lines: list[str]) -> tuple[list | str, str]:
+    installer = piptool.kind(python)
+    if installer == "none":
+        return piptool.describe(python), ""
+    with tempfile.TemporaryDirectory() as elsewhere:
+        path = os.path.join(elsewhere, "requirements.txt")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+        report = os.path.join(elsewhere, "report.json")
+        args = ["--dry-run", "--only-binary", ":all:", "--no-input"]
+        if installer == "pip":
+            args += ["--quiet", "--report", report]
+        args += ["-r", path]
+        try:
+            finished = piptool.run(python, "install", args, timeout=TIMEOUT, cwd=elsewhere)
+        except (OSError, subprocess.SubprocessError) as error:
+            return f"the installer could not be run ({type(error).__name__}: {error})", ""
+        if finished is None:
+            return piptool.describe(python), ""
+        output = f"{finished.stdout or ''}\n{finished.stderr or ''}"
+        if finished.returncode != 0:
+            return "", output
+        if installer == "uv":
+            return [
+                {"metadata": {"name": name, "version": version}}
+                for name, version in _UV_WOULD_INSTALL.findall(output)
+            ], ""
+        try:
+            with open(report, encoding="utf-8") as handle:
+                return json.load(handle).get("install", []), ""
+        except (OSError, ValueError) as error:
+            return f"the resolver's report could not be read ({error})", ""
+
+
+def _resolve(python: str, lines: list[str]) -> tuple[list | str, list[str]]:
+    """Ask the installer what it would install, without installing.
 
     Args:
         python: Interpreter to resolve against.
-        path: Requirements file.
+        lines: Requirement lines to resolve.
 
     Returns:
-        The report's ``install`` list, or a sentence saying why pip could not answer.
+        ``(install_list_or_reason, skipped)``. ``skipped`` names requirements left out
+        because they publish no wheel, which a preview will not build from source.
     """
-    command = [
-        python, "-m", "pip", "install",
-        "--dry-run", "--only-binary", ":all:",
-        "--no-input", "--disable-pip-version-check", "--quiet",
-        "--report", "-", "-r", path,
-    ]
-    try:
-        # Empty, so a bare name cannot also be a directory pip would find and build.
-        with tempfile.TemporaryDirectory() as elsewhere:
-            finished = subprocess.run(
-                command, capture_output=True, timeout=TIMEOUT, check=False,
-                encoding="utf-8", errors="replace", cwd=elsewhere,
-            )
-    except (OSError, subprocess.SubprocessError) as error:
-        return f"pip could not be run ({type(error).__name__}: {error})"
-
-    if finished.returncode != 0:
-        detail = (finished.stderr or finished.stdout or "").strip().splitlines()
-        return f"pip could not resolve these requirements: {detail[-1] if detail else 'no reason given'}"
-
-    try:
-        return json.loads(finished.stdout or "").get("install", [])
-    except ValueError as error:
-        return f"pip's report could not be read ({error})"
+    remaining = list(lines)
+    skipped: list[str] = []
+    for _ in range(WHEEL_RETRIES):
+        answer, failure = _run_resolver(python, remaining)
+        if not failure:
+            return answer, skipped
+        name = _no_wheel_for(failure)
+        if not name:
+            detail = failure.strip().splitlines()
+            last = next((one.strip() for one in reversed(detail) if one.strip()), "")
+            return f"the installer could not resolve these requirements: {last}", skipped
+        skipped.append(name)
+        shorter = _without(remaining, set(skipped))
+        if len(shorter) == len(remaining):
+            return f"the installer could not resolve these requirements: {name}", skipped
+        remaining = shorter
+        if not remaining:
+            return [], skipped
+    return "too many requirements publish no wheel to preview this", skipped
 
 
 def findings_from(impact: Impact) -> list[dict]:

@@ -22,7 +22,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import paths
+from . import paths, piptool
 
 __all__ = [
     "InstallResult",
@@ -70,6 +70,7 @@ class InstallResult:
             back or substituted.
         pip_errors: The lines of pip's output that say what went wrong, pulled out of the
             middle where the resolver puts them rather than left for the reader to find.
+        installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
     """
 
@@ -82,6 +83,7 @@ class InstallResult:
     pip_output: str = ""
     pip_requirements: tuple[str, ...] = ()
     pip_errors: tuple[str, ...] = ()
+    installer: str = ""
     restart_required: bool = False
 
     def to_json(self) -> dict:
@@ -96,6 +98,7 @@ class InstallResult:
             "pip_output": self.pip_output,
             "pip_requirements": list(self.pip_requirements),
             "pip_errors": list(self.pip_errors),
+            "installer": self.installer,
             "restart_required": self.restart_required,
         }
 
@@ -464,6 +467,7 @@ def install_repo(
         result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
+        result.installer = _ran.get("installer", "")
     return result
 
 
@@ -707,7 +711,8 @@ def _pip_install(directory: Path, python: str) -> dict:
         notes.append("Substituted by your overrides: " + "; ".join(swapped))
     if not keep:
         said = "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
-        return {"ok": True, "output": said, "requirements": [], "errors": []}
+        return {"ok": True, "output": said, "requirements": [], "errors": [],
+                "installer": piptool.kind(python)}
 
     # Written out rather than passed as arguments, so pip parses option lines itself.
     filtered = directory / ".open_manager_requirements.txt"
@@ -715,20 +720,21 @@ def _pip_install(directory: Path, python: str) -> dict:
         filtered.write_text("\n".join(keep) + "\n", encoding="utf-8")
     except OSError as error:
         return {"ok": False, "output": f"requirements could not be prepared ({error})",
-                "requirements": keep, "errors": [f"requirements could not be prepared ({error})"]}
+                "requirements": keep, "errors": [f"requirements could not be prepared ({error})"],
+                "installer": piptool.kind(python)}
 
-    command = [
-        python or sys.executable, "-m", "pip", "install", "--no-input",
-        "--disable-pip-version-check", "-r", str(filtered),
-    ]
     try:
-        finished = subprocess.run(
-            command, capture_output=True, timeout=PIP_TIMEOUT, check=False,
-            encoding="utf-8", errors="replace",
+        finished = piptool.run(
+            python, "install", ["--no-input", "-r", str(filtered)], timeout=PIP_TIMEOUT
         )
     except (OSError, subprocess.SubprocessError) as error:
-        said = f"pip could not be run ({type(error).__name__}: {error})"
-        return {"ok": False, "output": said, "requirements": keep, "errors": [said]}
+        said = f"the installer could not be run ({type(error).__name__}: {error})"
+        return {"ok": False, "output": said, "requirements": keep, "errors": [said],
+                "installer": piptool.kind(python)}
+    if finished is None:
+        said = piptool.describe(python)
+        return {"ok": False, "output": said, "requirements": keep, "errors": [said],
+                "installer": "none"}
     try:
         filtered.unlink()
     except OSError:
@@ -742,6 +748,7 @@ def _pip_install(directory: Path, python: str) -> dict:
         "output": tail,
         "requirements": keep,
         "errors": list(pip_trouble(output)),
+        "installer": piptool.kind(python),
     }
 
 
@@ -973,4 +980,5 @@ def install(
         result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
+        result.installer = _ran.get("installer", "")
     return result

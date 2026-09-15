@@ -132,7 +132,7 @@ Read once at start-up, so ComfyUI must be restarted after changing one.
 | `HF_TOKEN` | Hugging Face token. Also reads `HUGGING_FACE_HUB_TOKEN` and `OPEN_MANAGER_HF_TOKEN`. Read per request, not at start-up. |
 
 Keys are read from the environment, never written to it: this process loads third-party packs
-that can read `os.environ`, and `pip` inherits it when a pack's requirements are installed.
+that can read `os.environ`, and the installer inherits it when a pack's requirements are installed.
 
 ```bash
 OPEN_MANAGER_MODEL_HOSTS=civitai.com,cdn.civitai.com

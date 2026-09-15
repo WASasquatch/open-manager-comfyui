@@ -45,6 +45,7 @@ from . import (
     sources,
     topics,
     trust,
+    usertheme,
 )
 
 __all__ = ["ALLOW_BANNED", "PREFIX", "register_routes"]
@@ -321,16 +322,87 @@ def _pack_file(repo: str, relative: str, cap: int) -> str:
         return ""
 
 
+#: Most themes read from one pack when refreshing stored copies.
+THEME_DECLARED_CAP = 20
+
+
+def _declared_themes() -> list[dict]:
+    """Every theme the installed packs declare, read from their own directories.
+
+    The palette store keeps its own copy of a theme, so a pack shipping a newer one changed
+    nothing until the reader added it again. This is what the panel compares against on load.
+    Nothing here reaches the network: a pack that is not installed has nothing to compare.
+
+    Returns:
+        One ``{repo, path, theme}`` per readable declared theme.
+    """
+    try:
+        base = installer.custom_nodes_dir()
+    except Exception:
+        return []
+    found: list[dict] = []
+    for record in installer.list_installed():
+        if record.get("disabled"):
+            continue
+        directory = base / str(record.get("dir") or "")
+        try:
+            text = (directory / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        declared = developer.from_pyproject(text).get("themes") or []
+        repo = developer.repository_from_pyproject(text)
+        if not declared or not repo:
+            continue
+        for relative in declared[:THEME_DECLARED_CAP]:
+            clean = str(relative).strip().replace("\\", "/").lstrip("/")
+            if not clean or ".." in clean or not clean.lower().endswith(".json"):
+                continue
+            body = _pack_file(repo, clean, 1_000_000)
+            if not body:
+                continue
+            try:
+                data = json.loads(body)
+            except ValueError:
+                continue
+            if _looks_like_theme(data):
+                found.append({"repo": repo, "path": clean, "theme": data})
+    return found
+
+
+_SAFE_REF = re.compile(r"^[A-Za-z0-9._/-]{1,100}$")
+
+
+def _safe_ref(raw: str) -> str:
+    """A git ref fit to place in a raw.githubusercontent URL, or an empty string.
+
+    A ref may hold slashes, as in ``feature/x``, so it cannot be checked the way a file path
+    is. What it may not do is climb, which is the one thing that would change which file the
+    URL addresses.
+
+    Args:
+        raw: The ref as it arrived from the client.
+
+    Returns:
+        The ref, or an empty string where it is not one.
+    """
+    text = str(raw or "").strip()
+    if not text or ".." in text or text.startswith("/") or text.endswith("/"):
+        return ""
+    return text if _SAFE_REF.match(text) else ""
+
+
 def _pack_bytes(repo: str, relative: str, cap: int) -> bytes | None:
     """A file read as bytes from the installed copy of a pack.
 
     Args:
         repo: The pack's repository URL, matched against installed directories.
         relative: Path inside the pack, already checked for traversal.
-        cap: Most bytes returned.
+        cap: Size limit. One byte past it is read, so a caller can tell a file that fits
+            from one that was cut short.
 
     Returns:
-        The bytes, or ``None`` where the pack is not installed or holds no such file.
+        The bytes, or ``None`` where the pack is not installed or holds no such file. A
+        result longer than ``cap`` means the file is over the limit.
     """
     owner_repo = metadata._owner_repo(repo)
     if owner_repo is None:
@@ -344,7 +416,7 @@ def _pack_bytes(repo: str, relative: str, cap: int) -> bytes | None:
         if not target.is_file() or root not in target.parents:
             return None
         with target.open("rb") as handle:
-            return handle.read(cap)
+            return handle.read(cap + 1)
     except OSError:
         return None
 
@@ -716,6 +788,71 @@ def register_routes() -> None:
         )
         return web.json_response(payload)
 
+    #: Sent with every theme asset. An SVG a reader dropped in their themes directory is
+    #: same-origin, so a sandbox is what stops one that carries script from running if the
+    #: address is ever opened on its own rather than as a background image.
+    _ASSET_HEADERS = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    }
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/theme-asset")
+    async def theme_asset(request: web.Request) -> web.Response:
+        """One image a reader's theme keeps beside itself, under their themes directory."""
+        payload, kind, problem = await asyncio.to_thread(
+            usertheme.asset, request.query.get("path", "")
+        )
+        if problem:
+            return web.json_response({"ok": False, "reason": problem}, status=404)
+        return web.Response(
+            body=payload,
+            content_type=kind,
+            headers=_ASSET_HEADERS,
+        )
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/pack-asset")
+    async def pack_asset(request: web.Request) -> web.Response:
+        """One image a pack ships beside a theme it declares.
+
+        Read from the installed copy only. A theme added from a pack keeps pointing here, so
+        the image goes when the pack does rather than being copied somewhere it would outlive.
+        """
+        parts, kind, problem = usertheme.asset_parts(request.query.get("path", ""))
+        if problem:
+            return web.json_response({"ok": False, "reason": problem}, status=404)
+        payload = await asyncio.to_thread(
+            _pack_bytes, request.query.get("repo", ""), "/".join(parts), usertheme.ASSET_LIMIT
+        )
+        if not payload:
+            return web.json_response({"ok": False, "reason": "no such file"}, status=404)
+        # Refused rather than cut short, which is what the reader's own themes directory does
+        # for the same limit. Serving the first megabyte of a larger file answers 200 with a
+        # corrupt image, and the author has nothing to go on.
+        if len(payload) > usertheme.ASSET_LIMIT:
+            return web.json_response(
+                {"ok": False,
+                 "reason": f"is larger than {usertheme.ASSET_LIMIT // 1000}kB"},
+                status=404,
+            )
+        return web.Response(
+            body=payload,
+            content_type=kind,
+            headers=_ASSET_HEADERS,
+        )
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/theme-updates")
+    async def theme_updates(_request: web.Request) -> web.Response:
+        """Themes the installed packs declare, for comparing against the stored copies."""
+        found = await asyncio.to_thread(_declared_themes)
+        return web.json_response({"ok": True, "themes": found})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/user-themes")
+    async def user_themes(_request: web.Request) -> web.Response:
+        """Every theme the reader keeps in their own themes directory."""
+        found = await asyncio.to_thread(usertheme.listing)
+        return web.json_response({"ok": True, **found})
+
     @PromptServer.instance.routes.get(f"{PREFIX}/media")
     async def readme_media(request: web.Request) -> web.Response:
         """Signed URLs for the attachments a README embeds.
@@ -780,7 +917,7 @@ def register_routes() -> None:
         text = _pack_file(repo, clean, 8_000_000)
         if not text:
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "Main", "master"):
+                for candidate in (_safe_ref(branch), "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
@@ -829,7 +966,7 @@ def register_routes() -> None:
         text = _pack_file(repo, clean, 1_000_000)
         if not text:
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "Main", "master"):
+                for candidate in (_safe_ref(branch), "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
@@ -1138,7 +1275,7 @@ def register_routes() -> None:
         data = _pack_bytes(repo, clean, GALLERY_CAP)
         if not data:
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "Main", "master"):
+                for candidate in (_safe_ref(branch), "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = f"https://raw.githubusercontent.com/{owner}/{name}/{candidate}/{clean}"
@@ -1329,7 +1466,7 @@ def register_routes() -> None:
         if not text:
             branch = request.query.get("branch", "")
             async with aiohttp.ClientSession() as session:
-                for candidate in (branch, "main", "Main", "master"):
+                for candidate in (_safe_ref(branch), "main", "Main", "master"):
                     if not candidate:
                         continue
                     url = (f"https://raw.githubusercontent.com/{owner}/{name}/"

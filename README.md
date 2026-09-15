@@ -15,27 +15,40 @@ an install would do to your environment before it runs. It warns; it never block
 
 ---
 
-## Why Open Manager?
-
-ComfyUI-Manager installs packs well. Open Manager is built around telling you what you are
-installing before it happens.
+## Features
 
 | | |
 | --- | --- |
-| Every version, with its status | Flagged and withheld included, never hidden and never silently swapped for an approved one |
-| Before you install | The findings against that version, the dependency changes it would make, the nodes it adds, and whether the ComfyUI and hardware it asks for match yours |
-| What's in the box | A GitHub install is read first: compiled binaries, pickle data, bundled wheels and sourceless bytecode are named, with what each means. False positives possible |
-| Licences | Read from each pack, sortable, most permissive first |
-| Your own list | Repositories you add by URL, with an update path and inspection, kept in `user/` so they outlive an uninstall |
-| Trust the author | A pack from outside the registry asks who you are trusting, once per author or every time |
-| Any ref | Read and install a pack at another branch or recent commit, README and gallery together |
-| Missing nodes | The packs supplying the node types a workflow is missing |
-| Node names claimed twice | Silent in ComfyUI, where the last pack loaded wins. Named here, with which one is in use |
-| Fast sync | The whole Comfy Registry in seconds, at a concurrency you set |
+| Every version | Flagged, withheld and banned included |
+| Before you install | Findings, dependency changes, new nodes, hardware fit |
+| Contents named | Binaries, pickles, wheels, bytecode |
+| Licences | Per pack, sortable |
+| Your own repos | By URL, kept in `user/` |
+| Any ref | Branch or commit |
+| Workflow gaps | Missing nodes, and which pack won a duplicate name |
+| Themes | Gradients, icons, backdrops |
+| Fast sync | Whole registry in seconds |
 
-A risk changes the wording of the confirmation, not whether Install works. The one exception is
-a version the registry has banned; a setting lifts that too, because the registry's scanner bans
-for reasons it does not publish (`OPEN_MANAGER_ALLOW_BANNED=1` for a headless host).
+Findings reword the confirmation. They never block Install.
+
+### What your pack can declare
+
+Declare it once in `pyproject.toml` and every Open Manager reader sees it. Registry metadata is
+the floor, not the ceiling.
+
+| | |
+| --- | --- |
+| Access and capabilities | List what your pack does, shown as its own panel on your page |
+| Release note | Your words above the version list, not a changelog guess |
+| Incompatibilities | Name a package and version; readers are warned before installing |
+| Install from GitHub | Say so, and the panel recommends it over the registry copy |
+| Themes | Ship colour palettes with gradients, icons, backdrops and rulers |
+| Example workflows | Loadable from your page, with thumbnails |
+| Gallery | Screenshots from your repo or elsewhere |
+| Docs and funding | Buttons in your page header |
+
+Every field is documented under **For pack authors** below. Themes have their own reference in
+[`THEMES.md`](docs/THEMES.md).
 
 ### Beyond packs
 
@@ -43,9 +56,9 @@ Three pieces sit alongside the pack manager. None of them adds a node to your gr
 
 | | | Default |
 | --- | --- | --- |
-| [Download Manager](https://github.com/WASasquatch/open-manager-comfyui/blob/main/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, and picks the drive | on |
-| [Model Library](https://github.com/WASasquatch/open-manager-comfyui/blob/main/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced, storage | off |
-| [Resource Monitor](https://github.com/WASasquatch/open-manager-comfyui/blob/main/MONITOR.md) | A compact CPU/RAM/VRAM strip, and a Memory panel behind it | off |
+| [Download Manager](docs/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, and picks the drive | on |
+| [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced, storage | off |
+| [Resource Monitor](docs/MONITOR.md) | A compact CPU/RAM/VRAM strip, and a Memory panel behind it | off |
 
 ---
 
@@ -72,6 +85,9 @@ pip install comfyui-open-manager
 # Launch ComfyUI with --enable-manager flag
 python main.py --enable-manager
 ```
+
+On a uv-managed environment, which has no pip, use `uv pip install comfyui-open-manager`.
+Open Manager detects that and installs pack requirements through uv as well.
 
 Update with `pip install --upgrade comfyui-open-manager`. On a portable build, call its own
 interpreter rather than the `python` on your PATH, or the install lands in the wrong
@@ -164,6 +180,9 @@ branch = "main"                                 # default branch to install from
 docs = "https://example.com/docs"               # documentation URL
 funding = "https://ko-fi.com/you"               # funding URL
 release_note = "1.4.0 needs config regen."      # shown above the version list, 600 chars
+capabilities = [                                # what your pack does, its own page panel
+  "filesystem", "network", "subprocess",        #   from a fixed list, see below
+]
 example_workflows = ["workflows/*.json"]        # a path, a glob, or a directory
 themes = ["themes/my-theme.json"]               # list themes to offer
 gallery = [                                     # shown off on the pack page, up to 24, `png`,
@@ -175,58 +194,49 @@ gallery = [                                     # shown off on the pack page, up
 ```
 
 Leave `example_workflows` out and `workflows/`, `workflow/`, `examples/`, `example/` and
-`example_workflows/` are read instead. An image named for a workflow beside it becomes its
-thumbnail. `docs` and `funding` fall back to `[project.urls]`.
+`example_workflows/` are read instead. `docs` and `funding` fall back to `[project.urls]`.
+
+Workflow thumbnails are not declared. An image sitting beside a workflow and named for it is
+paired with it automatically, following
+[ComfyUI's workflow templates convention](https://docs.comfy.org/custom-nodes/workflow_templates):
+`workflows/hdr.json` picks up `workflows/hdr.webp`, `.png`, `.jpg`, `.jpeg` or `.gif`, and a
+numbered variant such as `hdr-1.png` counts too. Workflows without one show as a plain row.
+
+### Access and capabilities
+
+Your own account of what your pack does, shown as a panel on your page that reflows with the
+window. The vocabulary is fixed so that two packs describe themselves in the same words.
+
+`filesystem` `network` `subprocess` `binaries` `environment` `dynamic_code` `packages`
+`models` `credentials` `telemetry` `compilation` `hardware`
+
+The list is fixed. Anything outside it is refused and named on your page as unrecognised,
+rather than dropped in silence, so a guessed word is visible to you and never shown to a
+reader. Case and hyphens are forgiven: `Dynamic-Code` resolves to `dynamic_code`.
+
+Declaring nothing shows no panel. This is not verified and does not replace the archive
+inspection, which reads what is actually in the box; the two are worth comparing.
 
 ---
 
-## Theme format
+## Themes
 
-A theme is a ComfyUI colour palette with an optional `extras` block. ComfyUI reads `colors`
-and ignores `extras`; Open Manager reads both. Themes listed in `[tool.open_manager] themes`
-appear on the pack page with an Add button. Copy one of the six in
-[`open_manager/themes/`](https://github.com/WASasquatch/open-manager-comfyui/blob/main/open_manager/themes/), change the id and the colours.
+A theme is a ComfyUI colour palette plus an optional `extras` block: gradient or flat headers
+per node category or class, a title icon, an image behind node bodies, see-through bodies, a
+graph backdrop, shadow colours and a selection glow. Packs ship them and readers add them from
+the pack page.
 
-```jsonc
-{
-  "id": "my_theme",              // unique; the key it is stored under
-  "name": "My Theme",            // shown in the theme picker
-  "version": 1,                  // raise to publish a change
-  "light_theme": true,           // light palettes must set this, or the interface stays dark
+Full reference in [`docs/THEMES.md`](docs/THEMES.md). Examples in
+[`open_manager/themes/`](https://github.com/WASasquatch/open-manager-comfyui/tree/main/open_manager/themes/).
 
-  "colors": {
-    "node_slot":      { "IMAGE": "#64b5f6", "LATENT": "#ff9cf9" },   // wire colour per socket
-    "litegraph_base": { "CLEAR_BACKGROUND_COLOR": "#211927",         // canvas
-                        "NODE_DEFAULT_COLOR": "#f2ff59",             // node header
-                        "NODE_DEFAULT_BGCOLOR": "#2e2438",           // node body
-                        "BACKGROUND_IMAGE": "data:image/svg+xml;base64,..." },
-    "comfy_base":     { "fg-color": "#f0efed", "bg-color": "#211927" }  // interface, incl. Open Manager
-  },
-
-  "extras": {
-    "shape":      { "radius": 10, "titleHeight": 28, "slotHeight": 20 },
-    "links":      { "mode": "spline", "border": false },   // spline | linear | straight
-    "categories": { "loaders": "#352864", "sampling": "#4d3979" },  // header per node category
-    "nodes":      { "KSampler": "#6b4fa8",                          // header per node class
-                    "VAEDecode": { "color": "#71639a", "title": "Decode" } },
-    "glow":       { "selected": "#f2ff59", "blur": 16 }             // static, on selection
-  }
-}
+```toml
+[tool.open_manager]
+themes = ["themes/my-theme/my-theme.json"]
 ```
-
-| | |
-| --- | --- |
-| Categories | Matched on the full lowercased category path, longest first, so `was suite/image/masking` wins over `was suite/image`. Core nodes also match the segment below `model/` |
-| Precedence | A colour the user set on a node wins, then a `nodes` rule, then a `categories` tint |
-| Nothing is saved | Header, title and text colour are applied for the draw and undone after, so they never enter a saved workflow |
-| Bounded | Unknown keys are dropped and numbers are range-checked; there is no animation, and a theme cannot ask for one |
-| Scoped | Theme color palette `extras` apply only while your theme is active, and geometry is restored when the user switches away |
-
----
 
 ## Licence
 
-MIT, see [`LICENSE`](https://github.com/WASasquatch/open-manager-comfyui/blob/main/LICENSE).
+MIT, see [`LICENSE`](LICENSE).
 
 The GitHub mark shown on links to github.com is `mark-github` from
 [Octicons](https://github.com/primer/octicons), MIT licensed, Copyright (c) GitHub Inc. It is

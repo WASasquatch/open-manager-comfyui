@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { nodeTint, registerThemes, repairLinkMode, watchThemeExtras } from "./themes.js";
+import { nodeTint, refreshExtras, registerThemes, repairLinkMode, watchThemeExtras } from "./themes.js";
 
 const API = "/open_manager/v1/api";
 
@@ -86,6 +86,7 @@ style.textContent = `
 .om-blocked { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; color: var(--om-muted); border: 1px solid var(--om-border); }
 .om-icon { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: var(--om-input); flex: none; }
+.om-hero-bare .om-icon { width: 120px; height: 120px; border-radius: 12px; }
 .om-title { font-size: 19px; font-weight: 600; }
 .om-sub { color: var(--om-muted); }
 .om-stats { display: flex; gap: 22px; }
@@ -180,7 +181,7 @@ style.textContent = `
 }
 /* Capped for reading rather than filled to the dialog: a line that runs the whole width of
    a wide panel is hard to follow, which is the width GitHub settles on too. */
-.om-readme-body { line-height: 1.6; overflow-wrap: anywhere; max-width: 1080px; margin-inline: auto; }
+.om-readme-body { line-height: 1.6; overflow-wrap: anywhere; padding-inline: 24px; }
 .om-readme-body img { max-width: 100%; height: auto; }
 .om-readme-body pre { background: var(--om-input); padding: 10px; border-radius: 6px; overflow: auto; }
 .om-readme-body h1, .om-readme-body h2 { border-bottom: 1px solid var(--om-border); padding-bottom: 4px; }
@@ -189,7 +190,7 @@ style.textContent = `
    before it is clicked. */
 .om-readme-body a.om-doc-link::after { content: " \\2197"; opacity: .55; font-size: .85em; }
 .om-doc-trail { display: flex; align-items: center; gap: 10px; margin: 0 0 16px;
-  padding-bottom: 10px; border-bottom: 1px solid var(--om-border); }
+  padding: 16px 0 10px; border-bottom: 1px solid var(--om-border); }
 .om-doc-back { padding: 3px 10px; font-size: 12px; }
 .om-doc-where { color: var(--om-muted); font-size: 12px; overflow-wrap: anywhere; }
 .om-wf-shot { width: 56px; height: 32px; object-fit: cover; border-radius: 4px;
@@ -1212,7 +1213,7 @@ async function openEnvironmentDialog() {
   box.appendChild(el("div", "om-note-title", "Environment changes"));
   box.appendChild(el("div", "om-dl-note",
     "Package lists taken either side of each install, newest first. An install that changed "
-    + "nothing is not listed. Restoring runs pip and needs a restart afterwards."));
+    + "nothing is not listed. Restoring runs your installer and needs a restart afterwards."));
   const list = el("div", "om-keys");
   list.appendChild(loadingBlock("Reading the record"));
   box.appendChild(list);
@@ -1309,11 +1310,11 @@ async function showInstallFailure(job, result) {
     "The pack itself is on disk. Its Python requirements are what failed, so it may not load "
     + "or may load with parts missing until they are resolved."));
 
-  // pip's own words for what went wrong, first, because that is the answer.
+  const ran = result.installer === "uv" ? "uv" : "pip";
   const errors = result.pip_errors || [];
   if (errors.length) {
     const why = el("div", "om-keys-row");
-    why.appendChild(el("div", "om-dl-name", "What pip said"));
+    why.appendChild(el("div", "om-dl-name", `What ${ran} said`));
     const lines = el("div", "om-chg-text om-pip-errors");
     lines.textContent = errors.join("\n");
     why.appendChild(lines);
@@ -1331,7 +1332,7 @@ async function showInstallFailure(job, result) {
   }
 
   if (result.pip_output) {
-    const log = panel("pip output", "the last of it", { open: !errors.length });
+    const log = panel(`${ran} output`, "the last of it", { open: !errors.length });
     const body = el("div", "om-chg-text");
     body.textContent = result.pip_output;
     log.body.appendChild(body);
@@ -1428,7 +1429,7 @@ async function offerRestore(entryId, packName) {
   }
 
   const go = await chooseAction(`Restore packages to before ${packName}?`,
-    "This runs pip with the commands below. Other packs installed since may depend on what "
+    "This runs the commands below. Other packs installed since may depend on what "
     + "is about to be changed, and this does not check for that.",
     [{ key: "go", label: "Restore packages", primary: true, danger: true }],
     { wide: true, facts });
@@ -2034,6 +2035,10 @@ function applyWindowLook() {
   // `none` still makes the element its own containing block, which moves fixed children.
   document.body.classList.toggle("om-blur-inactive",
     panelSetting("openManager.blurInactive", false) !== false);
+  const icons = panelSetting("openManager.windowIcons", true) !== false;
+  for (const mark of document.querySelectorAll(".om-float-icon")) {
+    mark.hidden = !icons || !mark.getAttribute("src");
+  }
 }
 
 // The same page, in a window that outlives a click on the canvas. Keyed by pack, so opening
@@ -2047,6 +2052,7 @@ function showPackWindow(packId, data) {
     ...windowSize("pack"),
     centred: true,
   });
+  panel.setIcon(data.pack?.icon || "");
   // An already-open window comes back with its contents; only a fresh one needs filling.
   if (panel.body.childElementCount) return panel;
   try {
@@ -2077,6 +2083,7 @@ function showLocalPackWindow(packId, info) {
     ...windowSize("pack"),
     centred: true,
   });
+  panel.setIcon(info.pyproject?.icon || "");
   if (panel.body.childElementCount) return panel;
   buildLocalPackBody(panel.body, info);
   return panel;
@@ -2233,8 +2240,10 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   if (pack.banner) {
     const banner = el("img", "om-banner");
     banner.src = pack.banner;
-    banner.onerror = () => banner.remove();
+    banner.onerror = () => { banner.remove(); hero.classList.add("om-hero-bare"); };
     hero.appendChild(banner);
+  } else {
+    hero.classList.add("om-hero-bare");
   }
 
   const info = el("div", "om-hero-info");
@@ -2442,11 +2451,15 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   const versionNote = [`${versions.length} published`];
   if (pack.installed_version) versionNote.push(`installed ${pack.installed_version}`);
   else if (resolution.newest) versionNote.push(`newest ${resolution.newest}`);
-  const versionsPanel = panel("Versions", versionNote.join(" · "), {
-    remember: "om-versions-open",
+  const tabs = tabbedPanel({ remember: "om-pack-tab" });
+  body.appendChild(tabs.root);
+  tabs.add({
+    id: "versions",
+    title: "Versions",
+    note: versionNote.join(" · "),
+    order: 10,
+    pane: versionsBox,
   });
-  versionsPanel.body.appendChild(versionsBox);
-  body.appendChild(versionsPanel);
   attachStatusReasons(pack.id, versionsBox, versions);
 
   // What the pack adds to the graph. The registry records this per version and holds it for
@@ -2454,7 +2467,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   // when the registry was never told, rather than implying the pack adds nothing.
   const shownVersion = pack.installed_version || resolution.newest || versions[0]?.version;
   if (shownVersion) {
-    const nodesPanel = panel("Nodes", "", { open: false, remember: "om-nodes-open" });
+    const nodesPane = el("div", "om-tabpane");
 
     // Which version's list is on screen. The registry keeps one per version and fills it in
     // for some and not others, so the version that happens to be installed is often the one
@@ -2480,7 +2493,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     const fill = async () => {
       if (loaded) return;
       loaded = true;
-      nodesPanel.body.replaceChildren(loadingBlock("Reading the node list"));
+      nodesPane.replaceChildren(loadingBlock("Reading the node list"));
       let data;
       try {
         const query = new URLSearchParams({ version: atVersion });
@@ -2490,17 +2503,15 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
         if (!data.ok) throw new Error(data.reason || `HTTP ${answer.status}`);
       } catch (error) {
         loaded = false;
-        nodesPanel.body.replaceChildren(nodesBar(), el("div", "om-side-status",
+        nodesPane.replaceChildren(nodesBar(), el("div", "om-side-status",
           `The node list could not be read: ${error.message}`));
         return;
       }
       if (!data.known) {
         const said = el("div", "om-side-status",
-          `The registry holds no node list for ${atVersion}. That is common, and does not `
-          + "mean the pack adds no nodes: publishing one is optional. Another version may "
-          + "have one.");
-        nodesPanel.body.replaceChildren(nodesBar(), said);
-        nodesPanel.note("no list");
+          `No node list published for ${atVersion}.`);
+        nodesPane.replaceChildren(nodesBar(), said);
+        nodesTab.note("no list");
         return;
       }
       const list = el("div", "om-nodelist");
@@ -2528,8 +2539,8 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
         if (ports.length) item.appendChild(el("div", "om-why", ports.join(" · ")));
         list.appendChild(item);
       }
-      nodesPanel.note(`${countNote(data.nodes.length, "node")} in ${atVersion}`);
-      nodesPanel.body.replaceChildren(nodesBar(), list);
+      nodesTab.note(`${countNote(data.nodes.length, "node")} in ${atVersion}`);
+      nodesPane.replaceChildren(nodesBar(), list);
     };
 
     // The picker sits above whatever the panel is showing, so it is in the same place
@@ -2545,9 +2556,14 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       loaded = false;
       fill();
     };
-    nodesPanel.addEventListener("toggle", () => { if (nodesPanel.open) fill(); });
-    if (nodesPanel.open) fill();
-    body.appendChild(nodesPanel);
+    const nodesTab = tabs.add({
+      id: "nodes",
+      title: "Nodes",
+      order: 30,
+      pane: nodesPane,
+      // Asked for the first time the tab is looked at, and once per version after that.
+      onShow: fill,
+    });
   }
 
   // The registry carries a changelog per version, which almost nothing fills in. Where it is
@@ -2555,15 +2571,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   // section appears when there is something in it and stays out of the way when there is not.
   const noted = versions.filter((entry) => entry.changelog);
   {
-    const changes = panel("Changelog",
-      noted.length ? countNote(noted.length, "version") : "none published",
-      { open: false, remember: "om-changelog-open" });
     const list = el("div", "om-chg");
     if (!noted.length) {
-      list.appendChild(el("div", "om-side-status",
-        "This pack publishes no changelog. The registry keeps one per version and most "
-        + "publishers leave it empty; there is nothing here to show rather than nothing to "
-        + "read it with."));
+      list.appendChild(el("div", "om-side-status", "No changelog published."));
     }
     for (const entry of noted) {
       const item = el("div", "om-chg-item");
@@ -2581,8 +2591,16 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       item.appendChild(note);
       list.appendChild(item);
     }
-    changes.body.appendChild(list);
-    body.appendChild(changes);
+    tabs.add({
+      id: "changelog",
+      title: "Changelog",
+      note: noted.length ? countNote(noted.length, "version") : "none",
+      order: 20,
+      pane: list,
+    });
+    // Every section that exists before the pack's metadata arrives is registered, so the
+    // opening tab is the first of those rather than whichever was built first.
+    tabs.start();
   }
 
   // README, below the version list, only when enrichment is enabled.
@@ -3286,12 +3304,145 @@ function openScanDialog(packId, { onDone } = {}) {
 
 // The pack's [tool.open_manager] declarations: matched incompatibilities, a source
 // preference, links, and example workflows that load into the graph on click.
+//: What each declared capability means, in the reader's terms. The accepted set lives in
+//: developer.py; anything it lets through that is missing here is shown under its own name.
+const CAPABILITY_LABELS = {
+  filesystem: ["Filesystem read and write", "Reads or writes files outside its own folder"],
+  network: ["Network access", "Contacts hosts over the network at runtime"],
+  subprocess: ["Subprocess execution", "Starts other programs"],
+  binaries: ["External binaries", "Ships or calls compiled executables"],
+  environment: ["Environment access", "Reads or sets environment variables"],
+  dynamic_code: ["Dynamic code execution", "Builds and runs code at runtime"],
+  packages: ["Package and dependency changes", "Installs or changes Python packages"],
+  models: ["Model downloads", "Fetches model weights"],
+  credentials: ["Credentials and API keys", "Reads tokens or keys"],
+  telemetry: ["Telemetry or analytics", "Reports usage off this machine"],
+  compilation: ["Native or GPU compilation", "Compiles code or kernels on your machine"],
+  hardware: ["Direct hardware access", "Talks to devices directly"],
+};
+
+//: A glyph per capability, as shape lists rather than icon-font classes so nothing new has to
+//: load and the stroke follows the surrounding text colour. Drawn on a 24 unit grid.
+const CAPABILITY_ICONS = {
+  filesystem: [["path", "M3 7h6l2 3h10v9H3z"]],
+  network: [["circle", 12, 12, 8], ["path", "M4 12h16"],
+            ["path", "M12 4c3.2 3.4 3.2 12.6 0 16"], ["path", "M12 4c-3.2 3.4-3.2 12.6 0 16"]],
+  subprocess: [["rect", 3, 4, 18, 16, 2], ["path", "M7.5 9.5l3 2.5-3 2.5"],
+               ["path", "M13 15h4"]],
+  binaries: [["path", "M12 3l8 4.5v9L12 21l-8-4.5v-9z"], ["path", "M4 7.5l8 4.5 8-4.5"],
+             ["path", "M12 12v9"]],
+  environment: [["path", "M4 8h16"], ["circle", 9, 8, 2.2], ["path", "M4 16h16"],
+                ["circle", 15, 16, 2.2]],
+  dynamic_code: [["path", "M8.5 7L3.5 12l5 5"], ["path", "M15.5 7l5 5-5 5"]],
+  packages: [["rect", 3, 7, 18, 13, 2], ["path", "M12 10v6"], ["path", "M9 13l3 3 3-3"]],
+  models: [["ellipse", 12, 6, 8, 3], ["path", "M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"],
+           ["path", "M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"]],
+  credentials: [["circle", 8, 15.5, 3.5], ["path", "M10.5 13L20 3.5"], ["path", "M16 4h4v4"]],
+  telemetry: [["path", "M4 19v-4"], ["path", "M9.3 19v-8"], ["path", "M14.7 19v-12"],
+              ["path", "M20 19v-6"]],
+  compilation: [["path", "M14.5 6.2a4 4 0 1 0 3.3 3.3L21 6l-3-3z"], ["path", "M12.6 11.4L4 20"]],
+  hardware: [["rect", 7, 7, 10, 10, 1.5], ["path", "M10 3v4"], ["path", "M14 3v4"],
+             ["path", "M10 17v4"], ["path", "M14 17v4"], ["path", "M3 10h4"],
+             ["path", "M3 14h4"], ["path", "M17 10h4"], ["path", "M17 14h4"]],
+};
+
+//: Shown for a capability the backend accepts but this file has no glyph for.
+const CAPABILITY_FALLBACK = [["path", "M12 3l9 9-9 9-9-9z"], ["path", "M12 9v4"],
+                             ["path", "M12 16.2v.4"]];
+
+function capabilityIcon(key, size = 14) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.7");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.classList.add("om-cap-icon");
+  for (const shape of CAPABILITY_ICONS[key] || CAPABILITY_FALLBACK) {
+    const [kind, ...rest] = shape;
+    const node = document.createElementNS(ns, kind);
+    if (kind === "path") node.setAttribute("d", rest[0]);
+    else if (kind === "circle") {
+      node.setAttribute("cx", rest[0]);
+      node.setAttribute("cy", rest[1]);
+      node.setAttribute("r", rest[2]);
+    } else if (kind === "ellipse") {
+      node.setAttribute("cx", rest[0]);
+      node.setAttribute("cy", rest[1]);
+      node.setAttribute("rx", rest[2]);
+      node.setAttribute("ry", rest[3]);
+    } else if (kind === "rect") {
+      node.setAttribute("x", rest[0]);
+      node.setAttribute("y", rest[1]);
+      node.setAttribute("width", rest[2]);
+      node.setAttribute("height", rest[3]);
+      if (rest[4] != null) node.setAttribute("rx", rest[4]);
+    }
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+function capabilityTitle(key) {
+  const known = CAPABILITY_LABELS[key];
+  if (known) return known[0];
+  return String(key).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+// The pack's own account of what it does, as a grid that reflows with the window.
+//
+// Declared by the author and not verified, which the panel says plainly. What is actually in
+// the archive is a separate reading, and the two are worth comparing.
+function buildCapabilities(keys, refused = []) {
+  const box = panel("Access and capabilities", countNote(keys.length, "declaration"),
+    { open: false, remember: "om-caps-open" });
+  const content = el("div", "om-caps-pane");
+  box.body.appendChild(content);
+  box.pane = content;
+  content.appendChild(el("div", "om-caps-note", "Declared by the author, not verified."));
+  if (keys.length) {
+    const grid = el("div", "om-caps");
+    for (const key of keys) {
+      const cell = el("div", "om-cap");
+      const head = el("div", "om-cap-head");
+      head.appendChild(capabilityIcon(key));
+      head.appendChild(el("span", "om-cap-name", capabilityTitle(key)));
+      cell.appendChild(head);
+      const blurb = CAPABILITY_LABELS[key]?.[1];
+      if (blurb) cell.appendChild(el("span", "om-cap-what", blurb));
+      grid.appendChild(cell);
+    }
+    content.appendChild(grid);
+  }
+  // Named rather than dropped quietly, so the author of the pack can see which word was not
+  // recognised. The vocabulary is fixed on purpose: two packs are only comparable if they are
+  // describing themselves in the same terms.
+  if (refused.length) {
+    const bad = el("div", "om-caps-bad");
+    bad.appendChild(el("b", null,
+      `${refused.length === 1 ? "One declaration" : `${refused.length} declarations`} `
+      + "not recognised"));
+    bad.appendChild(el("div", "om-caps-list", refused.join(", ")));
+    bad.appendChild(el("div", "om-cap-what", "Not in the accepted list, so not shown."));
+    content.appendChild(bad);
+  }
+  return box;
+}
+
 function appendDeveloperBlock(slot, meta) {
   const dev = meta.developer || {};
   const matched = (meta.incompatible || []).filter((entry) => entry.matched);
   const workflows = dev.example_workflows || [];
   const themes = dev.themes || [];
   const gallery = panelSetting("openManager.galleryShow", true) ? (dev.gallery || []) : [];
+  const capabilities = dev.capabilities || [];
+  const badCapabilities = dev.capabilities_unknown || [];
 
   // The author's note on the current release, placed above the version list.
   const releaseSlot = packRoot(slot)?.querySelector(".om-release-slot");
@@ -3304,9 +3455,14 @@ function appendDeveloperBlock(slot, meta) {
   }
 
   if (!matched.length && !dev.source && !dev.docs && !dev.funding
-    && !workflows.length && !themes.length && !gallery.length) return;
+    && !workflows.length && !themes.length && !gallery.length && !capabilities.length
+    && !badCapabilities.length) return;
 
   const block = el("div", "om-dev");
+  // The page's own container, which is built before a pack's metadata arrives. Where it is
+  // there these sections become tabs in it; where it is not, each falls back to a dropdown of
+  // its own, because this same function draws the sections for a repository with no pack page.
+  const tabs = packRoot(slot)?.querySelector(".om-tabs")?.__omTabs || null;
 
   for (const entry of matched) {
     const card = el("div", "om-ack");
@@ -3341,22 +3497,51 @@ function appendDeveloperBlock(slot, meta) {
     else block.appendChild(links);
   }
 
-  if (gallery.length) block.appendChild(buildGallery(meta, gallery));
+  if (capabilities.length || badCapabilities.length) {
+    const built = buildCapabilities(capabilities, badCapabilities);
+    if (tabs) {
+      tabs.add({ id: "capabilities", title: "Access", order: 40,
+                 note: countNote(capabilities.length, "declaration"), pane: built.pane });
+    } else {
+      block.appendChild(built);
+    }
+  }
+
+  if (gallery.length) {
+    const built = buildGallery(meta, gallery);
+    if (tabs && built) {
+      tabs.add({ id: "gallery", title: "Gallery", order: 70,
+                 note: countNote(gallery.length, "image"), pane: built.pane });
+    } else if (built) {
+      block.appendChild(built);
+    }
+  }
 
   if (themes.length) {
-    block.appendChild(collapsible("Themes", themes, (path) => {
+    const themeRows = [];
+    const built = collapsible("Themes", themes, (path) => {
       const item = el("button", "om-wf-item");
       item.appendChild(el("span", "om-wf-name", path.split("/").pop().replace(/\.json$/, "")));
       item.appendChild(el("span", "om-wf-path", path));
       item.title = `Add ${path} to your themes`;
       item.onclick = () => addPackTheme(meta.repository, meta.default_branch, path, item);
+      themeRows.push([path, item]);
       return item;
-    }, { note: countNote(themes.length, "theme"), remember: "om-themes-open" }));
+    }, { note: countNote(themes.length, "theme"), remember: "om-themes-open" });
+    const titles = () => fillThemeTitles(meta.repository, meta.default_branch, themeRows);
+    if (tabs) {
+      tabs.add({ id: "themes", title: "Themes", order: 50,
+                 note: countNote(themes.length, "theme"), pane: built.pane, onShow: titles });
+    } else {
+      built.addEventListener("toggle", () => { if (built.open) titles(); });
+      if (built.open) titles();
+      block.appendChild(built);
+    }
   }
 
   if (workflows.length) {
     const previews = dev.example_workflow_previews || {};
-    block.appendChild(collapsible("Example workflows", workflows, (path) => {
+    const built = collapsible("Example workflows", workflows, (path) => {
       const item = el("button", "om-wf-item");
       // A preview beside the workflow, where the pack ships one. Shows what it produces
       // before it is loaded.
@@ -3373,10 +3558,128 @@ function appendDeveloperBlock(slot, meta) {
       item.title = `Load ${path}`;
       item.onclick = () => loadExampleWorkflow(meta.repository, meta.default_branch, path);
       return item;
-    }, { note: countNote(workflows.length, "workflow"), remember: "om-workflows-open" }));
+    }, { note: countNote(workflows.length, "workflow"), remember: "om-workflows-open" });
+    if (tabs) {
+      tabs.add({ id: "workflows", title: "Workflows", order: 60,
+                 note: countNote(workflows.length, "workflow"), pane: built.pane });
+    } else {
+      block.appendChild(built);
+    }
   }
 
   slot.appendChild(block);
+}
+
+// One container holding every section of a page, switched by a strip of tabs.
+//
+// The pack page had grown seven separate dropdowns, each with its own remembered open state,
+// so reading it meant opening and closing boxes to find anything. This is the same content in
+// one frame: the strip says what is available and how much of it there is, and the body is a
+// single scrolling area of a fixed height rather than seven that each move the rest of the
+// page when they open.
+//
+// Sections may be added after the container is on screen, because the ones that come from a
+// pack's metadata arrive later. A section added late never steals the view.
+function tabbedPanel({ remember = "" } = {}) {
+  const root = el("div", "om-tabs");
+  const strip = el("div", "om-tabstrip");
+  strip.setAttribute("role", "tablist");
+  const body = el("div", "om-tabbody");
+  root.appendChild(strip);
+  root.appendChild(body);
+  const sections = [];
+  let active = "";
+
+  const fold = el("button", "om-tabfold");
+  fold.type = "button";
+  const foldKey = remember ? `${remember}-shut` : "";
+  let shut = false;
+  if (foldKey) {
+    try { shut = localStorage.getItem(foldKey) === "1"; } catch { /* private browsing */ }
+  }
+  strip.appendChild(fold);
+
+  const loadActive = () => {
+    const found = sections.find((one) => one.id === active);
+    if (!found?.onShow) return;
+    try { found.onShow(); } catch { /* the section's own loader */ }
+  };
+
+  const paintFold = () => {
+    root.classList.toggle("om-tabs-shut", shut);
+    fold.textContent = shut ? "▸" : "▾";
+    fold.title = shut ? "Show the sections" : "Hide the sections and read on";
+    fold.setAttribute("aria-label", fold.title);
+    fold.setAttribute("aria-expanded", shut ? "false" : "true");
+  };
+
+  const setShut = (next, { load = true } = {}) => {
+    shut = next;
+    paintFold();
+    if (foldKey) {
+      try { localStorage.setItem(foldKey, shut ? "1" : "0"); } catch { /* private browsing */ }
+    }
+    if (!shut && load) loadActive();
+  };
+
+  fold.onclick = () => setShut(!shut);
+  paintFold();
+
+  const show = (id) => {
+    const found = sections.find((one) => one.id === id);
+    if (!found) return;
+    active = id;
+    for (const one of sections) {
+      const on = one.id === id;
+      one.tab.classList.toggle("om-tab-on", on);
+      one.tab.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    body.replaceChildren(found.pane);
+    if (remember) {
+      try { localStorage.setItem(remember, id); } catch { /* private browsing */ }
+    }
+    if (!shut) loadActive();
+  };
+
+  const add = ({ id, title, note = "", order = 50, pane, onShow = null }) => {
+    const tab = el("button", "om-tab");
+    tab.type = "button";
+    tab.setAttribute("role", "tab");
+    tab.appendChild(el("span", "om-tab-name", title));
+    const count = el("span", "om-tab-note", note);
+    tab.appendChild(count);
+    tab.onclick = () => {
+      if (shut) setShut(false, { load: false });
+      show(id);
+    };
+    const entry = { id, title, order, tab, pane, onShow, count };
+    sections.push(entry);
+    sections.sort((a, b) => a.order - b.order);
+    strip.replaceChildren(fold, ...sections.map((one) => one.tab));
+    if (active) show(active);
+    return {
+      pane,
+      note: (text) => { count.textContent = text; },
+    };
+  };
+
+  // Called once the sections that exist up front are registered, so the opening tab is the
+  // first of those rather than whichever happened to be built first.
+  const start = () => {
+    if (!sections.length) return;
+    let chosen = sections[0].id;
+    if (remember) {
+      try {
+        const saved = localStorage.getItem(remember);
+        if (saved && sections.some((one) => one.id === saved)) chosen = saved;
+      } catch { /* private browsing */ }
+    }
+    show(chosen);
+  };
+
+  const api = { root, add, show, start, has: (id) => sections.some((one) => one.id === id) };
+  root.__omTabs = api;
+  return api;
 }
 
 // A section that collapses to its header bar. `note` is all that stays visible when
@@ -3421,6 +3724,8 @@ function collapsible(title, paths, build, {
   const list = el("div", listClass);
   for (const path of paths) list.appendChild(build(path));
   box.body.appendChild(list);
+  // The list on its own, for a caller putting it in a tab rather than a dropdown.
+  box.pane = list;
   return box;
 }
 
@@ -3596,8 +3901,8 @@ async function openKeysDialog() {
   box.appendChild(el("div", "om-dl-note",
     "An environment variable is used instead where one is set, for a deployment that would "
     + "rather inject its secrets. Nothing here writes a key into the environment: this "
-    + "process loads third-party packs that can read it, and pip inherits it when a pack's "
-    + "requirements are installed."));
+    + "process loads third-party packs that can read it, and the installer inherits it when "
+    + "a pack's requirements are installed."));
   if (found?.warning) box.appendChild(el("div", "om-dl-note om-dl-bad", found.warning));
 
   const rows = el("div", "om-keys");
@@ -3879,6 +4184,123 @@ function openLightbox(items, index) {
 
 // Downloads a theme a pack ships and merges it into the palette store, leaving every other
 // palette untouched. It appears in the theme picker after a reload.
+//: How a theme names an image the pack ships beside it. Rewritten once, when the theme is
+//: added, because the palette store is all the theme system sees afterwards and it has no way
+//: to know which pack a palette came from.
+const PACK_REF = /^pack:([A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,5})$/;
+const PACK_REF_DEPTH = 6;
+
+function resolvePackAssets(value, repository, depth = 0) {
+  if (typeof value === "string") {
+    const match = PACK_REF.exec(value.trim());
+    if (!match) return value;
+    const query = new URLSearchParams({ repo: repository || "", path: match[1] });
+    return `${API}/pack-asset?${query.toString()}`;
+  }
+  if (depth >= PACK_REF_DEPTH) return value;
+  if (Array.isArray(value)) {
+    return value.map((one) => resolvePackAssets(one, repository, depth + 1));
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, one] of Object.entries(value)) {
+      out[key] = resolvePackAssets(one, repository, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+//: Most stored themes refreshed from installed packs in one pass.
+const THEME_REFRESH_CAP = 40;
+
+function themeIsNewer(candidate, current) {
+  const one = Number(candidate);
+  const two = Number(current);
+  if (Number.isFinite(one) && Number.isFinite(two)) return one > two;
+  return String(candidate ?? "") !== String(current ?? "");
+}
+
+// Brings stored copies of pack themes up to what the installed pack now ships.
+//
+// A theme added from a pack is copied into the palette store, and the store is all the theme
+// system reads afterwards. A pack shipping a newer theme therefore changed nothing until the
+// reader happened to press Add again, which is invisible unless you already know. Only themes
+// already in the store are touched, and only where the pack declares a higher version, so
+// this never adds a theme the reader did not choose.
+async function refreshPackThemes() {
+  let data;
+  try {
+    const answer = await api.fetchApi(`${API}/theme-updates`);
+    data = await answer.json();
+    if (!answer.ok || !data.ok) return [];
+  } catch {
+    return [];
+  }
+  const setting = app.extensionManager?.setting;
+  const service = app.extensionManager?.colorPalette;
+  if (!setting) return [];
+  let store;
+  try {
+    store = setting.get("Comfy.CustomColorPalettes") || {};
+  } catch {
+    return [];
+  }
+  const next = { ...store };
+  const updated = [];
+  for (const entry of (data.themes || []).slice(0, THEME_REFRESH_CAP)) {
+    const theme = resolvePackAssets(entry.theme, entry.repo);
+    const id = theme?.id;
+    if (!id || !next[id]) continue;
+    if (!themeIsNewer(theme.version, next[id].version)) continue;
+    next[id] = theme;
+    updated.push(theme.name || id);
+  }
+  if (!updated.length) return [];
+  try {
+    await setting.set("Comfy.CustomColorPalettes", next);
+    const active = service?.getActiveColorPalette?.()?.id;
+    if (active && next[active]) {
+      try { await service.loadColorPalette(active); } catch { /* redrawn on the next switch */ }
+    }
+  } catch {
+    return [];
+  }
+  return updated;
+}
+
+const themeNames = new Map();
+
+const THEME_NAME_CAP = 20;
+
+async function readThemeName(repository, branch, path) {
+  const key = `${repository || ""}|${path}`;
+  if (themeNames.has(key)) return themeNames.get(key);
+  try {
+    const query = new URLSearchParams({ repo: repository || "", branch: branch || "", path });
+    const answer = await api.fetchApi(`${API}/theme?${query.toString()}`);
+    const data = await answer.json();
+    if (!answer.ok || !data.ok) return "";
+    const name = String(data.theme?.name || data.theme?.id || "").trim().slice(0, 80);
+    if (name) themeNames.set(key, name);
+    return name;
+  } catch {
+    return "";
+  }
+}
+
+async function fillThemeTitles(repository, branch, rows) {
+  for (const [path, item] of rows.slice(0, THEME_NAME_CAP)) {
+    if (item.dataset.omThemeName) continue;
+    const name = await readThemeName(repository, branch, path);
+    if (!name) continue;
+    const label = item.querySelector(".om-wf-name");
+    if (label) label.textContent = name;
+    item.title = `Add ${name} to your themes`;
+    item.dataset.omThemeName = "1";
+  }
+}
+
 async function addPackTheme(repository, branch, path, button) {
   let data;
   try {
@@ -3890,7 +4312,7 @@ async function addPackTheme(repository, branch, path, button) {
     notify("Could not read theme", error.message);
     return;
   }
-  const theme = data.theme;
+  const theme = resolvePackAssets(data.theme, repository);
   const name = theme.name || theme.id;
   if (!(await confirmAction("Add theme", `Add "${name}" to your themes?`, "Add"))) return;
   try {
@@ -6517,14 +6939,69 @@ sidebarStyle.textContent = `
 /* The column already spaces its children, so a panel inside it drops its own margin rather
    than adding a second gap to the first. */
 .om-dev > .om-panel { margin: 0; }
+/* One frame for every section of a pack page. The body is the only scrolling area, and it is
+   as tall as the tallest thing it replaced, so nothing got shorter in the move. */
+.om-tabs { margin: 10px 0; border: 1px solid var(--om-border, #2c332b); border-radius: 8px;
+  overflow: hidden; }
+.om-tabstrip { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px;
+  border-bottom: 1px solid var(--om-border, #2c332b);
+  background: var(--comfy-menu-bg, rgba(255,255,255,0.03)); }
+.om-tab { display: inline-flex; align-items: baseline; gap: 5px; padding: 5px 10px;
+  border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit;
+  font-size: 12px; cursor: pointer; }
+.om-tab:hover { background: var(--om-input, rgba(255,255,255,0.06)); }
+.om-tab-on { background: var(--om-input, rgba(255,255,255,0.10)); font-weight: 600; }
+.om-tab-note { font-size: 10px; opacity: 0.6; white-space: nowrap; }
+.om-tabfold { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent;
+  color: var(--om-muted); font: inherit; font-size: 11px; line-height: 1; cursor: pointer; }
+.om-tabfold:hover { background: var(--om-input, rgba(255,255,255,0.06)); color: var(--om-text); }
+.om-tabfold:focus-visible { outline: 2px solid #388bfd; outline-offset: 1px; }
+.om-tabs-shut > .om-tabstrip { border-bottom: 0; }
+.om-tabs-shut > .om-tabbody { display: none; }
+.om-tabbody { max-height: 46vh; overflow: auto; }
+/* One inset for whatever a tab holds, so a list, a grid and a single line of text all sit the
+   same distance from the frame. Two classes deep so it outranks the padding a section
+   declares for itself when it is standing alone in a dropdown. */
+.om-tabs > .om-tabbody > * { padding: 10px; }
+/* The sections used to scroll inside their own dropdowns. In one frame that would nest a
+   scroller in a scroller, so the frame owns the scrolling and they simply lay out. */
+.om-tabbody .om-wf-list, .om-tabbody .om-nodelist, .om-tabbody .om-chg,
+.om-tabbody .om-chg-text, .om-tabbody .om-gal, .om-tabbody .om-caps,
+.om-tabbody .om-versions { max-height: none; overflow: visible; }
+.om-tabbody .om-side-status { line-height: 1.5; }
+.om-tabbody > .om-caps-pane > .om-caps-note { padding: 0 0 6px; }
 .om-wf-list { display: flex; flex-direction: column; gap: 6px;
   max-height: 40vh; overflow-y: auto; padding: 2px 2px 2px 0; }
+/* Capabilities reflow with the window: as many columns as fit at a readable width, so the
+   same list reads as one column in a narrow side panel and four in a wide window. */
+/* Two columns at most. Each track is at least half the row less the gap, so a third can
+   never fit however wide the window gets, and the 290px floor is what the longest
+   explanation needs to sit on one line, so a narrow panel drops to one column rather than
+   wrapping every cell. */
+.om-caps { display: grid; gap: 6px; padding: 0 12px 10px;
+  grid-template-columns: repeat(auto-fill, minmax(max(290px, calc(50% - 3px)), 1fr)); }
+.om-cap { display: flex; flex-direction: column; gap: 2px; padding: 7px 9px;
+  border: 1px solid var(--om-border, #2c332b); border-radius: 6px;
+  background: var(--comfy-input-bg, rgba(255,255,255,0.03)); }
+.om-cap-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.om-cap-icon { flex: none; opacity: 0.85; }
+.om-cap-name { font-weight: 600; font-size: 12px; min-width: 0; }
+
+/* Indented under the glyph rather than beside it, so the glyph is what the eye lands on. */
+.om-cap-what { font-size: 11px; opacity: 0.72; line-height: 1.35; padding-left: 20px; }
+.om-caps-note { padding: 10px 12px 6px; font-size: 11px; opacity: 0.72; }
+.om-caps-bad { margin: 0 12px 10px; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid var(--om-warn-border, rgba(217,112,95,0.45));
+  background: var(--om-warn-bg, rgba(217,112,95,0.10)); font-size: 11px; }
+.om-caps-list { font-family: ui-monospace, monospace; margin: 3px 0 4px; word-break: break-all; }
 /* Inside a panel the border is drawn for it, so the list sits in from that edge. */
 .om-panel-body > .om-wf-list, .om-panel-body > .om-gal { padding: 10px 12px; }
 /* A section that has nothing to show still has something to say, and was saying it hard
    against both edges. The same room the contents would have had. */
 .om-panel-body > .om-side-status, .om-panel-body > .om-body,
 .om-panel-body > .om-dl-note { padding: 12px; line-height: 1.5; }
+.om-panel-body > * > .om-side-status:only-child { padding: 12px; line-height: 1.5; }
 .om-nodes-bar + .om-side-status { padding: 12px; }
 .om-chg { display: flex; flex-direction: column; }
 .om-chg-item { padding: 10px 12px; border-bottom: 1px solid var(--om-surface); }
@@ -6675,8 +7152,8 @@ video.om-lb-img { background: #000; }
 @media (max-width: 1100px) { .om-dl-open-text { display: none; } }
 /* In the control bar there is no room for words, so the icon carries it and the name is on
    the hover. Square rather than oblong, so the three read as a set of controls. */
-.om-dl-open-icons { margin: 0 2px; padding: 3px; width: 26px; height: 24px;
-  justify-content: center; }
+.om-dl-open-icons { margin: 2px; padding: 3px; width: 28px; min-height: 24px;
+  align-self: stretch; justify-content: center; }
 .om-dl-open-icons .om-dl-open-text { display: none; }
 .om-dl-open-icons .om-dl-open-icon { font-size: 14px; }
 /* .om-side-select carries flex:1 for the sidebar's rows; in a stacked field that
@@ -6764,6 +7241,9 @@ video.om-lb-img { background: #000; }
    the window itself rather than on its contents. */
 .om-float-folded .om-float-tools { display: none; }
 /* Still shortens before the close button does, because a summary can be long. */
+.om-float-icon { width: calc(var(--om-title-size, 15px) * 1.35); flex: none;
+  height: calc(var(--om-title-size, 15px) * 1.35); border-radius: 4px;
+  object-fit: cover; background: var(--om-input); }
 .om-float-title { font-size: var(--om-title-size, 15px); font-weight: 600;
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
@@ -6927,6 +7407,23 @@ video.om-lb-img { background: #000; }
   text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9); }
 .om-mon-compact.om-mon-v { flex-direction: column; gap: 2px; }
 .om-mon-compact.om-mon-v .om-mon-tube { height: 16px; }
+.om-mon-style-vertical .om-mon-v .om-mon-label,
+.om-mon-style-vertical-compact .om-mon-v .om-mon-label {
+  writing-mode: vertical-rl; text-orientation: mixed; line-height: 1; letter-spacing: .06em; }
+.om-mon-style-vertical, .om-mon-style-vertical-compact,
+.om-mon-style-vertical .om-mon-dynamic,
+.om-mon-style-vertical-compact .om-mon-dynamic { align-items: stretch; }
+.om-mon-style-vertical .om-mon-v, .om-mon-style-vertical-compact .om-mon-v {
+  align-items: stretch; min-height: 28px; }
+.om-mon-style-vertical .om-mon-v .om-mon-value { align-self: center; }
+.om-mon-style-vertical .om-mon-v .om-mon-label,
+.om-mon-style-vertical-compact .om-mon-v .om-mon-label { align-self: flex-start; }
+.om-mon-style-vertical .om-mon-v .om-mon-tube,
+.om-mon-style-vertical-compact .om-mon-compact.om-mon-v .om-mon-tube {
+  width: 10px; height: auto; border-radius: 3px; }
+.om-mon-style-vertical-compact .om-mon-compact.om-mon-v {
+  flex-direction: row; gap: 3px; }
+.om-mon-style-vertical-compact .om-mon-compact.om-mon-v .om-mon-value { display: none; }
 @media (max-width: 1500px) { .om-mon-label { display: none; } }
 @media (max-width: 1200px) { .om-mon { display: none; } }
 .om-mon { cursor: pointer; border-radius: 6px; padding: 2px 4px; }
@@ -7112,6 +7609,11 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
   const fold = el("button", "om-float-fold", "▾");
   fold.title = "Collapse";
   bar.appendChild(fold);
+  const mark = el("img", "om-float-icon");
+  mark.alt = "";
+  mark.hidden = true;
+  mark.onerror = () => { mark.hidden = true; };
+  bar.appendChild(mark);
   const heading = el("div", "om-float-title", title);
   bar.appendChild(heading);
   const badge = el("div", "om-float-badge");
@@ -7331,6 +7833,12 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     // Opening something already open. Raising alone leaves a collapsed window collapsed, so
     // the reader clicks and nothing they can see happens.
     present: () => { setFolded(false); raise(); },
+    setIcon: (url) => {
+      const wanted = panelSetting("openManager.windowIcons", true) === true && safeUrl(url || "");
+      if (!wanted) { mark.hidden = true; mark.removeAttribute("src"); return; }
+      mark.src = wanted;
+      mark.hidden = false;
+    },
     setBadge: (text) => { badge.textContent = text || ""; },
     isFolded: () => panel.classList.contains("om-float-folded"),
   };
@@ -8697,14 +9205,14 @@ function monitorShape(kind) {
   const compact = style.endsWith("-compact");
   const base = compact ? style.slice(0, -"-compact".length) : style;
   const axis = base === "mixed" ? (kind === "thermo" ? "v" : "h") : base[0];
-  return { axis, compact };
+  return { axis, compact, base };
 }
 
 // One cell. The parts are the same whichever way round it is drawn -- a track, something that
 // fills it, a label and a figure -- so the shape is a matter of class names and which way the
 // fill grows, not of four separate builders.
 function monitorCell(kind, key, label, title) {
-  const { axis, compact } = monitorShape(kind);
+  const { axis, compact, base } = monitorShape(kind);
   const box = el("span",
     `om-mon-cell om-mon-${key} om-mon-${axis}${compact ? " om-mon-compact" : ""}`);
   box.title = title;
@@ -8714,14 +9222,18 @@ function monitorCell(kind, key, label, title) {
   const name = el("span", "om-mon-label", label);
   const value = el("span", `om-mon-value${kind === "thermo" ? " om-mon-degrees" : ""}`, "-");
 
-  if (compact) {
+  if (compact && base === "vertical") {
+    track.appendChild(value);
+    box.appendChild(name);
+    box.appendChild(track);
+  } else if (compact) {
     // The label and the figure read as one phrase, over the bar or under the column. One
     // element instead of three is the whole point of the compact styles.
     const both = el("span", "om-mon-both");
     both.appendChild(name);
     both.appendChild(value);
-    if (axis === "v") { box.appendChild(track); box.appendChild(both); }
-    else { box.appendChild(track); box.appendChild(both); }
+    box.appendChild(track);
+    box.appendChild(both);
   } else {
     box.appendChild(name);
     box.appendChild(track);
@@ -8779,19 +9291,26 @@ function syncMonitorDevices(reading) {
   monitorStrip._parts = [];
   monitorStrip._dynamic.replaceChildren();
 
+  const sensors = new Map();
   for (const one of temps) {
-    const thermo = monitorThermo(one.label.slice(0, 8), `${one.label} temperature`);
+    const base = one.label.slice(0, 8);
+    sensors.set(base, (sensors.get(base) || 0) + 1);
+  }
+  for (const [at, one] of temps.entries()) {
+    const base = one.label.slice(0, 8);
+    const thermo = monitorThermo(sensors.get(base) > 1 ? `${base}:${at}` : base,
+                                 `${one.label} temperature`);
     monitorStrip._dynamic.appendChild(thermo.box);
-    monitorStrip._parts.push({ kind: "cpu-temp", label: one.label, thermo });
+    monitorStrip._parts.push({ kind: "cpu-temp", label: one.label, at, thermo });
   }
   for (const device of devices) {
     const many = devices.length > 1;
-    const label = many ? `VRAM${device.index}` : "VRAM";
+    const label = many ? `VRAM:${device.index}` : "VRAM";
     const meter = monitorMeter("vram", label, device.name);
     monitorStrip._dynamic.appendChild(meter.box);
     monitorStrip._parts.push({ kind: "vram", index: device.index, meter });
     if (wantThermo && "temp" in device) {
-      const thermo = monitorThermo(many ? `GPU${device.index}` : "GPU",
+      const thermo = monitorThermo(many ? `GPU:${device.index}` : "GPU",
                                    `${device.name} temperature`);
       monitorStrip._dynamic.appendChild(thermo.box);
       monitorStrip._parts.push({ kind: "gpu-temp", index: device.index, thermo });
@@ -8810,11 +9329,11 @@ function paintMonitor(reading) {
     if (parts.axis === "v") { parts.fill.style.height = held; parts.fill.style.width = ""; }
     else { parts.fill.style.width = held; parts.fill.style.height = ""; }
   };
-  const setMeter = (parts, share, text, title) => {
+  const setMeter = (parts, share, text, detail) => {
     parts.value.textContent = text;
     fillTo(parts, share);
     parts.fill.classList.toggle("om-mon-hot", share >= 90);
-    if (title) parts.box.title = title;
+    parts.box.title = detail ? `${text} · ${detail}` : text;
   };
   const setThermo = (parts, degrees, title) => {
     parts.value.textContent = `${Math.round(degrees)}°`;
@@ -8825,9 +9344,7 @@ function paintMonitor(reading) {
 
   if (typeof reading.cpu === "number") {
     setMeter(cells.cpu, reading.cpu, `${Math.round(reading.cpu)}%`,
-             reading.cores?.length
-               ? `${Math.round(reading.cpu)}% across ${reading.cores.length} logical processors`
-               : "");
+             reading.cores?.length ? `${reading.cores.length} logical processors` : "");
   }
   if (reading.ram?.total) {
     const share = (reading.ram.used / reading.ram.total) * 100;
@@ -8850,7 +9367,10 @@ function paintMonitor(reading) {
         setThermo(part.thermo, device.temp, `${device.name} at ${device.temp}°C`);
       }
     } else if (part.kind === "cpu-temp") {
-      const found = (reading.cpu_temps || []).find((one) => one.label === part.label);
+      const sensors = reading.cpu_temps || [];
+      const found = sensors[part.at]?.label === part.label
+        ? sensors[part.at]
+        : sensors.find((one) => one.label === part.label);
       if (found) setThermo(part.thermo, found.temp, `${found.label} at ${found.temp}°C`);
     }
   }
@@ -10628,6 +11148,93 @@ app.registerExtension({
         + "does not override it.",
     },
     {
+      id: "openManager.themeNodeArt",
+      name: "Theme images behind node bodies",
+      category: ["Open Manager", "Theme", "themeNodeArt"],
+      type: "boolean",
+      defaultValue: true,
+      onChange: () => refreshExtras(),
+      tooltip: "A theme may paint a texture behind every node body. It is the one effect here "
+        + "that costs work for every node on every frame, so this is also the answer on a large "
+        + "graph. Off decodes and paints nothing and leaves the theme's colours, gradients, "
+        + "icons and glow alone. The image sits under a node's widgets and is hidden entirely "
+        + "behind text boxes and image previews, which are real elements above the canvas.",
+    },
+    {
+      id: "openManager.themeNodeArtOpacity",
+      name: "Node background image strength",
+      category: ["Open Manager", "Theme", "themeNodeArtOpacity"],
+      type: "slider",
+      attrs: { min: 0, max: 1, step: 0.05 },
+      defaultValue: 1,
+      onChange: () => refreshExtras(),
+      tooltip: "Multiplies what the theme asked for, so 1 is what its author designed and lower "
+        + "quietens it. A theme cannot make its image louder than it declared. The opacity of a "
+        + "node's body colour is ComfyUI's own Appearance setting and Open Manager never writes "
+        + "it.",
+    },
+    {
+      id: "openManager.themeTitleIcons",
+      name: "Theme icons in node titles",
+      category: ["Open Manager", "Theme", "themeTitleIcons"],
+      type: "boolean",
+      defaultValue: true,
+      onChange: () => refreshExtras(),
+      tooltip: "A theme may replace the dot at the left of a node's title with an icon. Off "
+        + "restores the dot exactly. Three things always win over the theme: a subgraph keeps "
+        + "its own marker, a node whose dot colour you set keeps your colour, and nothing is "
+        + "drawn when zoomed too far out to read it.",
+    },
+    {
+      id: "openManager.themeGlow",
+      name: "Selection glow",
+      category: ["Open Manager", "Theme", "themeGlow"],
+      type: "boolean",
+      defaultValue: true,
+      onChange: () => refreshExtras(),
+      tooltip: "A theme may light a selected node with a coloured halo and suppress its drop "
+        + "shadow while it does, so the halo reads as a glow rather than a smudge. Off falls "
+        + "back to ComfyUI's own outline and shadow, both still coloured by the theme.",
+    },
+    {
+      id: "openManager.themeBackdrop",
+      name: "Theme graph backdrop",
+      category: ["Open Manager", "Theme", "themeBackdrop"],
+      type: "boolean",
+      defaultValue: true,
+      onChange: () => refreshExtras(),
+      tooltip: "A theme may put an image behind the graph in place of ComfyUI's flat canvas "
+        + "colour. It is set on the canvas element, so the browser draws it and the graph "
+        + "itself costs nothing extra to redraw. Off restores the canvas colour the palette "
+        + "asks for. ComfyUI's own dot grid is drawn over the image either way, unless the "
+        + "theme asks for it to be left off.",
+    },
+    {
+      id: "openManager.themeNodeOpacity",
+      name: "Node body opacity",
+      category: ["Open Manager", "Theme", "themeNodeOpacity"],
+      type: "slider",
+      attrs: { min: 0, max: 1, step: 0.05 },
+      defaultValue: 1,
+      onChange: () => refreshExtras(),
+      tooltip: "How solid a node body is drawn, as the opacity itself rather than a share of "
+        + "anything: 0.6 means a body at 60 percent, whatever the theme asked for. Left at 1 "
+        + "the theme's own value is used, and a theme that asks for nothing stays solid. Only "
+        + "the body is affected. Title bars, widgets and text boxes keep their own colours at "
+        + "every setting, so nothing you need to read gets harder to read.",
+    },
+    {
+      id: "openManager.windowIcons",
+      name: "Show a pack's icon in its window title",
+      category: ["Open Manager", "Windows", "windowIcons"],
+      type: "boolean",
+      defaultValue: true,
+      onChange: () => applyWindowLook(),
+      tooltip: "A pack page opened as a window carries the pack's icon before its name, "
+        + "which tells several open windows apart at a glance. Packs that publish no icon "
+        + "show the name alone either way. Turn it off to keep title bars to text.",
+    },
+    {
       id: "openManager.blurInactive",
       onChange: () => applyWindowLook(),
       name: "Blur inactive windows",
@@ -10870,8 +11477,10 @@ app.registerExtension({
       defaultValue: "mixed",
       tooltip: "'mixed' draws each figure the way it reads: a share of a total as a bar left "
         + "to right, a temperature as a column like a thermostat. 'horizontal' and 'vertical' "
-        + "draw everything the one way instead. The compact styles drop the separate label "
-        + "and put the text on the bar, or under the column, which is about half the width.",
+        + "draw everything the one way instead, and the vertical styles write each name down "
+        + "the side of its column, clear of the track. The compact styles drop the separate "
+        + "label and put the text on the bar, or the figure at the foot of the column, which "
+        + "is what pays for a column wide enough to read.",
     },
     {
       id: "openManager.monitorInterval",
@@ -10916,7 +11525,7 @@ app.registerExtension({
       category: ["Open Manager", "Monitor", "monitorVram"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Graphics memory in use, as a share of the total, one meter per device. A machine with four cards gets four, labelled VRAM0 to VRAM3. Always available.",
+      tooltip: "Graphics memory in use, as a share of the total, one meter per device. A machine with four cards gets four, labelled VRAM:0 to VRAM:3, and a machine with one names it VRAM. Always available.",
     },
     {
       id: "openManager.startupTimes",
@@ -11136,6 +11745,11 @@ app.registerExtension({
     applyWindowLook();
     registerThemes().catch(() => {});
     watchThemeExtras();
+    refreshPackThemes().then((updated) => {
+      if (!updated.length) return;
+      toast(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} themes`} `
+        + "from the installed pack.", { kind: "ok" });
+    }).catch(() => {});
     // One-time, and only for the value an earlier version of this extension wrote.
     repairLinkMode().then((fixed) => {
       if (!fixed) return;

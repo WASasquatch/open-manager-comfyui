@@ -10,6 +10,7 @@ pyproject. Every field is optional and whitelisted.
     docs = "https://..."
     funding = "https://..."
     release_note = "3.1.0 is flagged for an optional subprocess call."
+    capabilities = ["filesystem", "network", "subprocess"]
     example_workflows = ["workflows/demo.json"]
     themes = ["themes/ember-pro.json"]
     gallery = ["docs/before.png", "https://example.com/after.webp"]
@@ -28,7 +29,8 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         tomllib = None
 
-__all__ = ["expand", "from_pyproject", "resolve_incompatible", "scrub"]
+__all__ = ["CAPABILITIES", "expand", "from_pyproject", "repository_from_pyproject",
+           "resolve_incompatible", "scrub"]
 
 #: String fields kept from the table and shown as text.
 _STR_FIELDS = ("source", "branch", "release_note")
@@ -38,7 +40,33 @@ _STR_FIELDS = ("source", "branch", "release_note")
 _URL_FIELDS = ("docs", "funding")
 
 #: List-of-string fields kept from the table.
-_LIST_FIELDS = ("incompatible", "example_workflows", "themes", "gallery")
+_LIST_FIELDS = ("incompatible", "example_workflows", "themes", "gallery", "capabilities")
+
+#: What a pack may declare it does, as a fixed vocabulary so the panel can label each one and
+#: so a reader comparing two packs is comparing the same words. A pack declaring something
+#: outside this loses that entry rather than passing an arbitrary string to the interface.
+#:
+#: This is the author's own account of their pack. It is not verified, and it is not a
+#: substitute for the archive inspection, which reads what is actually in the box.
+CAPABILITIES = {
+    "filesystem": "Filesystem read and write",
+    "network": "Network access",
+    "subprocess": "Subprocess execution",
+    "binaries": "External binaries",
+    "environment": "Environment access",
+    "dynamic_code": "Dynamic code execution",
+    "packages": "Package and dependency changes",
+    "models": "Model downloads",
+    "credentials": "Credentials and API keys",
+    "telemetry": "Telemetry or analytics",
+    "compilation": "Native or GPU compilation",
+    "hardware": "Direct hardware access",
+}
+
+#: Most refused capabilities reported back, and the longest one shown. A pack listing fifty
+#: invented words does not get fifty lines of complaint on its page.
+_CAPABILITY_REFUSALS = 8
+_CAPABILITY_CHARS = 40
 
 #: Most gallery entries kept. Lower than the general cap: a gallery is a showcase, and every
 #: entry is an image the panel will fetch.
@@ -54,6 +82,31 @@ _LIST_CAP = 50
 
 #: Longest string kept from one field.
 _STR_CAP = 600
+
+
+def repository_from_pyproject(text: str) -> str:
+    """The repository a pack declares under ``[project.urls]``.
+
+    Args:
+        text: pyproject.toml contents.
+
+    Returns:
+        The URL, or an empty string where the pack declares none.
+    """
+    if not text or tomllib is None:
+        return ""
+    try:
+        data = tomllib.loads(text)
+    except (ValueError, TypeError):
+        return ""
+    urls = (data.get("project") or {}).get("urls") or {}
+    if not isinstance(urls, dict):
+        return ""
+    for name in ("Repository", "repository", "Source", "source", "Homepage", "homepage"):
+        value = urls.get(name)
+        if isinstance(value, str) and value.strip().startswith(("http://", "https://")):
+            return value.strip()[:_STR_CAP]
+    return ""
 
 
 def from_pyproject(text: str) -> dict:
@@ -88,6 +141,15 @@ def from_pyproject(text: str) -> dict:
         value = section.get(key)
         if isinstance(value, list):
             items = [v.strip() for v in value if isinstance(v, str) and v.strip()]
+            if key == "capabilities":
+                asked = dict.fromkeys(v.lower().replace("-", "_") for v in items)
+                items = [one for one in asked if one in CAPABILITIES]
+                # What was refused is reported rather than dropped in silence, so an author
+                # who guessed at a word finds out instead of seeing their declaration vanish.
+                refused = [one[:_CAPABILITY_CHARS] for one in asked
+                           if one not in CAPABILITIES][:_CAPABILITY_REFUSALS]
+                if refused:
+                    out["capabilities_unknown"] = refused
             if items:
                 out[key] = items[:_LIST_CAP]
     # The official scaffold already carries these, so a pack need not repeat them under
@@ -265,6 +327,13 @@ def expand(table: dict, lister) -> dict:
             folder = posixpath.dirname(entry)
             stem = posixpath.splitext(posixpath.basename(entry))[0].lower()
             for candidate in lister(folder or "."):
+                # Beside the workflow, not merely somewhere under it. Both listers recurse, so
+                # matching on the basename alone paired a workflow at the pack root with an
+                # image from any subdirectory: a pack shipping `was-node.json` took
+                # `themes/was-node-suite-dark/was-node-bg.png` as its thumbnail, because that
+                # sorts before its real sibling.
+                if posixpath.dirname(candidate) != folder:
+                    continue
                 name = posixpath.basename(candidate).lower()
                 base, ext = posixpath.splitext(name)
                 if ext not in _PREVIEW_SUFFIXES:

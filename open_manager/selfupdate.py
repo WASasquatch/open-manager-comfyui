@@ -170,6 +170,24 @@ def version() -> str:
     return "unknown"
 
 
+def _install_prefix(python: str) -> tuple[str, str]:
+    """How to spell an install command for this environment, and how to force one.
+
+    Args:
+        python: Interpreter the command should act on, already quoted.
+
+    Returns:
+        ``(prefix, reinstall_flag)``. The flag is empty where the installer has no equivalent.
+    """
+    from . import piptool
+
+    if piptool.kind(sys.executable) == "uv":
+        found = piptool.command(sys.executable, "install", [])
+        if found:
+            return " ".join(_quote(part) for part in found), ""
+    return f"{python} -m pip install", "--force-reinstall "
+
+
 def state() -> dict:
     """How this copy is installed and what updating it would take.
 
@@ -201,6 +219,7 @@ def state() -> dict:
 
     # Package mode. Update from wherever this copy came from, because that is the source the
     # reader already chose and the one their setup is known to reach.
+    prefix, forced = _install_prefix(python)
     source = _source_dir(direct)
     vcs = direct.get("vcs_info") or {}
     from_git = bool(vcs) or (source is not None and (source / ".git").is_dir())
@@ -212,7 +231,7 @@ def state() -> dict:
             {"label": "Update your clone",
              "command": f"git -C {_quote(str(source))} pull"},
             {"label": "Reinstall from it",
-             "command": f"{python} -m pip install --upgrade {_quote(str(source))}"},
+             "command": f"{prefix} --upgrade {_quote(str(source))}"},
         ]
     elif vcs.get("requested_revision") or str(direct.get("url", "")).startswith(("git+", "http")):
         # Installed straight from the repository. pip is given the same URL again.
@@ -224,16 +243,16 @@ def state() -> dict:
                 url = f"{url}@{revision}"
         steps = [
             {"label": "Reinstall from the repository",
-             "command": f'{python} -m pip install --upgrade --force-reinstall "{url}"'},
+             "command": f'{prefix} --upgrade {forced}"{url}"'},
         ]
     else:
         # No direct_url.json means pip resolved this from an index, so the name is enough.
         # The archive stays as the answer for an index that does not carry it.
         steps = [
             {"label": "Update from PyPI",
-             "command": f"{python} -m pip install --upgrade {DIST}"},
+             "command": f"{prefix} --upgrade {DIST}"},
             {"label": "Or install the latest from GitHub",
-             "command": f'{python} -m pip install --upgrade --force-reinstall "{ARCHIVE_URL}"'},
+             "command": f'{prefix} --upgrade {forced}"{ARCHIVE_URL}"'},
         ]
 
     notes = {

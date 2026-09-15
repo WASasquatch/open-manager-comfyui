@@ -24,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import paths
+from . import paths, piptool
 
 __all__ = ["REFUSED", "compare", "forget", "record", "recorded", "restore", "restore_plan",
            "snapshot"]
@@ -160,15 +160,13 @@ def restore_plan(diff: dict) -> dict:
 
 
 def _pip(args: list[str], python: str = "") -> tuple[bool, str]:
-    """Run pip and return whether it succeeded with its trimmed output."""
-    command = [python or sys.executable, "-m", "pip", "--disable-pip-version-check", *args]
+    """Run one installer subcommand and return whether it succeeded, with trimmed output."""
     try:
-        finished = subprocess.run(
-            command, capture_output=True, timeout=TIMEOUT, check=False,
-            encoding="utf-8", errors="replace",
-        )
+        finished = piptool.run(python, args[0], list(args[1:]), timeout=TIMEOUT)
     except (OSError, subprocess.SubprocessError) as error:
-        return False, f"pip could not be run ({type(error).__name__}: {error})"
+        return False, f"the installer could not be run ({type(error).__name__}: {error})"
+    if finished is None:
+        return False, piptool.describe(python)
     output = (finished.stdout or "") + (finished.stderr or "")
     return finished.returncode == 0, "\n".join(output.strip().splitlines()[-15:])
 

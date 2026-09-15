@@ -19,7 +19,8 @@ ComfyUI's floating control bar. Clicking it opens the same panel.
 By default each figure is drawn the way it reads: a share of a total as a bar left to right, a
 temperature as a column like a thermostat, so the two kinds are not mistaken for each other.
 The strip is built from the reading, so a machine with four cards gets four of each, labelled
-`VRAM0`, `GPU0` and so on.
+`VRAM:0`, `GPU:0` and so on. A single card is named without an index, and a processor
+temperature keeps the sensor's own name unless two of them would read the same.
 
 Six styles, under *How the resource monitor strip is drawn*:
 
@@ -27,8 +28,18 @@ Six styles, under *How the resource monitor strip is drawn*:
 |---|---|
 | `mixed` | The default: bars for shares, columns for temperatures |
 | `horizontal` | Everything as a bar |
-| `vertical` | Everything as a column |
-| `…-compact` | The same, with the label and figure on the bar or under the column instead of beside it — about a third narrower |
+| `vertical` | Everything as a column, each name written down the side of its own |
+| `…-compact` | The same, with the text on the bar, or, in the vertical one, no figure at all |
+
+A vertical name is rotated rather than stacked a letter to a line: upright letters want the
+whole height of the control bar for a name like `VRAM:0`. It sits beside the track, never over
+it. `vertical-compact` drops the figure to the hover and shows the column alone, which is the
+narrowest the strip gets: 130 pixels for four readings, against 286 for `horizontal-compact`
+and 377 for `mixed`. Every hover says the share first, then what it is a share of.
+
+A column in either vertical style runs the full height of the strip rather than a fixed
+number of pixels, so every one is the same height as the longest name beside it and as the
+controls it sits among.
 
 ## The Memory panel
 
