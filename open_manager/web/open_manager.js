@@ -99,6 +99,46 @@ style.textContent = `
 .om-btn.flagged { background: #9e6a00; border-color: #d29922; color: #fff; }
 .om-btn.banned { background: #a5261d; border-color: #f85149; color: #fff; }
 .om-btn.om-star.om-starred { background: #3a2d00; border-color: #d29922; color: #f0c14b; }
+[data-om-tint] { box-shadow: inset 0 -2px 0 var(--om-tab-tint);
+  background: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)) !important;
+  --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)); }
+[data-om-tint].p-togglebutton-checked {
+  background: color-mix(in srgb, var(--om-tab-tint) 28%, var(--om-tab-under, #151915)) !important;
+  --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 28%, var(--om-tab-under, #151915)); }
+[data-om-titled] .workflow-label { display: none !important; }
+.om-tab-title { display: inline-block; max-width: 150px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
+/* Rows added to ComfyUI's own tab menu. They wear that menu's item class for their spacing,
+   so only what is inside them is ours. */
+.om-tab-row { display: flex !important; align-items: center; gap: 10px;
+  justify-content: space-between; cursor: default; }
+.om-tab-row-label { color: var(--om-muted, #8b949e); font-size: 12px; }
+.om-tab-swatches { display: inline-flex; align-items: center; gap: 4px; }
+.om-tab-swatch { width: 17px; height: 17px; padding: 0; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+  border: 1px solid rgba(255,255,255,.28); background: transparent; cursor: pointer;
+  font: 600 11px/1 system-ui, sans-serif; color: var(--om-muted, #8b949e); }
+.om-tab-swatch-pick, .om-tab-swatch-off { color: var(--om-text, #e6edf3); }
+.om-tab-swatch:hover { transform: scale(1.15); }
+.om-tab-swatch-on { outline: 2px solid #fff; outline-offset: 1px; }
+.om-tab-swatch-pick, .om-tab-swatch-off { border-style: dashed; }
+.om-tab-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; padding: 2px 8px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--om-border, #2c332b); background: transparent; color: inherit;
+  font: inherit; font-size: 12px; }
+.om-tab-name:hover { border-color: #388bfd; }
+.om-tab-split:not([class*="border"]) { height: 1px; margin: 4px 0; padding: 0;
+  background: var(--om-border, #2c332b); }
+.om-tab-picker { position: fixed; left: -100px; top: -100px; width: 1px; height: 1px;
+  opacity: 0; pointer-events: none; }
+.om-tip { position: fixed; z-index: 10020; max-width: 320px; padding: 6px 9px;
+  border-radius: 6px; pointer-events: none; opacity: 0; transition: opacity .1s linear;
+  background: var(--om-surface, #161b22); border: 1px solid var(--om-border, #2c332b);
+  color: var(--om-text, #e6edf3); font: 11px/1.45 system-ui, sans-serif;
+  box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.om-tip-on { opacity: 1; }
+.om-tip-lead { font-weight: 600; }
+.om-tip-line { color: var(--om-muted, #8b949e); margin-top: 2px; }
 .om-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 10001;
   display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
 .om-toast { background: var(--om-surface); color: var(--om-text); border: 1px solid var(--om-border);
@@ -626,6 +666,91 @@ async function restartServer(button) {
   setTimeout(waitForUp, 3000);
 }
 
+// --- live tooltips ------------------------------------------------------------------
+
+const TIP_DELAY = 220;
+
+const TIP_BEAT = 400;
+
+const tip = { node: null, host: null, timer: 0, opening: 0 };
+
+function tipNode() {
+  if (!tip.node) {
+    tip.node = el("div", "om-tip");
+    tip.node.setAttribute("role", "tooltip");
+    tip.node.id = "om-tip";
+    document.body.appendChild(tip.node);
+  }
+  return tip.node;
+}
+
+function tipSay(said) {
+  const node = tipNode();
+  const lines = String(said).split("\n").filter((one) => one.trim());
+  const first = lines.shift() || "";
+  node.replaceChildren(el("div", "om-tip-lead", first),
+                       ...lines.map((one) => el("div", "om-tip-line", one)));
+  return node;
+}
+
+function tipPlace(host) {
+  const node = tipNode();
+  const at = host.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  const gap = 8;
+  let top = at.bottom + gap;
+  if (top + box.height > window.innerHeight - 4) top = Math.max(4, at.top - box.height - gap);
+  let left = at.left + at.width / 2 - box.width / 2;
+  left = Math.max(6, Math.min(left, window.innerWidth - box.width - 6));
+  node.style.top = `${Math.round(top)}px`;
+  node.style.left = `${Math.round(left)}px`;
+}
+
+function tipClose() {
+  clearTimeout(tip.opening);
+  clearInterval(tip.timer);
+  tip.timer = 0;
+  tip.host?.removeAttribute("aria-describedby");
+  tip.host = null;
+  tip.node?.classList.remove("om-tip-on");
+}
+
+function tipOpen(host) {
+  const said = host.__omTip?.();
+  if (!said) { tipClose(); return; }
+  tip.host = host;
+  host.setAttribute("aria-describedby", "om-tip");
+  tipSay(said).classList.add("om-tip-on");
+  tipPlace(host);
+  clearInterval(tip.timer);
+  tip.timer = setInterval(() => {
+    if (!tip.host?.isConnected || tip.host !== host) { tipClose(); return; }
+    const now = host.__omTip?.();
+    if (!now) { tipClose(); return; }
+    tipSay(now);
+    tipPlace(host);
+  }, TIP_BEAT);
+}
+
+function liveTip(host, say) {
+  if (!host) return host;
+  host.__omTip = typeof say === "function" ? say : () => say;
+  host.removeAttribute("title");
+  if (host.__omTipBound) return host;
+  host.__omTipBound = true;
+  const open = () => {
+    clearTimeout(tip.opening);
+    tip.opening = setTimeout(() => tipOpen(host), TIP_DELAY);
+  };
+  const shut = () => { if (tip.host === host || !tip.host) tipClose(); };
+  host.addEventListener("pointerenter", open);
+  host.addEventListener("pointerleave", shut);
+  host.addEventListener("pointerdown", shut);
+  host.addEventListener("focus", open);
+  host.addEventListener("blur", shut);
+  return host;
+}
+
 // --- modal (replaces window.alert / window.prompt) ----------------------------------
 
 function notify(title, message) {
@@ -903,6 +1028,20 @@ function installedPack(packId) {
   return installedIndex.get(foldId(packId)) || null;
 }
 
+// The version an installed pack could move up to, or an empty string.
+//
+// Args:
+//   record: The pack as the installed index holds it, or null for one not on disk.
+//   newest: The newest version the other side knows about.
+// Returns:
+//   That version where it is a release, ahead of what is installed, and the pack is not held.
+function updateTarget(record, newest) {
+  if (!record || !newest) return "";
+  if (!isRelease(record.version) || !isRelease(newest)) return "";
+  if (isHeld(record)) return "";
+  return compareVersions(newest, record.version) > 0 ? String(newest) : "";
+}
+
 // The install control a registry row carries, in whichever view is on screen.
 //
 // The list, the table and the cards each built this themselves, nine identical lines apiece
@@ -1018,6 +1157,11 @@ function registryControl(entry, cls) {
     onInstall: () => quickInstall(entry.id, control),
   });
   restoreInstall(entry.id, control);
+  const ahead = updateTarget(onDisk, entry.advertised);
+  const busy = installState.get(entry.id);
+  if (ahead && (!busy || busy === "installed")) {
+    control.setUpdate(ahead, () => quickInstall(entry.id, control));
+  }
   control.el.classList.add(cls);
   return control;
 }
@@ -3803,11 +3947,30 @@ function migrateEntryMode() {
 // differently and the difference is not something a reader can see, so the server is asked
 // rather than guessed at: a custom node has the ordinary pack update, a package needs a
 // command in a terminal naming the interpreter that is actually running the server.
+let selfInfo = null;
+
+async function loadSelfInfo(check = false) {
+  if (selfInfo && !check) return selfInfo;
+  try {
+    const answer = await api.fetchApi(`${API}/self${check ? "?check=1" : ""}`);
+    if (answer.ok) selfInfo = await answer.json();
+  } catch {
+    // Left as it was; a row simply does not offer the update.
+  }
+  return selfInfo;
+}
+
+function selfUpdateTarget(pack) {
+  const id = foldId(pack.registry_id || pack.id || "");
+  if (!selfInfo || !id || id !== foldId(selfInfo.node_id || "")) return "";
+  return selfInfo.behind ? String(selfInfo.newest || "") : "";
+}
+
 async function openAboutDialog() {
   let info = null;
   try {
-    const answer = await api.fetchApi(`${API}/self`);
-    if (answer.ok) info = await answer.json();
+    const answer = await api.fetchApi(`${API}/self?check=1`);
+    if (answer.ok) { info = await answer.json(); selfInfo = info; }
   } catch {
     // Left null; the dialog says so rather than showing nothing.
   }
@@ -3828,6 +3991,11 @@ async function openAboutDialog() {
     head.appendChild(el("span", "om-dl-name", `Version ${info.version}`));
     head.appendChild(el("span", "om-dl-src",
       packaged ? "installed as a package" : "installed as a custom node"));
+    if (info.behind && info.newest) {
+      head.appendChild(el("span", "om-upd", `update → ${info.newest}`));
+    } else if (info.newest) {
+      head.appendChild(el("span", "om-dl-src", "up to date"));
+    }
     facts.appendChild(head);
     facts.appendChild(el("div", "om-dl-note", info.path));
     box.appendChild(facts);
@@ -5663,7 +5831,7 @@ async function renderInstalled(container) {
   const packs = data.packs;
   indexInstalled(packs);
 
-  const [timings] = await Promise.all([loadStartupTimes(), loadHolds()]);
+  const [timings] = await Promise.all([loadStartupTimes(), loadHolds(), loadSelfInfo(true)]);
   if (!viewIsCurrent(generation)) return;
   if (timings?.ok && timings.packs?.length) {
     const worst = timings.packs[0];
@@ -5850,8 +6018,7 @@ async function toggleHold(pack, refresh) {
 // is not updatable in any sense the rest of the view cares about: it is left out of the
 // count, the filter, the sort and a batch update alike, which is the whole point of a hold.
 function isInstalledUpdatable(pack) {
-  return !!pack.registry_id && isRelease(pack.version) && isRelease(pack.latest)
-    && compareVersions(pack.latest, pack.version) > 0 && !isHeld(pack);
+  return !!pack.registry_id && !!updateTarget(pack, pack.latest);
 }
 
 // One installed-pack row: version, an update badge, a status-coloured management control, and
@@ -5958,6 +6125,9 @@ function buildInstalledRow(pack) {
   }
   if (cost?.failed) meta.appendChild(el("span", "om-upd om-cost-failed", "import failed"));
   if (updatable) meta.appendChild(el("span", "om-upd", `update → ${pack.latest}`));
+  else if (selfUpdateTarget(pack)) {
+    meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));
+  }
   text.appendChild(meta);
   if (pack.registry_id) text.onclick = () => openPack(pack.registry_id);
   else if (pack.repository) text.onclick = () => openRepoPack({ repo: pack.repository, title: pack.id, classes: [] });
@@ -5976,9 +6146,18 @@ function buildInstalledRow(pack) {
     items,
   });
   const vstatus = (pack.status || "").toLowerCase();
-  if (vstatus === "banned" || vstatus === "flagged") control.setStatusInstalled(vstatus);
-  else if (updatable) control.setUpdate(pack.latest, () => updateInstalled(pack, row, control));
-  else control.setInstalled();
+  const mine = selfUpdateTarget(pack);
+  if (mine) {
+    control.setUpdate(mine, () => openAboutDialog());
+    control.el.querySelector(".om-btn").title =
+      `Version ${mine} is published. Open Manager updates from About and updates.`;
+  } else if (vstatus === "banned" || vstatus === "flagged") {
+    control.setStatusInstalled(vstatus);
+  } else if (updatable) {
+    control.setUpdate(pack.latest, () => updateInstalled(pack, row, control));
+  } else {
+    control.setInstalled();
+  }
   control.el.classList.add("om-side-ictl");
   row.appendChild(control.el);
   return row;
@@ -7375,11 +7554,18 @@ video.om-lb-img { background: #000; }
 .om-orb-stalled { background: #d29922; box-shadow: 0 0 10px 3px rgba(210,153,34,.7);
   animation: om-orb-throb 1s ease-in-out infinite; }
 .om-orb-oom { background: #f85149; box-shadow: 0 0 10px 3px rgba(248,81,73,.65); }
+.om-orb-quiet { background: transparent; box-shadow: none;
+  border: 2px solid #8b949e; box-sizing: border-box; }
+.om-orb-thrashing { background: #db61a2; box-shadow: 0 0 10px 3px rgba(219,97,162,.6);
+  animation: om-orb-throb 1.4s ease-in-out infinite; }
+.om-mem-gone { opacity: .6; border-style: dashed; }
+.om-mem-gone .om-mem-grid { filter: grayscale(.55); }
+.om-mem-gone-bar .om-mem-resident { background: var(--om-muted); }
 @keyframes om-orb-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @keyframes om-orb-throb { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
 /* Anyone who has asked for less movement gets the colour and none of the animation. */
 @media (prefers-reduced-motion: reduce) {
-  .om-orb-working, .om-orb-stalled { animation: none; }
+  .om-orb-working, .om-orb-stalled, .om-orb-thrashing { animation: none; }
 }
 .om-mem-drop { padding: 2px 8px; font-size: 11px; flex: none; }
 .om-keys { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
@@ -7465,6 +7651,9 @@ video.om-lb-img { background: #000; }
    layout and the graph would grow without end. */
 /* Capped as well as floored. A graph is read by its shape, which a taller box does not
    improve, so past this the room goes to the list of models instead of to more empty chart. */
+.om-mem-quiet .om-mem-canvas, .om-mem-quiet .om-mem-bar-value { opacity: .45; }
+.om-mem-quiet .om-mem-graph-detail { color: #d29922; }
+.om-mon-quiet { opacity: .45; }
 .om-mem-canvas { width: 100%; flex: 1 1 0; min-height: 34px; max-height: 140px;
   display: block; background: var(--om-input); }
 .om-mem-graph-detail { color: var(--om-muted); font-size: 12px; padding: 0 14px;
@@ -9019,6 +9208,7 @@ function mountTopbar(attempt = 0) {
   }
   mountMonitor(slot);
   mountRunBar();
+  mountTabMarks();
   return true;
 }
 
@@ -9215,7 +9405,9 @@ function monitorCell(kind, key, label, title) {
   const { axis, compact, base } = monitorShape(kind);
   const box = el("span",
     `om-mon-cell om-mon-${key} om-mon-${axis}${compact ? " om-mon-compact" : ""}`);
-  box.title = title;
+  box._say = title;
+  liveTip(box, () => [box._say, readingQuiet() ? quietText(readingAge()) : ""]
+    .filter(Boolean).join("\n"));
   const track = el("span", axis === "v" ? "om-mon-tube" : "om-mon-bar");
   const fill = el("span", "om-mon-fill");
   track.appendChild(fill);
@@ -9256,7 +9448,9 @@ function monitorThermo(label, title) {
 
 function buildMonitorStrip() {
   const strip = el("div", `om-mon om-mon-style-${monitorStyle()}`);
-  strip.title = "Open the Memory panel";
+  liveTip(strip, () => ["Open the Memory panel",
+    readingQuiet() ? `${quietText(readingAge())}. These figures are the last that arrived.` : ""]
+    .filter(Boolean).join("\n"));
   strip.onclick = () => openMemoryPanel();
   strip._cells = {
     cpu: monitorMeter("cpu", "CPU", "Processor load since the last reading"),
@@ -9333,13 +9527,13 @@ function paintMonitor(reading) {
     parts.value.textContent = text;
     fillTo(parts, share);
     parts.fill.classList.toggle("om-mon-hot", share >= 90);
-    parts.box.title = detail ? `${text} · ${detail}` : text;
+    parts.box._say = detail ? `${text} · ${detail}` : text;
   };
   const setThermo = (parts, degrees, title) => {
     parts.value.textContent = `${Math.round(degrees)}°`;
     fillTo(parts, tempShare(degrees));
     parts.fill.style.background = tempColour(degrees);
-    if (title) parts.box.title = title;
+    if (title) parts.box._say = title;
   };
 
   if (typeof reading.cpu === "number") {
@@ -9376,10 +9570,16 @@ function paintMonitor(reading) {
   }
 }
 
+function markMonitorQuiet() {
+  if (!monitorStrip?.isConnected) return;
+  monitorStrip.classList.toggle("om-mon-quiet", readingQuiet());
+}
+
 async function renewMonitorLease() {
   if (!monitorStrip?.isConnected) return;
   // A hidden tab is not being read, so it stops asking and the server stops sampling.
   if (document.hidden) return;
+  markMonitorQuiet();
   try {
     const answer = await dlPost("/monitor", {
       client: MONITOR_CLIENT, interval: monitorInterval(),
@@ -9388,6 +9588,7 @@ async function renewMonitorLease() {
   } catch {
     // The server will drop the lease on its own.
   }
+  markMonitorQuiet();
 }
 
 function startMonitor() {
@@ -9449,6 +9650,318 @@ function mountMonitor(slot) {
   });
   window.addEventListener("pagehide", stopMonitor);
   return true;
+}
+
+// --- workflow tab marks --------------------------------------------------------------
+
+const TAB_MARK_KEY = "om-tab-marks";
+
+const TAB_TINTS = [
+  ["Red", "#f85149"], ["Amber", "#d29922"], ["Green", "#3fb950"], ["Teal", "#39c5cf"],
+  ["Blue", "#58a6ff"], ["Purple", "#a371f7"], ["Pink", "#db61a2"], ["Grey", "#8b949e"],
+];
+
+const TAB_HEX = /^#[0-9a-fA-F]{6}$/;
+
+const TAB_MENU_PICK = '[role="menuitem"], li.p-contextmenu-item, [data-reka-collection-item]';
+
+const TAB_MENU_WAIT = 1500;
+
+const TAB_TITLE_CAP = 80;
+
+let tabMarks = null;
+let tabSeenKey = "";
+let tabWatching = false;
+
+function tabMarksAll() {
+  if (tabMarks) return tabMarks;
+  try {
+    const held = JSON.parse(localStorage.getItem(TAB_MARK_KEY) || "{}");
+    tabMarks = held && typeof held === "object" ? held : {};
+  } catch {
+    tabMarks = {};
+  }
+  return tabMarks;
+}
+
+function tabMarksSave() {
+  try { localStorage.setItem(TAB_MARK_KEY, JSON.stringify(tabMarksAll())); } catch { /* private */ }
+}
+
+function tabKeyOf(workflow) {
+  return String(workflow?.path || workflow?.key || "");
+}
+
+function tabMarkOf(workflow) {
+  return tabMarksAll()[tabKeyOf(workflow)] || null;
+}
+
+function tabTint(value) {
+  const text = String(value || "").trim();
+  return TAB_HEX.test(text) ? text : "";
+}
+
+function tabStrip() {
+  return document.querySelector(".workflow-tabs");
+}
+
+function openWorkflows() {
+  return app.extensionManager?.workflow?.openWorkflows || [];
+}
+
+function tabMarksOn() {
+  return panelSetting("openManager.tabMarks", true) !== false;
+}
+
+function tabExtrasWrite(workflow, mark) {
+  const active = app.extensionManager?.workflow?.activeWorkflow;
+  if (!active || active.key !== workflow?.key) return;
+  const extra = app.graph?.extra;
+  if (!extra) return;
+  if (mark.title) extra.om_custom_title = mark.title;
+  else delete extra.om_custom_title;
+  if (mark.colour) extra.om_tab_color = mark.colour;
+  else delete extra.om_tab_color;
+}
+
+function tabExtrasRead() {
+  const active = app.extensionManager?.workflow?.activeWorkflow;
+  const extra = app.graph?.extra;
+  if (!active || !extra) return;
+  const title = String(extra.om_custom_title || "").trim().slice(0, TAB_TITLE_CAP);
+  const colour = tabTint(extra.om_tab_color);
+  if (!title && !colour) return;
+  const all = tabMarksAll();
+  const key = tabKeyOf(active);
+  const now = { ...(all[key] || {}) };
+  if (title) now.title = title;
+  if (colour) now.colour = colour;
+  all[key] = now;
+  tabMarksSave();
+}
+
+function setTabMark(workflow, patch) {
+  const key = tabKeyOf(workflow);
+  if (!key) return;
+  const all = tabMarksAll();
+  const now = { ...(all[key] || {}), ...patch };
+  if (!now.colour) delete now.colour;
+  if (!now.title) delete now.title;
+  if (Object.keys(now).length) all[key] = now;
+  else delete all[key];
+  tabMarksSave();
+  tabExtrasWrite(workflow, now);
+  paintTabs();
+}
+
+function paintTab(tab, mark) {
+  const tint = mark?.colour || "";
+  if (tab.style.getPropertyValue("--om-tab-tint") !== tint) {
+    if (tint) tab.style.setProperty("--om-tab-tint", tint);
+    else tab.style.removeProperty("--om-tab-tint");
+  }
+  if ((tab.getAttribute("data-om-tint") || "") !== tint) {
+    if (tint) tab.setAttribute("data-om-tint", tint);
+    else tab.removeAttribute("data-om-tint");
+  }
+
+  const label = tab.querySelector(".workflow-label");
+  if (!label) return;
+  const wanted = mark?.title || "";
+  const own = tab.querySelector(".om-tab-title");
+  if (!wanted) {
+    if (own) own.remove();
+    tab.removeAttribute("data-om-titled");
+    return;
+  }
+  if (tab.getAttribute("data-om-titled") !== "1") tab.setAttribute("data-om-titled", "1");
+  if (own) {
+    if (own.textContent !== wanted) own.textContent = wanted;
+    return;
+  }
+  const shown = el("span", "om-tab-title", wanted);
+  liveTip(shown, () => `${wanted}
+${label.textContent.trim()}`);
+  label.parentElement.insertBefore(shown, label);
+}
+
+function paintTabs() {
+  const strip = tabStrip();
+  if (!strip) return;
+  const off = !tabMarksOn();
+  const open = openWorkflows();
+  [...strip.children].forEach((tab, index) => {
+    paintTab(tab, off ? null : tabMarkOf(open[index]));
+  });
+}
+
+function tabUnderlay() {
+  const root = document.documentElement;
+  const now = getComputedStyle(root).getPropertyValue("--comfy-menu-bg").trim();
+  if (!now || now === root.style.getPropertyValue("--om-tab-under")) return;
+  root.style.setProperty("--om-tab-under", now);
+}
+
+function tabTick() {
+  tabUnderlay();
+  const active = app.extensionManager?.workflow?.activeWorkflow;
+  const key = active ? tabKeyOf(active) : "";
+  if (key && key !== tabSeenKey) {
+    tabSeenKey = key;
+    tabExtrasRead();
+  }
+  paintTabs();
+}
+
+function tabAt(event) {
+  const strip = tabStrip();
+  if (!strip || !(event.target instanceof Element)) return null;
+  const tabs = [...strip.children];
+  const tab = tabs.find((one) => one.contains(event.target));
+  if (!tab) return null;
+  return openWorkflows()[tabs.indexOf(tab)] || null;
+}
+
+function awaitTabMenu(workflow) {
+  let timer = 0;
+  const watcher = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        const item = node.matches?.(TAB_MENU_PICK) ? node : node.querySelector?.(TAB_MENU_PICK);
+        if (!item) continue;
+        watcher.disconnect();
+        clearTimeout(timer);
+        injectTabMenu(item, workflow);
+        return;
+      }
+    }
+  });
+  watcher.observe(document.body, { childList: true, subtree: true });
+  timer = setTimeout(() => watcher.disconnect(), TAB_MENU_WAIT);
+}
+
+function closeHostMenu() {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+}
+
+function pickTabColour(workflow) {
+  const field = el("input", "om-tab-picker");
+  field.type = "color";
+  field.value = tabMarkOf(workflow)?.colour || "#58a6ff";
+  document.body.appendChild(field);
+  field.addEventListener("change", () => {
+    setTabMark(workflow, { colour: tabTint(field.value) });
+    field.remove();
+  });
+  field.click();
+}
+
+function injectTabMenu(item, workflow) {
+  const host = item.parentElement;
+  if (!host || host.querySelector(".om-tab-row")) return;
+  const mark = tabMarkOf(workflow) || {};
+  const shell = () => {
+    const holder = el(item.tagName.toLowerCase() === "li" ? "li" : "div", null);
+    holder.className = item.className;
+    holder.classList.add("om-tab-row");
+    return holder;
+  };
+  const divider = () => {
+    const theirs = host.querySelector('[role="separator"], hr');
+    if (theirs) {
+      const copy = theirs.cloneNode(true);
+      copy.classList.add("om-tab-split");
+      return copy;
+    }
+    const made = el(item.tagName.toLowerCase() === "li" ? "li" : "div", "om-tab-split");
+    made.setAttribute("role", "separator");
+    return made;
+  };
+
+  const colours = shell();
+  colours.appendChild(el("span", "om-tab-row-label", "Colour"));
+  const swatches = el("span", "om-tab-swatches");
+  for (const [name, value] of TAB_TINTS) {
+    const dot = el("button", "om-tab-swatch");
+    dot.style.background = value;
+    dot.title = name;
+    if (mark.colour === value) dot.classList.add("om-tab-swatch-on");
+    dot.onclick = (event) => {
+      event.stopPropagation();
+      setTabMark(workflow, { colour: value });
+      closeHostMenu();
+    };
+    swatches.appendChild(dot);
+  }
+  const custom = el("button", "om-tab-swatch om-tab-swatch-pick", "+");
+  custom.title = "Custom colour";
+  custom.onclick = (event) => {
+    event.stopPropagation();
+    closeHostMenu();
+    pickTabColour(workflow);
+  };
+  swatches.appendChild(custom);
+  const clear = el("button", "om-tab-swatch om-tab-swatch-off", "×");
+  clear.title = "No colour";
+  clear.onclick = (event) => {
+    event.stopPropagation();
+    setTabMark(workflow, { colour: "" });
+    closeHostMenu();
+  };
+  swatches.appendChild(clear);
+  colours.appendChild(swatches);
+
+  const titles = shell();
+  titles.appendChild(el("span", "om-tab-row-label", "Title"));
+  const naming = el("span", "om-tab-swatches");
+  const set = el("button", "om-tab-name", mark.title || "Set a title");
+  set.title = "A label for this tab only. The file keeps its own name.";
+  set.onclick = async (event) => {
+    event.stopPropagation();
+    closeHostMenu();
+    const asked = await askText("Tab title", mark.title || workflow.filename || "", "Set");
+    if (asked === null) return;
+    setTabMark(workflow, { title: String(asked).slice(0, TAB_TITLE_CAP) });
+  };
+  naming.appendChild(set);
+  if (mark.title) {
+    const drop = el("button", "om-tab-swatch om-tab-swatch-off", "×");
+    drop.title = "Use the file's own name";
+    drop.onclick = (event) => {
+      event.stopPropagation();
+      setTabMark(workflow, { title: "" });
+      closeHostMenu();
+    };
+    naming.appendChild(drop);
+  }
+  titles.appendChild(naming);
+
+  host.appendChild(divider());
+  host.appendChild(colours);
+  host.appendChild(titles);
+}
+
+function onTabMenu(event) {
+  if (!tabMarksOn()) return;
+  const workflow = tabAt(event);
+  if (workflow) awaitTabMenu(workflow);
+}
+
+function mountTabMarks() {
+  if (tabWatching) { tabTick(); return; }
+  const strip = tabStrip();
+  if (!strip) return;
+  tabWatching = true;
+  let due = 0;
+  const watcher = new MutationObserver(() => {
+    if (due) return;
+    due = requestAnimationFrame(() => { due = 0; tabTick(); });
+  });
+  watcher.observe(strip, { childList: true, subtree: true, characterData: true,
+                           attributes: true, attributeFilter: ["class"] });
+  document.addEventListener("contextmenu", onTabMenu, true);
+  tabTick();
 }
 
 // --- the run bar --------------------------------------------------------------------------------
@@ -9794,7 +10307,28 @@ const memoryHistory = { cpu: [], ram: [], vram: [] };
 //: without changing what the strip asked for.
 const MEMORY_CLIENT = `${MONITOR_CLIENT}-panel`;
 
+const READING_QUIET = 6000;
+
+let lastReadingAt = 0;
+
+function readingAge() {
+  return lastReadingAt ? Date.now() - lastReadingAt : Infinity;
+}
+
+function readingQuiet() {
+  return readingAge() > Math.max(READING_QUIET, monitorInterval() * 3000);
+}
+
+function quietText(age) {
+  if (!Number.isFinite(age)) return "nothing since the panel opened";
+  const seconds = Math.round(age / 1000);
+  if (seconds < 90) return `no reading for ${seconds} seconds`;
+  const minutes = Math.round(seconds / 60);
+  return `no reading for ${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 function recordReading(reading) {
+  lastReadingAt = Date.now();
   const push = (key, value) => {
     if (typeof value !== "number" || Number.isNaN(value)) return;
     const series = memoryHistory[key];
@@ -9911,14 +10445,26 @@ function keyItem(device, seat) {
   return item;
 }
 
+function heatKeyItem() {
+  const item = el("span", "om-mem-key-item om-mem-key-hot");
+  const swatch = el("span", "om-mem-swatch");
+  swatch.style.background = `rgba(${BLOCK_HOT}, .8)`;
+  item.appendChild(swatch);
+  item.appendChild(el("span", null, "in use now"));
+  item.title = "A square lights where the run has just faulted that page in, and fades as it "
+    + "goes quiet. It is drawn over the colour that says where the page is.";
+  return item;
+}
+
 function blockColour(seat) {
   return seat < 0 ? "transparent" : BLOCK_COLOURS[seat % BLOCK_COLOURS.length];
 }
 
-//: How large a square wants to be, and the space between them. The real size is worked out
-//: from these so the squares divide the width exactly.
-const BLOCK_CELL = 7;
 const BLOCK_GAP = 1;
+
+const BLOCK_CELL_MAX = 14;
+
+const BLOCK_ROWS_LIMIT = 10;
 
 // Squares laid out to fill the width exactly, rather than wrapped and left ragged.
 //
@@ -9926,28 +10472,80 @@ const BLOCK_GAP = 1;
 // leaves whatever does not fit as a gap at the end, so every row ends in a different place
 // and the map looks like it has holes in it. Working out the size from the width instead
 // means the columns always come out even, and a map costs one node rather than hundreds.
-function paintBlockMap(canvas, cells) {
+function blockGrid(canvas, count) {
   const width = canvas.clientWidth;
-  if (!width || !cells.length) return;
-  const columns = Math.max(1, Math.floor((width + BLOCK_GAP) / (BLOCK_CELL + BLOCK_GAP)));
-  const size = (width - (columns - 1) * BLOCK_GAP) / columns;
-  const rows = Math.ceil(cells.length / columns);
-  const height = Math.round(rows * size + (rows - 1) * BLOCK_GAP);
-
+  if (!width || !count) return null;
   const ratio = window.devicePixelRatio || 1;
-  canvas.style.height = `${height}px`;
-  canvas.width = Math.round(width * ratio);
-  canvas.height = Math.round(height * ratio);
+  const gap = Math.max(1, Math.round(BLOCK_GAP * ratio));
+  const deviceWidth = Math.max(1, Math.round(width * ratio));
+  const pick = (rows) => {
+    const columns = Math.max(1, Math.ceil(count / rows));
+    return { rows, columns, step: deviceWidth / columns };
+  };
+  let best = pick(1);
+  for (let rows = 2; rows <= BLOCK_ROWS_LIMIT; rows += 1) {
+    const candidate = pick(rows);
+    if (candidate.step > BLOCK_CELL_MAX * ratio) break;
+    best = candidate;
+  }
+  const step = Math.min(best.step, BLOCK_CELL_MAX * ratio);
+  const deviceHeight = Math.max(1, Math.round(best.rows * step));
+  return { width, ratio, gap, step, columns: best.columns, rows: best.rows,
+           deviceWidth, deviceHeight, height: Math.round(deviceHeight / ratio) };
+}
+
+function blockRect(grid, index) {
+  const column = index % grid.columns;
+  const row = Math.floor(index / grid.columns);
+  const left = Math.round(column * grid.step);
+  const top = Math.round(row * grid.step);
+  return [left, top,
+          Math.max(1, Math.round((column + 1) * grid.step) - left - grid.gap),
+          Math.max(1, Math.round((row + 1) * grid.step) - top - grid.gap)];
+}
+
+function paintBlockMap(canvas, cells) {
+  const grid = blockGrid(canvas, cells.length);
+  if (!grid) return;
+  canvas.style.height = `${grid.height}px`;
+  canvas.width = grid.deviceWidth;
+  canvas.height = grid.deviceHeight;
   const pen = canvas.getContext("2d");
-  pen.setTransform(ratio, 0, 0, ratio, 0, 0);
-  pen.clearRect(0, 0, width, height);
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.clearRect(0, 0, grid.deviceWidth, grid.deviceHeight);
 
   cells.forEach((seat, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
     pen.fillStyle = blockColour(seat);
-    pen.fillRect(column * (size + BLOCK_GAP), row * (size + BLOCK_GAP), size, size);
+    pen.fillRect(...blockRect(grid, index));
   });
+  canvas._omGrid = grid;
+}
+
+const BLOCK_HOT = "255, 255, 255";
+
+const HEAT_FRAME = 60;
+
+const HEAT_FADE = 2500;
+
+function paintBlockHeat(canvas, heat, at) {
+  const grid = canvas._omGrid;
+  if (!grid || !heat?.length) return false;
+  const base = canvas._omBase;
+  if (!base) return false;
+  const pen = canvas.getContext("2d");
+  pen.setTransform(1, 0, 0, 1, 0, 0);
+  pen.drawImage(base, 0, 0);
+  const fade = Math.max(0, 1 - (performance.now() - at) / HEAT_FADE);
+  if (!fade) return false;
+  let lit = false;
+  for (let index = 0; index < heat.length; index += 1) {
+    const value = heat[index];
+    if (!value) continue;
+    lit = true;
+    pen.fillStyle = `rgba(${BLOCK_HOT}, ${(value / 100) * 0.75 * fade})`;
+    pen.fillRect(...blockRect(grid, index));
+  }
+  return lit;
 }
 
 // Where each part of a model sits, drawn the way a disk map is drawn: one square per stretch
@@ -9961,9 +10559,40 @@ function buildBlockMap(map) {
   frame.appendChild(canvas);
   box.appendChild(frame);
   let cells = map.cells || [];
-  const draw = () => paintBlockMap(canvas, cells);
-  // Its width is not settled when it is built and changes with the window, so the element is
-  // watched rather than the drawing being timed to guesses about layout.
+  let heat = map.heat || [];
+  let heatAt = 0;
+  let beating = 0;
+
+  const snapshot = () => {
+    if (!canvas.width || !canvas.height) return;
+    let base = canvas._omBase;
+    if (!base) { base = document.createElement("canvas"); canvas._omBase = base; }
+    if (base.width !== canvas.width || base.height !== canvas.height) {
+      base.width = canvas.width;
+      base.height = canvas.height;
+    }
+    const pen = base.getContext("2d");
+    pen.setTransform(1, 0, 0, 1, 0, 0);
+    pen.clearRect(0, 0, base.width, base.height);
+    pen.drawImage(canvas, 0, 0);
+  };
+
+  const draw = () => { paintBlockMap(canvas, cells); snapshot(); };
+
+  const beat = () => {
+    beating = 0;
+    if (!canvas.isConnected || document.hidden) return;
+    if (paintBlockHeat(canvas, heat, heatAt)) {
+      beating = setTimeout(() => requestAnimationFrame(beat), HEAT_FRAME);
+    } else {
+      draw();
+    }
+  };
+  const warm = () => {
+    if (beating || !heat.some(Boolean)) return;
+    beating = setTimeout(() => requestAnimationFrame(beat), HEAT_FRAME);
+  };
+
   const watcher = new ResizeObserver(draw);
   watcher.observe(canvas);
   box._redraw = draw;
@@ -9972,13 +10601,19 @@ function buildBlockMap(map) {
   for (const [seat, device] of (map.devices || []).entries()) {
     key.appendChild(keyItem(device, seat));
   }
+  const hot = heatKeyItem();
+  hot.hidden = !map.heat;
+  key.appendChild(hot);
   // Named for what was actually counted. The page figures are coarser than the byte figure on
   // the row above, and saying which is which stops the two looking like a contradiction.
   const note = el("span", "om-mem-key-note", `${map.modules} ${map.unit || "blocks"}`);
-  note.title = map.source === "pages"
+  note.title = (map.source === "pages"
     ? "Read from the streaming library, a page at a time, so the shares here step in whole "
       + "pages and differ slightly from the byte figure above."
-    : "Read from the model's own modules.";
+    : "Read from the model's own modules.")
+    + (map.heat ? " A square lights when the run faults that page in, and fades as it goes "
+                  + "quiet, so the light is where the work is rather than where the weights are."
+                : "");
   key.appendChild(note);
   box.appendChild(key);
 
@@ -9987,13 +10622,23 @@ function buildBlockMap(map) {
   return {
     el: box,
     update: (next) => {
+      const shape = (next.cells || []).join(",");
+      const moved = shape !== cells.join(",");
       cells = next.cells || [];
-      draw();
-      note.textContent = `${next.modules} ${next.unit || "blocks"}`;
-      const items = [...key.querySelectorAll(".om-mem-key-item")];
+      heat = next.heat || [];
+      heatAt = performance.now();
+      if (moved || !canvas._omBase) draw();
+      warm();
+      const rate = Number.isFinite(next.faults)
+        ? ` · ${Math.round(next.faults)} faults/s`
+          + (next.refaults >= 1 ? `, ${Math.round(next.refaults)} back` : "")
+        : "";
+      note.textContent = `${next.modules} ${next.unit || "blocks"}${rate}`;
+      hot.hidden = !next.heat;
+      const items = [...key.querySelectorAll(".om-mem-key-item:not(.om-mem-key-hot)")];
       const devices = next.devices || [];
       if (items.length !== devices.length) {
-        key.replaceChildren(...devices.map((device, seat) => keyItem(device, seat)), note);
+        key.replaceChildren(...devices.map((device, seat) => keyItem(device, seat)), hot, note);
       } else {
         devices.forEach((device, seat) => {
           items[seat].lastChild.textContent = `${device.device} · ${bytesText(device.bytes)}`;
@@ -10012,6 +10657,10 @@ function repaintBlockMaps(root) {
 // A model ComfyUI is holding, and where its weights are.
 // A model ComfyUI is holding. Built once and then kept up to date: these figures change every
 // few seconds, and a row rebuilt on every reading is a row that blinks.
+const BLOCK_CELLS_FIRST = 240;
+
+const BLOCK_CELLS_MAX = 1024;
+
 function buildMemoryModelRow(model, refresh) {
   const row = el("div", "om-mem-model");
 
@@ -10061,6 +10710,7 @@ function buildMemoryModelRow(model, refresh) {
   const bar = el("div", "om-mem-split");
   const resident = el("div", "om-mem-resident");
   bar.appendChild(resident);
+  liveTip(bar, () => bar._say || "");
   row.appendChild(bar);
 
   const meta = el("div", "om-dl-where");
@@ -10081,7 +10731,8 @@ function buildMemoryModelRow(model, refresh) {
     row._name = model.name;
     row._total = model.total;
     resident.style.width = `${Math.max(0, Math.min(100, model.share))}%`;
-    resident.title = `${bytesText(model.resident)} on ${model.device}`;
+    bar._say = `${bytesText(model.resident)} on ${model.device}`
+      + (model.offloaded ? `\n${bytesText(model.offloaded)} offloaded to host memory` : "");
 
     // The tags are a short list that changes shape, so they are rewritten; the parts that
     // move continuously are not.
@@ -10102,9 +10753,17 @@ function buildMemoryModelRow(model, refresh) {
     if (model.pins?.failed) parts.push(el("span", "om-dl-src om-dl-bad", "pinning failed"));
     meta.replaceChildren(...parts);
 
-    // Asked for per model, because walking one is cheap and walking every one is not.
-    libGet(`/monitor/blocks?index=${model.index}&cells=240`)
+    row._index = model.index;
+    row._streaming = !!model.streaming;
+  };
+
+  let asking = false;
+  row._blocks = () => {
+    if (asking || !slot.isConnected || document.hidden || row._inView === false) return;
+    asking = true;
+    libGet(`/monitor/blocks?index=${row._index}&cells=${row._cells || BLOCK_CELLS_FIRST}`)
       .then((found) => {
+        asking = false;
         if (!slot.isConnected) return;
         if (!found?.ok) {
           drawn = null;
@@ -10116,11 +10775,14 @@ function buildMemoryModelRow(model, refresh) {
           drawn = buildBlockMap(found);
           slot.replaceChildren(drawn.el);
         }
+        if (found.modules) row._cells = Math.min(found.modules, BLOCK_CELLS_MAX);
+        row._busy = Number.isFinite(found.faults) && found.faults > 0;
       })
-      .catch(() => {});
+      .catch(() => { asking = false; });
   };
 
   tell(model);
+  row._blocks();
   row._update = tell;
   return row;
 }
@@ -10134,6 +10796,8 @@ const ACTIVITY_LOOK = {
   stalled: { title: "Memory stalled" },
   oom: { title: "Out of memory" },
   idle: { title: "Idle" },
+  quiet: { title: "Not reporting" },
+  thrashing: { title: "Streaming thrash" },
 };
 
 // A light in the panel's header. Green while there is work going through, amber where the
@@ -10143,15 +10807,23 @@ const ACTIVITY_LOOK = {
 function buildActivityOrb() {
   const orb = el("span", "om-orb om-orb-idle");
   orb.setAttribute("role", "img");
-  orb.tell = (activity) => {
-    const state = ACTIVITY_LOOK[activity?.state] ? activity.state : "idle";
+  orb.tabIndex = 0;
+  liveTip(orb, () => orb._say || "");
+  orb.tell = (activity, quietFor = 0) => {
+    const state = quietFor ? "quiet" : (ACTIVITY_LOOK[activity?.state] ? activity.state : "idle");
     if (orb._state !== state) {
       orb._state = state;
       orb.className = `om-orb om-orb-${state}`;
     }
-    const label = activity?.label || ACTIVITY_LOOK[state].title;
-    const detail = activity?.detail || "";
-    orb.title = detail ? `${label}\n${detail}` : label;
+    const label = quietFor
+      ? `Not reporting: ${quietText(quietFor)}`
+      : (activity?.label || ACTIVITY_LOOK[state].title);
+    const detail = quietFor
+      ? "The server has not sent a reading. It is the same process that runs the graph, so "
+        + "work heavy enough to stop it answering stops the readings too. Every figure here "
+        + "is from the last one that arrived."
+      : (activity?.detail || "");
+    orb._say = detail ? `${label}\n${detail}` : label;
     orb.setAttribute("aria-label", label);
   };
   orb.tell(null);
@@ -10168,6 +10840,8 @@ function openMemoryPanel() {
     modal: !asWindow("memory"),
     onClose: () => {
       clearInterval(panel._tick);
+      clearInterval(panel._heat);
+      watching.disconnect();
       dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
     },
   });
@@ -10254,6 +10928,14 @@ function openMemoryPanel() {
       if (!one.folded()) drawGraph(one.canvas, series, one.colour);
       one.value.textContent = series.length ? `${Math.round(series[series.length - 1])}%` : "-";
     }
+    const quietFor = readingQuiet() ? readingAge() : 0;
+    body.classList.toggle("om-mem-quiet", !!quietFor);
+    if (quietFor) {
+      orb.tell(latest?.activity, quietFor);
+      graphs[0].detail.textContent =
+        `${quietText(quietFor)}. The figures above are the last that arrived.`;
+      return;
+    }
     if (!latest) return;
     if (latest.ram?.total) {
       graphs[1].detail.textContent =
@@ -10294,7 +10976,7 @@ function openMemoryPanel() {
   api.addEventListener("open_manager.monitor", onReading);
 
   async function loadModels() {
-    if (!panel.el.isConnected) return;
+    if (!panel.el.isConnected || document.hidden) return;
     let found;
     try {
       found = await (await api.fetchApi(`${API}/monitor/models`)).json();
@@ -10320,24 +11002,75 @@ function openMemoryPanel() {
     const shape = rows.map((one) => one.name).join("|");
     if (modelList._shape !== shape) {
       modelList._shape = shape;
-      modelList.replaceChildren(...rows.map((one, position) =>
-        buildMemoryModelRow({ ...one, index: position }, loadModels)));
+      const built = rows.map((one, position) =>
+        buildMemoryModelRow({ ...one, index: position }, loadModels));
+      for (const row of built) watchRow(row);
+      modelList.replaceChildren(...built, ...releasedRows(rows));
     } else {
-      const built = [...modelList.children];
+      const built = [...modelList.children].filter((node) => !node._released);
       rows.forEach((one, position) =>
         built[position]?._update?.({ ...one, index: position }));
     }
   }
 
+  const released = new Map();
+  const releasedRows = (live) => {
+    const names = new Set(live.map((one) => one.name));
+    for (const node of [...modelList.children]) {
+      if (node._released || !node._name || names.has(node._name)) continue;
+      node._released = true;
+      node.classList.add("om-mem-gone");
+      node.querySelector(".om-mem-split")?.classList.add("om-mem-gone-bar");
+      const drop = node.querySelector(".om-mem-drop");
+      if (drop) {
+        drop.textContent = "Dismiss";
+        drop.title = "Remove this card. The model is already gone.";
+        drop.onclick = () => { released.delete(node._name); node.remove(); };
+      }
+      node.querySelector(".om-dl-where")?.appendChild(
+        el("span", "om-dl-src om-dl-bad", "released"));
+      released.set(node._name, node);
+    }
+    for (const [name, node] of released) {
+      if (names.has(name)) { released.delete(name); node.remove(); }
+    }
+    return [...released.values()];
+  };
+
+  const watching = new IntersectionObserver((entries) => {
+    for (const entry of entries) entry.target._inView = entry.isIntersecting;
+  }, { root: modelList, rootMargin: "40px" });
+  const watchRow = (row) => { row._inView = true; watching.observe(row); };
+  const heatTick = () => {
+    if (!panel.el.isConnected || document.hidden) return;
+    for (const row of modelList.children) {
+      if (row._released || !row._inView) continue;
+      if (row._streaming || row._busy) row._blocks?.();
+    }
+  };
+
   // Its own lease, asked for faster than the strip so the graphs move smoothly. The server
   // samples at whichever of the two is quicker and stops when both are gone.
+  // A hidden tab is not being read. The lease is given up rather than left to lapse, so the
+  // server's loop stops on the spot instead of measuring for three more intervals.
   const renew = () => {
     if (!panel.el.isConnected) return;
-    dlPost("/monitor", { client: MEMORY_CLIENT, interval: 1 })
+    if (document.hidden) {
+      if (!panel._asleep) {
+        panel._asleep = true;
+        dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
+      }
+      return;
+    }
+    panel._asleep = false;
+    dlPost("/monitor", { client: MEMORY_CLIENT, interval: 1, watch: true })
       .then((answer) => { if (answer?.reading) { latest = answer.reading; recordReading(latest); paint(); } })
       .catch(() => {});
   };
-  panel._tick = setInterval(() => { renew(); loadModels(); }, 3000);
+  panel._tick = setInterval(() => { renew(); loadModels(); paint(); }, 3000);
+  panel._heat = setInterval(heatTick, 1000);
+  const wake = () => { if (!document.hidden) { renew(); loadModels(); } };
+  document.addEventListener("visibilitychange", wake);
   renew();
   loadModels();
   paint();
@@ -10346,6 +11079,7 @@ function openMemoryPanel() {
   const stopWatching = () => {
     if (panel.el.isConnected) return;
     api.removeEventListener("open_manager.monitor", onReading);
+    document.removeEventListener("visibilitychange", wake);
     clearInterval(watcher);
   };
   const watcher = setInterval(stopWatching, 2000);
@@ -11276,6 +12010,15 @@ app.registerExtension({
       defaultValue: 13,
       tooltip: "Size in pixels of the body text inside windows: lists, descriptions and "
         + "READMEs. Clamped to 10-22. Raise it on a large or distant screen.",
+    },
+    {
+      id: "openManager.tabMarks",
+      onChange: () => paintTabs(),
+      name: "Colour and title workflow tabs",
+      category: ["Open Manager", "Interface", "tabMarks"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Adds Colour and Title to the right-click menu on a workflow tab, for telling four copies of the same workflow apart. Both are written into the workflow itself as om_tab_color and om_custom_title, so they travel with the file, and kept in this browser as well so an unsaved workflow keeps its mark. Setting either marks that workflow as changed, because it is a change to the file.",
     },
     {
       id: "openManager.managerEntry",

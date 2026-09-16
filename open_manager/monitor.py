@@ -37,6 +37,14 @@ MAX_INTERVAL = 10.0
 #: or a tab that is briefly busy, and short enough that a closed tab stops the timer promptly.
 LEASE_INTERVALS = 3
 
+#: How much of the clock measuring may have. A reading normally takes a millisecond or two, so
+#: the asked interval stands; where the machine is strained enough that one takes seconds, this
+#: is what stops the monitor asking again straight away and adding to it.
+SAMPLE_SHARE = 20
+
+#: Longest the budget may stretch an interval to, however slow a reading gets.
+SAMPLE_BACKOFF_CAP = 60.0
+
 #: client id -> {expires, interval}
 _leases: dict[str, dict] = {}
 _task: "asyncio.Task | None" = None
@@ -60,14 +68,19 @@ def _psutil():
 #: an error: a machine without NVIDIA tooling simply reports no temperature.
 _nvml = None
 
+#: The device handles, once enumerated.
+_nvml_cards = None
+
 
 def _nvml_handles():
     """A handle per NVIDIA device, or an empty list.
 
-    NVML is initialised once. Where it is missing, or refuses, temperatures and utilisation
-    are left out of the reading rather than the reading failing.
+    NVML is initialised once, and the handles are kept: they name the device rather than the
+    moment, and enumerating them again on every reading is a driver call per card per sample
+    for an answer that does not change. Where it is missing, or refuses, temperatures and
+    utilisation are left out of the reading rather than the reading failing.
     """
-    global _nvml
+    global _nvml, _nvml_cards
     if _nvml is False:
         return []
     if _nvml is None:
@@ -79,11 +92,15 @@ def _nvml_handles():
         except Exception:
             _nvml = False
             return []
+    if _nvml_cards is not None:
+        return _nvml_cards
     try:
-        return [_nvml.nvmlDeviceGetHandleByIndex(i)
-                for i in range(_nvml.nvmlDeviceGetCount())]
+        _nvml_cards = [_nvml.nvmlDeviceGetHandleByIndex(i)
+                       for i in range(_nvml.nvmlDeviceGetCount())]
     except Exception:
+        _nvml_cards = None
         return []
+    return _nvml_cards
 
 
 def _nvml_readings() -> list[dict]:
@@ -156,8 +173,11 @@ def _interval() -> float:
 
 def _expire(now: float) -> None:
     """Drop leases nobody renewed."""
-    for client in [key for key, one in _leases.items() if one["expires"] <= now]:
+    gone = [key for key, one in _leases.items() if one["expires"] <= now]
+    for client in gone:
         _leases.pop(client, None)
+    if gone:
+        _sync_watch()
 
 
 def sample() -> dict:
@@ -330,11 +350,138 @@ def models() -> dict:
 
 #: What a page of a streamed model can be. The flags come from the streaming library: bit one
 #: means the page is on the card, bit two means it is pinned there.
-PAGE_STATES = ("host", "on device", "pinned", "on device, pinned")
+PAGE_STATES = ("host", "on device", "pinned", "on device, pinned", "not allocated yet")
 
-#: How much address space the streaming library reserves against a model's real size. Its own
-#: comment calls it headroom for casting a whole model to a wider type with room to spare.
-VBAR_OVERCOMMIT = 10
+#: Page size the streaming library states in its own header, 32 MiB, as a shift.
+VBAR_SHIFT = 25
+
+UNSEEN = len(PAGE_STATES) - 1
+
+REFAULT_WINDOW = 2.0
+
+HEAT_WINDOW = 4.0
+
+THRASH_RATE = 12.0
+
+THRASH_SHARE = 0.4
+
+_fault_real = None
+_fault_seen: dict = {}
+
+
+def _watch_init(vbar) -> None:
+    """Give one streamed model somewhere to record what was touched."""
+    try:
+        vbar._om_last = [0.0] * max(1, vbar.get_nr_pages())
+    except Exception:
+        vbar._om_last = [0.0]
+    vbar._om_faults = 0
+    vbar._om_refaults = 0
+
+
+def _watched_fault(self, alloc, size):
+    """``ModelVBAR.fault``, with the pages it was for stamped as touched."""
+    answer = _fault_real(self, alloc, size)
+    try:
+        last = self._om_last
+        now = time.monotonic()
+        base = alloc - self.base_addr
+        first = base >> VBAR_SHIFT
+        end = (base + size - 1) >> VBAR_SHIFT
+        pages = len(last)
+        if first < pages:
+            if now - last[first] < REFAULT_WINDOW:
+                self._om_refaults += 1
+            last[first] = now
+        if end != first and end < pages:
+            last[end] = now
+        self._om_faults += 1
+    except AttributeError:
+        _watch_init(self)
+    except Exception:
+        pass
+    return answer
+
+
+def watching() -> bool:
+    return _fault_real is not None
+
+
+def watch_faults(on: bool) -> bool:
+    """Start or stop recording which blocks the run touches.
+
+    Returns:
+        Whether the record is being kept.
+    """
+    global _fault_real
+    try:
+        from comfy_aimdo.model_vbar import ModelVBAR
+    except Exception:
+        return False
+    if on and _fault_real is None:
+        original = ModelVBAR.fault
+        if getattr(original, "_om_watch", False):
+            return True
+        _fault_real = original
+        _watched_fault._om_watch = True
+        ModelVBAR.fault = _watched_fault
+    elif not on and _fault_real is not None:
+        ModelVBAR.fault = _fault_real
+        _fault_real = None
+        _fault_seen.clear()
+    return watching()
+
+
+def _sync_watch() -> None:
+    """Keep the record in step with whether anything is asking for it."""
+    wanted = any(one.get("watch") for one in _leases.values())
+    if wanted != watching():
+        watch_faults(wanted)
+
+
+_churn_seen: dict = {}
+
+
+def _stream_churn(now: float) -> tuple[float, float] | None:
+    """Faults and re-faults a second across every streamed model.
+
+    Args:
+        now: The clock this rate is measured against.
+
+    Returns:
+        ``(faults, refaults)`` a second, or ``None`` where nothing is recording.
+    """
+    if not watching():
+        return None
+    try:
+        import comfy.model_management as mm
+    except Exception:
+        return None
+    faults = 0
+    refaults = 0
+    found = False
+    for entry in list(getattr(mm, "current_loaded_models", [])):
+        try:
+            vbars = getattr(entry.model.model, "dynamic_vbars", None)
+            if not isinstance(vbars, dict):
+                continue
+            for vbar in vbars.values():
+                one = getattr(vbar, "_om_faults", None)
+                if one is None:
+                    continue
+                found = True
+                faults += one
+                refaults += getattr(vbar, "_om_refaults", 0)
+        except Exception:
+            continue
+    if not found:
+        return None
+    was = _churn_seen.get("all")
+    _churn_seen["all"] = (faults, refaults, now)
+    if not was or now <= was[2]:
+        return None
+    span = now - was[2]
+    return (max(0, faults - was[0]) / span, max(0, refaults - was[1]) / span)
 
 
 def _vbar_pages(patcher, entry, cells: int):
@@ -358,20 +505,25 @@ def _vbar_pages(patcher, entry, cells: int):
     if not flags:
         return None
 
-    # The range is deliberately allocated at ten times the model, so most of it is address
-    # space the model never occupies. Describing all of it would report a model as entirely
-    # absent from the card simply because its unused tail is. The model's own extent is that
-    # tenth, and only that is described.
-    model_pages = max(1, -(-len(flags) // VBAR_OVERCOMMIT))
-    flags = flags[:model_pages]
-    total = len(flags)
+    try:
+        weighs = int(entry.model_memory() or 0)
+    except Exception:
+        weighs = 0
+    wants = -(-weighs // (1 << VBAR_SHIFT)) if weighs else 0
+    model_pages = wants or len(flags)
+    if model_pages < 1:
+        model_pages = len(flags)
+    held = list(flags[:model_pages])
+    unseen = [UNSEEN] * max(0, model_pages - len(held))
+    total = model_pages
+    cells = max(1, min(cells, total))
 
-    states = [(1 if flag & 1 else 0) + (2 if flag & 2 else 0) for flag in flags]
-    counts = [0, 0, 0, 0]
+    states = [(1 if flag & 1 else 0) + (2 if flag & 2 else 0) for flag in held] + unseen
+    counts = [0] * len(PAGE_STATES)
     for state in states:
         counts[state] += 1
 
-    seen = [state for state in range(4) if counts[state]]
+    seen = [state for state in range(len(PAGE_STATES)) if counts[state]]
     seats = {state: position for position, state in enumerate(seen)}
 
     # Each square is asked which pages it covers, rather than each page being told which
@@ -388,7 +540,7 @@ def _vbar_pages(patcher, entry, cells: int):
 
     page_bytes = int(entry.model_memory() / total) if total else 0
 
-    return {
+    made = {
         "ok": True,
         "source": "pages",
         "total": entry.model_memory(),
@@ -401,6 +553,53 @@ def _vbar_pages(patcher, entry, cells: int):
                     for state in seen],
         "reason": "",
     }
+    made.update(_vbar_activity(vbar, total, cells))
+    return made
+
+
+def _vbar_activity(vbar, total: int, cells: int) -> dict:
+    """What the run has touched, per square, where that is being recorded.
+
+    Args:
+        vbar: The streaming library's range for one model.
+        total: Pages the model itself occupies.
+        cells: Squares the map is divided into.
+
+    Returns:
+        ``{heat, faults, refaults, watermark}``, or the parts of it that can be read. ``heat``
+        is one figure per square, 0 to 100, highest for a page touched just now.
+    """
+    out: dict = {}
+    try:
+        out["watermark"] = int(vbar.get_watermark())
+    except Exception:
+        pass
+    last = getattr(vbar, "_om_last", None)
+    if last is None:
+        return out
+
+    now = time.monotonic()
+    heat = []
+    for cell in range(cells):
+        low = (cell * total) // cells
+        high = max(low + 1, ((cell + 1) * total) // cells)
+        freshest = 0.0
+        for page in range(low, min(high, total, len(last))):
+            if last[page] > freshest:
+                freshest = last[page]
+        age = now - freshest if freshest else HEAT_WINDOW
+        heat.append(0 if age >= HEAT_WINDOW else round((1 - age / HEAT_WINDOW) * 100))
+    out["heat"] = heat
+
+    faults = getattr(vbar, "_om_faults", 0)
+    refaults = getattr(vbar, "_om_refaults", 0)
+    was = _fault_seen.get(id(vbar))
+    _fault_seen[id(vbar)] = (faults, refaults, now)
+    if was and now > was[2]:
+        span = now - was[2]
+        out["faults"] = round(max(0, faults - was[0]) / span, 1)
+        out["refaults"] = round(max(0, refaults - was[1]) / span, 1)
+    return out
 
 
 def _module_bytes(mm, module) -> int:
@@ -452,7 +651,7 @@ def blocks(index: int = 0, cells: int = 240) -> dict:
     if inner is None:
         return {"ok": False, "cells": [], "reason": "that model is no longer held"}
 
-    cells = max(24, min(600, int(cells or 240)))
+    cells = max(24, min(2048, int(cells or 240)))
 
     # The device a module's parameters report is where its home copy lives, which under block
     # streaming is the host for the whole model even while all of it is resident. Asking the
@@ -484,6 +683,7 @@ def blocks(index: int = 0, cells: int = 240) -> dict:
     total = sum(size for size, _ in segments)
     if not total:
         return {"ok": False, "cells": [], "reason": "that model reports no weights"}
+    cells = max(1, min(cells, len(segments)))
 
     # Each module occupies a stretch of the model, and each square a stretch of the same
     # length; the overlap between them is what a square gets.
@@ -626,7 +826,7 @@ def activity(reading: dict | None = None) -> dict:
 
     Returns:
         ``{state, label, detail}`` where state is one of ``idle``, ``working``,
-        ``stalling``, ``stalled``, ``oom``.
+        ``stalling``, ``stalled``, ``thrashing``, ``oom``.
     """
     now = time.time()
     reading = reading if reading is not None else sample()
@@ -669,6 +869,13 @@ def activity(reading: dict | None = None) -> dict:
 
     if busy:
         _watch["quiet_since"] = 0.0
+        churn = _stream_churn(now)
+        if churn and churn[0] >= THRASH_RATE and churn[1] / churn[0] >= THRASH_SHARE:
+            return {"state": "thrashing", "label": "Streaming thrash",
+                    "detail": f"Running{': ' + ', '.join(where) if where else ''}, but "
+                              f"{churn[0]:.0f} page faults a second and {churn[1]:.0f} of them "
+                              "are pages coming back. The card is busy fetching weights it "
+                              "already had rather than getting through the run."}
         return {"state": "working", "label": "Working",
                 "detail": "Running" + (f": {', '.join(where)}" if where else "") + "."}
 
@@ -818,6 +1025,7 @@ def state() -> dict:
         "watching": len(_leases),
         "interval": _interval(),
         "running": _task is not None and not _task.done(),
+        "watching": watching(),
         "channel": CHANNEL,
     }
 
@@ -831,12 +1039,20 @@ async def _loop() -> None:
             now = time.time()
             _expire(now)
             if not _leases:
+                watch_faults(False)
                 return
+            asked = _interval()
+            wait = asked
             try:
                 # The light rides along with the reading rather than being asked for
                 # separately: it is read from the same figures, and a panel that has the
                 # reading should not have to make a second request to know what it means.
-                reading = sample()
+                started = time.monotonic()
+                reading = await asyncio.to_thread(sample)
+                took = time.monotonic() - started
+                wait = max(asked, min(SAMPLE_BACKOFF_CAP, took * SAMPLE_SHARE))
+                reading["took"] = round(took, 3)
+                reading["every"] = round(wait, 2)
                 try:
                     reading["activity"] = activity(reading)
                 except Exception as error:  # noqa: BLE001 - a reading without it is still one
@@ -844,19 +1060,20 @@ async def _loop() -> None:
                 PromptServer.instance.send_sync(CHANNEL, reading)
             except Exception as error:  # noqa: BLE001 - a bad sample must not end the loop
                 logger.debug("monitor sample failed (%s: %s)", type(error).__name__, error)
-            await asyncio.sleep(_interval())
+            await asyncio.sleep(wait)
     finally:
         global _task
         _task = None
 
 
-def lease(client: str, interval: float = DEFAULT_INTERVAL) -> dict:
+def lease(client: str, interval: float = DEFAULT_INTERVAL, watch: bool = False) -> dict:
     """Ask for readings, or say you still want them.
 
     Args:
         client: Something stable for this viewer, so renewing replaces rather than adds.
         interval: Seconds between samples, clamped to :data:`MIN_INTERVAL`..
             :data:`MAX_INTERVAL`.
+        watch: Also record which blocks the run touches, for as long as this lease lasts.
 
     Returns:
         What :func:`state` reports afterwards.
@@ -868,7 +1085,9 @@ def lease(client: str, interval: float = DEFAULT_INTERVAL) -> dict:
     _leases[client[:120]] = {
         "interval": wanted,
         "expires": time.time() + wanted * LEASE_INTERVALS,
+        "watch": bool(watch),
     }
+    _sync_watch()
     if _task is None or _task.done():
         _task = asyncio.create_task(_loop())
     return state()
@@ -877,6 +1096,7 @@ def lease(client: str, interval: float = DEFAULT_INTERVAL) -> dict:
 def release(client: str) -> dict:
     """Stop wanting readings. The lease would lapse anyway; this is just prompt about it."""
     _leases.pop((client or "")[:120], None)
+    _sync_watch()
     return state()
 
 

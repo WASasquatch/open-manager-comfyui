@@ -1574,7 +1574,7 @@ def register_routes() -> None:
     @PromptServer.instance.routes.get(f"{PREFIX}/monitor/models")
     async def monitor_models(_request: web.Request) -> web.Response:
         """The models ComfyUI is holding, and where each one's weights are."""
-        return web.json_response(monitor.models())
+        return web.json_response(await asyncio.to_thread(monitor.models))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor")
     @_json_body
@@ -1592,10 +1592,11 @@ def register_routes() -> None:
             interval = float(body.get("interval") or monitor.DEFAULT_INTERVAL)
         except (TypeError, ValueError):
             interval = monitor.DEFAULT_INTERVAL
-        answer = monitor.lease(client, interval)
+        answer = monitor.lease(client, interval, watch=_flag(body.get("watch")))
         # The first reading rides along with the lease, so the strip has something to show
-        # before the first push arrives.
-        first = monitor.sample()
+        # before the first push arrives. Taken off the event loop: under a heavy run the
+        # driver can take seconds to answer, and this handler runs every couple of seconds.
+        first = await asyncio.to_thread(monitor.sample)
         try:
             first["activity"] = monitor.activity(first)
         except Exception:  # noqa: BLE001 - a reading without the light is still a reading
@@ -1632,14 +1633,15 @@ def register_routes() -> None:
         return web.json_response(await asyncio.to_thread(pack_health.startup_times))
 
     @PromptServer.instance.routes.get(f"{PREFIX}/self")
-    async def self_state(_request: web.Request) -> web.Response:
+    async def self_state(request: web.Request) -> web.Response:
         """How Open Manager is installed here, and what updating it takes.
 
         Read-only, and it reads nothing the page could not work out for itself except the
         path of the interpreter running the server, which is the whole point: the update
         command for a portable build names an interpreter a terminal would never find.
         """
-        return web.json_response(await asyncio.to_thread(selfupdate.state))
+        check = _flag(request.query.get("check"))
+        return web.json_response(await asyncio.to_thread(selfupdate.state, check))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/pack/toggle")
     @_json_body

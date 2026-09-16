@@ -208,46 +208,46 @@ function contrastOn(color) {
 
 // Relative luminance of any CSS colour, 0 to 1.
 function luminance(color) {
-  try {
-    const ctx = document.createElement("canvas").getContext("2d");
-    ctx.fillStyle = "#000000";
-    ctx.fillStyle = color;
-    const value = ctx.fillStyle;
-    let r, g, b;
-    if (value[0] === "#") {
-      r = parseInt(value.slice(1, 3), 16);
-      g = parseInt(value.slice(3, 5), 16);
-      b = parseInt(value.slice(5, 7), 16);
-    } else {
-      const match = value.match(/(\d+)\D+(\d+)\D+(\d+)/);
-      if (!match) return 0;
-      [, r, g, b] = match.map(Number);
-    }
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  } catch {
-    return 0;
-  }
+  const [r, g, b] = channels(color);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
+let colourPen = null;
+const colourSeen = new Map();
+const COLOUR_CAP = 500;
+
+function colourReader() {
+  if (!colourPen) colourPen = document.createElement("canvas").getContext("2d");
+  return colourPen;
 }
 
 // Any CSS colour as its three channels, for compositing a scrim over a backdrop image.
 function channels(color) {
+  const key = String(color);
+  const known = colourSeen.get(key);
+  if (known) return known;
+  let made = [0, 0, 0];
   try {
-    const ctx = document.createElement("canvas").getContext("2d");
+    const ctx = colourReader();
     ctx.fillStyle = "#000000";
     ctx.fillStyle = color;
     const value = ctx.fillStyle;
     if (value[0] === "#") {
-      return [
+      made = [
         parseInt(value.slice(1, 3), 16),
         parseInt(value.slice(3, 5), 16),
         parseInt(value.slice(5, 7), 16),
       ];
+    } else {
+      const match = value.match(/(\d+)\D+(\d+)\D+(\d+)/);
+      if (match) made = match.slice(1, 4).map(Number);
     }
-    const match = value.match(/(\d+)\D+(\d+)\D+(\d+)/);
-    return match ? match.slice(1, 4).map(Number) : [0, 0, 0];
   } catch {
-    return [0, 0, 0];
+    made = [0, 0, 0];
   }
+  if (colourSeen.size >= COLOUR_CAP) colourSeen.clear();
+  colourSeen.set(key, made);
+  return made;
 }
 
 //: Contrast below which ink is treated as unreadable on a surface, as a WCAG-style ratio.
@@ -371,13 +371,22 @@ let hookInstalled = false;
 
 // Category keys a node answers to, most specific first: the full path, then the bucket below
 // ``model/`` where core nodes nest, then each shorter path.
+const keysSeen = new Map();
+const KEYS_CAP = 600;
+
 function categoryKeys(node) {
   const raw = String(node?.constructor?.category ?? node?.category ?? "").trim().toLowerCase();
+  const known = keysSeen.get(raw);
+  if (known) return known;
   const parts = raw.split("/").filter(Boolean);
-  if (!parts.length) return [];
-  const keys = [parts.join("/")];
-  if (parts[0] === "model" && parts.length > 1) keys.push(parts[1]);
-  for (let i = parts.length - 1; i > 0; i--) keys.push(parts.slice(0, i).join("/"));
+  const keys = [];
+  if (parts.length) {
+    keys.push(parts.join("/"));
+    if (parts[0] === "model" && parts.length > 1) keys.push(parts[1]);
+    for (let i = parts.length - 1; i > 0; i--) keys.push(parts.slice(0, i).join("/"));
+  }
+  if (keysSeen.size >= KEYS_CAP) keysSeen.clear();
+  keysSeen.set(raw, keys);
   return keys;
 }
 
@@ -454,13 +463,18 @@ function sanitiseGradient(raw) {
 
 // The stop a title has to stay legible against: the lightest, because white text fails there
 // first. A gradient reading as one colour for contrast is the point.
+const anchorSeen = new WeakMap();
+
 function gradientAnchor(grade) {
+  const known = anchorSeen.get(grade);
+  if (known) return known;
   let best = grade.stops[0][1];
   let high = -1;
   for (const [, colour] of grade.stops) {
     const value = luminance(colour);
     if (value > high) { high = value; best = colour; }
   }
+  anchorSeen.set(grade, best);
   return best;
 }
 
@@ -722,6 +736,33 @@ function artFor(src, slot) {
   return entry.image;
 }
 
+const RASTER_EDGE = 128;
+
+const rasterCache = new Map();
+
+function artRaster(src, image) {
+  if (!image) return null;
+  const known = rasterCache.get(src);
+  if (known !== undefined) return known;
+  let made = null;
+  const wide = image.naturalWidth || image.width || RASTER_EDGE;
+  const tall = image.naturalHeight || image.height || RASTER_EDGE;
+  if (wide > 0 && tall > 0) {
+    const ratio = RASTER_EDGE / Math.max(wide, tall);
+    try {
+      const pad = document.createElement("canvas");
+      pad.width = Math.max(1, Math.round(wide * ratio));
+      pad.height = Math.max(1, Math.round(tall * ratio));
+      pad.getContext("2d").drawImage(image, 0, 0, pad.width, pad.height);
+      made = pad;
+    } catch {
+      made = null;
+    }
+  }
+  rasterCache.set(src, made);
+  return made;
+}
+
 function artPattern(ctx, src, image) {
   let made = patternCache.get(src);
   if (!made) {
@@ -735,6 +776,7 @@ function artPattern(ctx, src, image) {
 function forgetArt() {
   artCache.clear();
   patternCache.clear();
+  rasterCache.clear();
   imageSeen.clear();
   imageBudget = 0;
   imageCount = 0;
@@ -1002,16 +1044,22 @@ function installDrawHook() {
 
     const gates = readerGates();
     const savedIcon = node.onDrawTitleBox;
-    const hadIcon = Object.prototype.hasOwnProperty.call(node, "onDrawTitleBox");
+    let hadIcon = false;
+    let paintedIcon = false;
     const iconSpec = gates.titleIcons ? facetFor(extras, node, "icon") : undefined;
     if (iconSpec && iconSpec !== "none" && !this.low_quality && !node.boxcolor
         && !node.isSubgraphNode?.() && iconApplies(iconSpec, node)) {
-      const art = iconSpec.image ? artFor(iconSpec.image, "icon") : null;
-      if (art || iconSpec.glyph) node.onDrawTitleBox = paintTitleIcon(iconSpec, art);
+      const art = iconSpec.image
+        ? artRaster(iconSpec.image, artFor(iconSpec.image, "icon"))
+        : null;
+      if (art || iconSpec.glyph) {
+        hadIcon = Object.prototype.hasOwnProperty.call(node, "onDrawTitleBox");
+        node.onDrawTitleBox = paintTitleIcon(iconSpec, art);
+        paintedIcon = true;
+      }
     }
 
     const savedBody = node.onDrawBackground;
-    const hadBody = Object.prototype.hasOwnProperty.call(node, "onDrawBackground");
     let painter = savedBody;
     const bodySpec = gates.nodeArt ? facetFor(extras, node, "body") : undefined;
     if (bodySpec && bodySpec !== "none" && !this.low_quality && bodySpec.image) {
@@ -1034,22 +1082,31 @@ function installDrawHook() {
       painter = paintBodyWash(bodyColour(node), solidity, painter);
       node.bgcolor = "transparent";
     }
-    if (painter !== savedBody) node.onDrawBackground = painter;
+    const paintedBody = painter !== savedBody;
+    const hadBody = paintedBody
+      && Object.prototype.hasOwnProperty.call(node, "onDrawBackground");
+    if (paintedBody) node.onDrawBackground = painter;
 
     try {
       return original.call(this, node, ctx, ...rest);
     } finally {
       this.render_shadows = savedShadows;
       if (lg && typeof shadow === "string") lg.DEFAULT_SHADOW_COLOR = savedShadow;
-      node.color = savedColor;
-      node.title = savedTitle;
+      if (tint) node.color = savedColor;
+      if (rule?.title) node.title = savedTitle;
       this.node_title_color = savedTitleColor;
-      if (savedPainter) node.onDrawTitleBar = savedPainter;
-      else delete node.onDrawTitleBar;
-      if (hadIcon) node.onDrawTitleBox = savedIcon;
-      else delete node.onDrawTitleBox;
-      if (hadBody) node.onDrawBackground = savedBody;
-      else delete node.onDrawBackground;
+      if (grade) {
+        if (savedPainter) node.onDrawTitleBar = savedPainter;
+        else delete node.onDrawTitleBar;
+      }
+      if (paintedIcon) {
+        if (hadIcon) node.onDrawTitleBox = savedIcon;
+        else delete node.onDrawTitleBox;
+      }
+      if (paintedBody) {
+        if (hadBody) node.onDrawBackground = savedBody;
+        else delete node.onDrawBackground;
+      }
       if (washed) {
         if (hadBg) node.bgcolor = savedBg;
         else delete node.bgcolor;

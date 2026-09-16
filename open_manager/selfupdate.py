@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-__all__ = ["DIST", "NODE_ID", "state"]
+__all__ = ["DIST", "NODE_ID", "behind", "newest", "state"]
 
 #: The distribution name pip knows, and the identifier the registry lists the pack under.
 #: Both come from ``pyproject.toml``'s ``name``.
@@ -170,6 +170,71 @@ def version() -> str:
     return "unknown"
 
 
+PYPI_URL = f"https://pypi.org/pypi/{DIST}/json"
+NEWEST_TTL = 6 * 3600
+NEWEST_TIMEOUT = 6
+
+_newest: dict = {"version": "", "at": 0.0}
+
+
+def newest(force: bool = False) -> str:
+    """The newest version published for this distribution.
+
+    The registry carries no version for Open Manager, so the published package is the only
+    place that says whether this copy is behind.
+
+    Args:
+        force: Ask again even where a recent answer is held.
+
+    Returns:
+        A version string, or an empty string where it could not be read.
+    """
+    import time
+
+    if not force and _newest["version"] and time.time() - _newest["at"] < NEWEST_TTL:
+        return _newest["version"]
+    try:
+        import json
+        import urllib.request
+
+        with urllib.request.urlopen(PYPI_URL, timeout=NEWEST_TIMEOUT) as answer:
+            data = json.loads(answer.read().decode("utf-8", "replace")[:2_000_000])
+        found = str(((data or {}).get("info") or {}).get("version") or "").strip()[:40]
+    except Exception:
+        found = ""
+    if found:
+        _newest["version"] = found
+        _newest["at"] = time.time()
+    return found or _newest["version"]
+
+
+def behind(check: bool = False) -> dict:
+    """Whether the running copy is behind what is published.
+
+    Args:
+        check: Ask the index rather than answering from what is already held.
+
+    Returns:
+        ``{version, newest, behind}``. ``newest`` is empty where it is not known.
+    """
+    here = version()
+    out = {"version": here, "newest": "", "behind": False}
+    published = newest() if check else (_newest["version"] or "")
+    if not published:
+        return out
+    out["newest"] = published
+    try:
+        from packaging.version import InvalidVersion, Version
+
+        try:
+            out["behind"] = Version(published) > Version(here)
+        except InvalidVersion:
+            out["behind"] = published != here
+    except Exception:
+        out["behind"] = published != here
+    return out
+
+
 def _install_prefix(python: str) -> tuple[str, str]:
     """How to spell an install command for this environment, and how to force one.
 
@@ -188,15 +253,19 @@ def _install_prefix(python: str) -> tuple[str, str]:
     return f"{python} -m pip install", "--force-reinstall "
 
 
-def state() -> dict:
+def state(check: bool = False) -> dict:
     """How this copy is installed and what updating it would take.
 
+    Args:
+        check: Ask the package index whether a newer version is published.
+
     Returns:
-        ``{mode, version, dist, node_id, path, python, environment, from_git, managed,
-        steps, note}``. ``mode`` is ``custom_node`` or ``package``. ``managed`` says whether
-        Open Manager can perform the update itself. ``steps`` is the terminal recipe for when
-        it cannot, each ``{label, command}``; it is empty in custom-node mode.
+        ``{mode, version, newest, behind, dist, node_id, path, python, environment, from_git,
+        managed, steps, note}``. ``mode`` is ``custom_node`` or ``package``. ``managed`` says
+        whether Open Manager can perform the update itself. ``steps`` is the terminal recipe
+        for when it cannot, each ``{label, command}``; it is empty in custom-node mode.
     """
+    published = behind(check)
     pack_dir = _custom_node_dir()
     environment = _environment()
     python = _quote(sys.executable)
@@ -206,7 +275,9 @@ def state() -> dict:
         return {
             "mode": "custom_node",
             "from_git": (pack_dir / ".git").is_dir(),
-            "version": version(),
+            "version": published["version"],
+            "newest": published["newest"],
+            "behind": published["behind"],
             "dist": DIST,
             "node_id": NODE_ID,
             "path": str(pack_dir),
@@ -266,7 +337,9 @@ def state() -> dict:
     }
     return {
         "mode": "package",
-        "version": version(),
+        "version": published["version"],
+        "newest": published["newest"],
+        "behind": published["behind"],
         "dist": DIST,
         "node_id": NODE_ID,
         "path": str(_ROOT),
