@@ -1,23 +1,4 @@
-"""Where the access keys live, and what may be said about them.
-
-A key typed into ComfyUI's own settings is stored in ``comfy.settings.json``, returned in full
-by ``GET /settings`` to anything that asks, and shown back in the input box that set it. That
-is three ways to leak a credential for the convenience of one text field, so keys are kept
-here instead: written by this module, read by this module, and never sent back out.
-
-What this does not do is encrypt them. A key the server has to use while nobody is watching
-cannot be hidden from the account the server runs as, and a file that decrypts itself is not
-encrypted, it is obfuscated. The protection is the file's permissions, and where the platform
-will not honour those this says so rather than implying a safety it has not got.
-
-Nor does it load a ``.env`` into the environment, which is the usual way to do this and the
-wrong way here. ComfyUI loads third-party code into this process, and ``os.environ`` is a
-namespace every one of those packs can read without trying. Worse, this pack runs ``pip`` to
-install a pack's requirements, and that subprocess inherits the environment -- so a key placed
-there would be handed to pip, and to the build backend of whatever package is being installed,
-which is arbitrary code from the internet. The environment is therefore read where a
-deployment has chosen to inject a key, and never written to.
-"""
+"""Where the access keys live, and what may be said about them."""
 
 from __future__ import annotations
 
@@ -34,10 +15,6 @@ __all__ = ["ENV_NAMES", "NAMES", "forget", "hint", "listing", "path", "secret",
 
 logger = log.get_logger("keys")
 
-#: The keys this knows about: what each is called, what a value looks like, and what it is
-#: for. Anything else is refused, so a caller cannot invent a name and have it written to
-#: disk. The panel renders this rather than keeping its own copy, so a key added here appears
-#: there without anybody remembering to add it twice.
 NAMES = {
     "huggingface": {
         "label": "Hugging Face",
@@ -59,20 +36,8 @@ NAMES = {
     },
 }
 
-#: Longest value accepted. Tokens are well under this; the cap is a guard against a caller
-#: writing a file rather than a key.
 MAX_LENGTH = 512
 
-#: The environment variables consulted for each key, in the order they are tried. This is for
-#: a deployment that would rather inject its secrets than have anything write them: a
-#: container, a service unit, a launcher script.
-#:
-#: The conventional names are read as well as ours, because someone who has already told
-#: huggingface-cli who they are should not have to say it again under a different name. Which
-#: variable supplied a key is reported rather than assumed, so picking one up is visible.
-#:
-#: Read only. Nothing here ever puts a key *into* the environment, which is the part of the
-#: dotenv pattern that does not suit this process; the reason is in the module docstring.
 ENV_NAMES = {
     "huggingface": ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "OPEN_MANAGER_HF_TOKEN"),
     "github": ("GITHUB_TOKEN", "GH_TOKEN", "OPEN_MANAGER_GITHUB_TOKEN"),
@@ -99,7 +64,7 @@ def _harden(target: Path) -> str:
 
     Returns:
         An empty string where the file is now owner-only, or a sentence describing what
-        could not be arranged. The caller is expected to show it rather than swallow it.
+        could not be arranged.
     """
     try:
         os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
@@ -107,15 +72,12 @@ def _harden(target: Path) -> str:
         return f"the file's permissions could not be set ({error.strerror or error})"
     if sys.platform != "win32":
         return ""
-    # chmod on Windows only toggles the read-only flag; it says nothing about who may read
-    # the file. Inherited permissions are what actually decide that, so they are removed and
-    # the owner granted explicitly.
     try:
         import getpass
         import subprocess
 
         who = os.environ.get("USERNAME") or getpass.getuser()
-        done = subprocess.run(  # noqa: S603 - fixed program, no shell
+        done = subprocess.run(  # noqa: S603
             ["icacls", str(target), "/inheritance:r", "/grant:r", f"{who}:F"],
             capture_output=True, text=True, timeout=20, check=False,
         )
@@ -159,11 +121,11 @@ def store(name: str, value: str) -> dict:
 
     Args:
         name: One of :data:`NAMES`.
-        value: The key. Whitespace around it is dropped, because pasting picks it up.
+        value: The key, with surrounding whitespace dropped.
 
     Returns:
         ``{ok, reason, name, set, hint, warning}``. ``warning`` is non-empty where the file
-        could be written but not restricted, which the reader should be told about.
+        could be written but not restricted.
     """
     if name not in NAMES:
         return {"ok": False, "reason": "no such key", "name": name, "set": False,
@@ -197,14 +159,7 @@ def forget(name: str) -> dict:
 
 
 def secret(name: str) -> str:
-    """The key itself, for this server's own use.
-
-    Never returned over HTTP. Every route that needs a key reads it here rather than taking
-    one from the request, so a key is not carried in a query string, a body, or a log.
-
-    The environment is consulted first, so a deployment that injects its secrets is not
-    overridden by something typed in a browser months ago.
-    """
+    """The key itself, for this server's own use."""
     if name not in NAMES:
         return ""
     _, from_env = _from_env(name)
@@ -229,23 +184,16 @@ def hint(name: str) -> dict:
     value = secret(name)
     where = source(name)
     variable, _ = _from_env(name)
-    # A key held in the file while the environment also has one is not the key in use, and
-    # saying so is the difference between a setting that works and one that quietly does not.
     shadowed = where == "environment" and isinstance(_read().get(name), str)
     return {"set": bool(value), "hint": _hint_for(value) if value else "",
             "source": where,
-            # Which variable actually supplied it, or the one to set if none did.
             "env": variable or ENV_NAMES[name][0],
             "env_names": list(ENV_NAMES[name]),
             "shadowed": shadowed}
 
 
 def listing() -> dict:
-    """Every key this knows about: what it is for, and whether one is held.
-
-    Deliberately without values. There is no route that returns a key, because there is no
-    question a reader can ask that needs one.
-    """
+    """Every key this knows about: what it is for, and whether one is held."""
     held = _read()
     where = path()
     readable = ""

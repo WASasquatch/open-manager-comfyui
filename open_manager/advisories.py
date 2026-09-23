@@ -1,8 +1,4 @@
-"""Published supply-chain compromises, recorded so a warning can cite one.
-
-Each entry names a package or pack version confirmed compromised and shipped to users, with
-a reference to the published incident.
-"""
+"""Published supply-chain compromises, recorded so a warning can cite one."""
 
 from __future__ import annotations
 
@@ -28,7 +24,6 @@ class Advisory:
     reference: str
 
 
-#: Node packs published in a compromised state.
 PACK_ADVISORIES: tuple[Advisory, ...] = (
     Advisory(
         subject="ComfyUI_LLMVISION",
@@ -39,7 +34,6 @@ PACK_ADVISORIES: tuple[Advisory, ...] = (
     ),
 )
 
-#: Python distributions published in a compromised state.
 PIP_ADVISORIES: tuple[Advisory, ...] = (
     Advisory(
         subject="ultralytics",
@@ -52,7 +46,7 @@ PIP_ADVISORIES: tuple[Advisory, ...] = (
         subject="litellm",
         versions=("1.82.7", "1.82.8"),
         summary="Release artifacts carried code that exfiltrated environment variables.",
-        reference="https://github.com/BerriAI/litellm/issues",
+        reference="https://github.com/BerriAI/litellm/issues/24518",
     ),
 )
 

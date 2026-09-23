@@ -1,17 +1,4 @@
-"""Which packs carry a GitHub topic.
-
-The tags shown on a pack's page are its repository's GitHub topics. They are not in the
-registry: it has a ``tags`` field, but it is empty for all but a handful of packs, and its own
-search does not match topics either -- searching it for ``perlin-noise`` returns nothing while
-WAS Node Suite carries exactly that topic.
-
-So the question goes to GitHub, which does index topics, and the answer is narrowed to the
-catalogue we already hold. The narrowing matters more than it looks: ``topic:animation`` alone
-is 19,000 repositories and the hundred most-starred of them contain no ComfyUI pack at all,
-while ``topic:animation topic:comfyui`` is fourteen repositories of which eight are packs. The
-cost of that is a pack which does not tag itself ``comfyui`` will not be found by its other
-topics; that is stated where the results are shown rather than papered over.
-"""
+"""Which packs carry a GitHub topic."""
 
 from __future__ import annotations
 
@@ -23,20 +10,13 @@ import aiohttp
 
 __all__ = ["TOPIC", "packs_for"]
 
-#: GitHub's own shape for a topic: lowercase, digits and hyphens, 50 characters at most. A
-#: value that is not one of these is not searched for -- it would be pasted into a query.
 TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,49}$")
 
-#: The qualifier that keeps the search inside this ecosystem.
 _NARROW = "topic:comfyui"
 
-#: Results a page, and pages followed. A topic narrowed to ComfyUI has never come close to
-#: three hundred repositories, so this is a bound on a runaway rather than a real limit.
 _PER_PAGE = 100
 _MAX_PAGES = 3
 
-#: How long an answer is kept. Topics move when someone edits their repository, which is not
-#: something that needs to be noticed within the hour.
 _TTL = 3600.0
 
 _cache: dict[str, tuple[float, dict]] = {}
@@ -60,8 +40,7 @@ async def packs_for(topic: str, session: aiohttp.ClientSession) -> dict:
     Returns:
         ``{ok, topic, ids, found, searched, partial, reason}``. ``ids`` are catalogue
         identifiers. ``found`` is how many repositories GitHub returned and ``searched`` how
-        many of those are packs, so a reader can tell "no pack has this" from "GitHub knows
-        nothing about this". ``partial`` marks a result cut short by the page cap.
+        many of those are packs. ``partial`` marks a result cut short by the page cap.
     """
     from . import catalog, keys
 
@@ -73,8 +52,6 @@ async def packs_for(topic: str, session: aiohttp.ClientSession) -> dict:
     if hit and time.monotonic() - hit[0] < _TTL:
         return hit[1]
 
-    # Built once per call rather than held, so a pack installed or synced since the last search
-    # is included without anything having to remember to clear a second cache.
     known: dict[str, str] = {}
     for entry in catalog.load():
         pair = _pair(entry.get("repository", ""))
@@ -87,7 +64,6 @@ async def packs_for(topic: str, session: aiohttp.ClientSession) -> dict:
     }
     token = keys.secret("github")
     if token:
-        # Search is rate limited hard without one: ten requests a minute against thirty.
         headers["Authorization"] = f"Bearer {token}"
 
     ids: list[str] = []

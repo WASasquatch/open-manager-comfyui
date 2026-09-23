@@ -1,22 +1,4 @@
-"""What may be downloaded, from where, and to which directory.
-
-A model file is not code, but the machinery around it is close enough to matter: a pickle
-format executes on load, a URL decides who is being trusted, and a filename decides what
-gets written where. So the policy is a whitelist on all three, kept here rather than spread
-through the download code, and every decision is refused by default.
-
-Two environment variables widen it, both read once at import:
-
-``OPEN_MANAGER_MODEL_HOSTS``
-    Hosts to allow in addition to Hugging Face and GitHub, comma separated.
-
-``OPEN_MANAGER_MODEL_FORMATS``
-    File extensions to allow *instead of* the safe set. Setting this is how a reader opts
-    into pickle-backed formats, which run code when a model is loaded.
-
-``OPEN_MANAGER_MEDIA_FORMATS``
-    Image, video and audio extensions to allow *instead of* the built-in set.
-"""
+"""What may be downloaded, from where, and to which directory."""
 
 from __future__ import annotations
 
@@ -46,9 +28,6 @@ __all__ = [
     "sha256_file",
 ]
 
-#: Hosts a model may be fetched from without the reader widening anything. Hugging Face and
-#: GitHub, plus the hosts each redirects its actual bytes to: a download that follows a
-#: redirect off the allowed set is refused, so the redirect targets have to be named.
 _DEFAULT_HOSTS = frozenset({
     "huggingface.co",
     "hf.co",
@@ -69,12 +48,8 @@ def _extra_hosts() -> frozenset[str]:
     return frozenset(part.strip().lower() for part in raw.split(",") if part.strip())
 
 
-#: Every host a download may touch, including any the environment added.
 ALLOWED_HOSTS = _DEFAULT_HOSTS | _extra_hosts()
 
-#: Formats that cannot execute code when a model is loaded. ``safetensors`` and ``gguf`` are
-#: data; ``ckpt``, ``pt``, ``pth`` and ``bin`` are pickles, and loading one runs whatever it
-#: was built to run. Those are absent deliberately.
 _SAFE_FORMATS = frozenset({".safetensors", ".sft", ".gguf"})
 
 
@@ -89,12 +64,8 @@ def _formats() -> frozenset[str]:
     return frozenset(chosen) if chosen else _SAFE_FORMATS
 
 
-#: Extensions a download may carry.
 SAFE_FORMATS = _formats()
 
-#: Image, video and audio containers. These are read as data by whatever loads them, so none
-#: of them carries code the way a pickle does. ``svg`` is absent: it is a document that can
-#: carry script, not an image format.
 _MEDIA_FORMATS = frozenset({
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif",
     ".mp4", ".webm", ".mov", ".mkv", ".m4v", ".avi",
@@ -113,11 +84,8 @@ def _media() -> frozenset[str]:
     return frozenset(chosen) if chosen else _MEDIA_FORMATS
 
 
-#: Media extensions a download may carry.
 MEDIA_FORMATS = _media()
 
-#: Where media is written. ComfyUI reads the graph's images, video and audio from here, so a
-#: file downloaded for a workflow to use belongs in it.
 MEDIA_DIRECTORY = "input"
 
 
@@ -154,10 +122,8 @@ def _media_root() -> str:
         return ""
 
 
-#: A filename that is only a name: no separators, no parent, nothing a shell would read.
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,190}$")
 
-#: Windows device names, which cannot be used as a filename.
 _RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{n}" for n in range(1, 10)}
@@ -165,9 +131,6 @@ _RESERVED = frozenset(
 )
 
 
-#: Hosts a Hugging Face token may be sent to. Deliberately not the CDN: a download is
-#: redirected to a signed URL on a different host, and a credential that follows a redirect is
-#: a credential handed to whoever controls the redirect.
 TOKEN_HOSTS = frozenset({"huggingface.co", "hf.co"})
 
 
@@ -194,10 +157,6 @@ def host_allowed(host: str) -> bool:
 def normalise(url: str) -> str:
     """A URL pointing at the bytes rather than at a page about them.
 
-    Hugging Face serves a file two ways. ``/blob/`` is the page a person reads, and fetching
-    it returns HTML; ``/resolve/`` is the file. Templates carry both, so the page form is
-    rewritten rather than downloaded and found to be markup.
-
     Args:
         url: The URL as it was declared.
 
@@ -219,9 +178,6 @@ def normalise(url: str) -> str:
 def owner_of(url: str) -> str:
     """Who a URL belongs to, as ``host/account``, for the trust prompt.
 
-    A model is published by an account on a host, and that pair is what a reader is being
-    asked about. A URL with no account part answers with the host alone.
-
     Args:
         url: A model URL.
 
@@ -236,7 +192,6 @@ def owner_of(url: str) -> str:
     if host in ("github.com", "raw.githubusercontent.com") and segments:
         return f"{host}/{segments[0]}"
     if host.endswith("huggingface.co") or host == "hf.co":
-        # A model lives at /account/repo; a dataset or space carries a kind first.
         if segments and segments[0] in ("datasets", "spaces", "models") and len(segments) > 1:
             return f"{host}/{segments[1]}"
         if segments:
@@ -273,13 +228,6 @@ def _folder_roots(directory: str) -> list[str]:
 def roots(directory: str) -> list[dict]:
     """Where a model of this kind may be stored, for the reader to choose between.
 
-    ComfyUI can be pointed at several drives through ``extra_model_paths.yaml``, which is how
-    a large model ends up somewhere other than the install. Only the paths it registers are
-    offered: a download is never written to a path the reader types.
-
-    The order is ComfyUI's own, so a base marked ``is_default`` leads, and free space is
-    reported because that is usually what decides.
-
     Args:
         directory: A ComfyUI model folder name, such as ``loras``.
 
@@ -294,8 +242,6 @@ def roots(directory: str) -> list[dict]:
             continue
         exists = path.is_dir()
         free = total = 0
-        # Free space comes from the nearest parent that exists, so a folder ComfyUI has
-        # registered but not yet created still reports the drive it would land on.
         probe = path
         while not probe.exists() and probe.parent != probe:
             probe = probe.parent
@@ -345,7 +291,6 @@ def destination(directory: str, name: str, root: str = "") -> Path | None:
     except OSError:
         return None
     target = (base / name).resolve()
-    # The name is already checked, so this only catches a surprising resolution.
     if target.parent != base:
         return None
     return target
@@ -382,27 +327,11 @@ def sha256_file(where: str, chunk: int = 1 << 20) -> str:
         return ""
 
 
-#: Folders ComfyUI registers that hold no model the reader put there.
-#:
-#: ``custom_nodes`` is registered alongside the model folders and is not one: it holds a
-#: pack's code, its bundled weights and its config files, and deleting from it breaks the
-#: pack. ``input``, ``output`` and ``temp`` hold media with a different lifecycle.
 NON_MODEL_FOLDERS = frozenset({"custom_nodes", "input", "output", "temp"})
 
 
 def owned_path(where: str) -> Path | None:
     """The file at this path, where it lies inside a model folder ComfyUI registers.
-
-    The gate for deleting something from the model library. A library file is not a download,
-    so it cannot be checked the way :func:`overwrite_target` checks one; what makes it ours to
-    act on is only that ComfyUI would look for models where it sits.
-
-    Anywhere *under* a root counts, not merely the root itself: ComfyUI reads model folders
-    recursively and a reader who files their loras under ``WAN/light2x`` has still put them in
-    a model folder.
-
-    Both the file and the roots are resolved before they are compared, so a symlink is judged
-    by where it actually leads. One pointing out of the model folders is refused.
 
     Args:
         where: A path, as the panel reported it.
@@ -432,11 +361,6 @@ def owned_path(where: str) -> Path | None:
 
 def overwrite_target(directory: str, name: str, existing: str) -> Path | None:
     """The path to rewrite when replacing a file already on disk.
-
-    ComfyUI can be configured with several roots per model folder, and a file being replaced
-    may sit under any of them. Writing to the first root instead would leave the original
-    where it was and add a second copy, so the existing path is used -- once it is confirmed
-    to be a file of that name sitting directly inside one of the folder's own roots.
 
     Args:
         directory: A ComfyUI model folder name.
@@ -507,18 +431,12 @@ def check(url: str, name: str, directory: str, root: str = "") -> tuple[bool, st
         )
     if directory not in folders():
         return False, f"{directory or 'no directory'} is not a ComfyUI folder"
-    # Each folder takes what it is for: weights in the model folders, images, video and audio
-    # in the media one. That keeps a folder's contents loadable by whatever reads it.
     media = directory == MEDIA_DIRECTORY
     permitted = MEDIA_FORMATS if media else SAFE_FORMATS
     advice = (
         "Set OPEN_MANAGER_MEDIA_FORMATS to choose your own list." if media else
-        "Pickle-backed formats run code when loaded; set OPEN_MANAGER_MODEL_FORMATS to "
-        "choose your own list."
+        "Set OPEN_MANAGER_MODEL_FORMATS to choose your own list."
     )
-    # Both ends are checked. The URL says what is being fetched, and the name says what ends
-    # up on disk; gating only the first lets a permitted URL be written under any extension
-    # at all, which is the opposite of what an allowlist is for.
     for candidate, what in ((parts.path.rsplit("/", 1)[-1], "that URL"), (name, "that name")):
         suffix = _suffix(candidate)
         if suffix not in permitted:

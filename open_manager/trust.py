@@ -1,21 +1,4 @@
-"""Accounts the reader has chosen to trust, so they are not asked the same thing twice.
-
-The panel's setting decides whether this list is consulted at all:
-
-``author``
-    Ask once per account and remember the answer. Anything that account publishes is
-    allowed from then on. This matches how the risk actually works -- a custom node runs
-    with ComfyUI's privileges, so who wrote it is the question -- but it is broad.
-
-``action``
-    Ask every time, naming the account, and remember nothing. Nothing is written here.
-
-Neither silences findings. An advisory, a payload finding or a scan result is about the
-code rather than who published it, and is reported either way.
-
-Kept in ``user/`` rather than beside the pack, so removing and reinstalling Open Manager
-does not quietly clear it.
-"""
+"""Accounts the reader has chosen to trust, so they are not asked the same thing twice."""
 
 from __future__ import annotations
 
@@ -27,12 +10,8 @@ from . import paths
 
 __all__ = ["KINDS", "forget", "is_trusted", "listing", "path", "record"]
 
-#: What a decision covers. Trusting someone to ship code that runs with ComfyUI's
-#: privileges is a different question from trusting them for a model file, so the answers
-#: are kept apart and neither implies the other.
 KINDS = ("packs", "downloads")
 
-#: Most accounts remembered. Far above any real list; a guard against a runaway writer.
 _CAP = 500
 
 
@@ -47,11 +26,7 @@ def _fold(owner: str) -> str:
 
 
 def _read() -> dict:
-    """Every stored decision, keyed by kind then by owner.
-
-    A file written before the kinds existed held owners at the top level. Those were all
-    pack decisions, so they are read as such rather than discarded.
-    """
+    """Every stored decision, keyed by kind then by owner."""
     empty = {kind: {} for kind in KINDS}
     try:
         data = json.loads(path().read_text(encoding="utf-8"))

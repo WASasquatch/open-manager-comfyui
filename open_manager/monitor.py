@@ -1,19 +1,12 @@
-"""What the machine is doing, sampled only while somebody is looking.
-
-A monitor that keeps measuring after its panel is closed is a cost with nobody to read it, so
-sampling here is driven by leases rather than by a switch. A client that wants readings asks
-for one and renews it; when the last lease lapses the timer stops. A counter alone would not
-do, because a browser tab that is closed never gets to decrement anything -- so a lease that
-is not renewed simply expires.
-
-Readings are pushed over the websocket ComfyUI already holds open rather than answered from a
-new endpoint, which keeps a reading at one message instead of a request and a response.
-"""
+"""What the machine is doing, sampled only while somebody is looking."""
 
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import time
+import warnings
 
 from . import log
 
@@ -22,40 +15,25 @@ __all__ = ["activity", "blocks", "free", "lease", "models", "release", "sample",
 
 logger = log.get_logger("monitor")
 
-#: Message type the readings are pushed under. Registered by the panel before it asks for a
-#: lease, so ComfyUI dispatches it rather than reporting it as an unknown type.
 CHANNEL = "open_manager.monitor"
 
-#: Seconds between samples, unless a client asks for something else.
 DEFAULT_INTERVAL = 2.0
 
-#: The range a client may ask for. Below the floor this measures itself more than the machine.
 MIN_INTERVAL = 1.0
 MAX_INTERVAL = 10.0
 
-#: Intervals a lease survives without being renewed. Three is enough to ride out a slow frame
-#: or a tab that is briefly busy, and short enough that a closed tab stops the timer promptly.
 LEASE_INTERVALS = 3
 
-#: How much of the clock measuring may have. A reading normally takes a millisecond or two, so
-#: the asked interval stands; where the machine is strained enough that one takes seconds, this
-#: is what stops the monitor asking again straight away and adding to it.
 SAMPLE_SHARE = 20
 
-#: Longest the budget may stretch an interval to, however slow a reading gets.
 SAMPLE_BACKOFF_CAP = 60.0
 
-#: client id -> {expires, interval}
 _leases: dict[str, dict] = {}
 _task: "asyncio.Task | None" = None
 
 
 def _psutil():
-    """psutil, or ``None`` where it cannot be imported.
-
-    ComfyUI depends on it, so this is nearly always present; a reading it would have supplied
-    is left out rather than the whole sample failing.
-    """
+    """psutil, or ``None`` where it cannot be imported."""
     try:
         import psutil
 
@@ -64,28 +42,21 @@ def _psutil():
         return None
 
 
-#: NVML, once it has been tried. ``False`` means it was tried and is not usable, which is not
-#: an error: a machine without NVIDIA tooling simply reports no temperature.
 _nvml = None
 
-#: The device handles, once enumerated.
 _nvml_cards = None
 
 
 def _nvml_handles():
-    """A handle per NVIDIA device, or an empty list.
-
-    NVML is initialised once, and the handles are kept: they name the device rather than the
-    moment, and enumerating them again on every reading is a driver call per card per sample
-    for an answer that does not change. Where it is missing, or refuses, temperatures and
-    utilisation are left out of the reading rather than the reading failing.
-    """
+    """A handle per NVIDIA device, or an empty list."""
     global _nvml, _nvml_cards
     if _nvml is False:
         return []
     if _nvml is None:
         try:
-            import pynvml
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                import pynvml
 
             pynvml.nvmlInit()
             _nvml = pynvml
@@ -120,11 +91,11 @@ def _nvml_readings() -> list[dict]:
         except Exception:
             pass
         try:
-            entry["util"] = int(_nvml.nvmlDeviceGetUtilizationRates(handle).gpu)
+            rates = _nvml.nvmlDeviceGetUtilizationRates(handle)
+            entry["util"] = int(rates.gpu)
+            entry["mem_util"] = int(rates.memory)
         except Exception:
             pass
-        # Watts say what utilisation cannot. A card can report busy while it waits on memory;
-        # a card drawing a third of its limit is doing arithmetic.
         try:
             entry["watts"] = round(_nvml.nvmlDeviceGetPowerUsage(handle) / 1000, 1)
         except Exception:
@@ -135,17 +106,19 @@ def _nvml_readings() -> list[dict]:
                 break
             except Exception:
                 continue
+        for reader in ("nvmlDeviceGetCurrentClocksEventReasons",
+                       "nvmlDeviceGetCurrentClocksThrottleReasons"):
+            try:
+                entry["clock_events"] = int(getattr(_nvml, reader)(handle))
+                break
+            except Exception:
+                continue
         found.append(entry)
     return found
 
 
 def _cpu_temps(tool) -> list[dict]:
-    """Processor temperatures, where the platform reports any.
-
-    ``sensors_temperatures`` is not present on every platform -- Windows has no such attribute
-    at all -- so this is frequently empty and that is not a failure. A package reading is
-    preferred over each individual core, since one figure per socket is what a reader wants.
-    """
+    """Processor temperatures, where the platform reports any."""
     if tool is None or not hasattr(tool, "sensors_temperatures"):
         return []
     try:
@@ -159,7 +132,6 @@ def _cpu_temps(tool) -> list[dict]:
             current = getattr(entry, "current", None)
             if current is None:
                 continue
-            # One per package or die, not one per core: a reader wants a handful of numbers.
             if "package" in label.lower() or "die" in label.lower() or not found:
                 found.append({"label": label or source, "temp": round(float(current), 1)})
     return found[:8]
@@ -183,19 +155,14 @@ def _expire(now: float) -> None:
 def sample() -> dict:
     """One reading of the machine.
 
-    Every part is optional: a figure that cannot be taken is left out rather than reported as
-    zero, which would read as "idle" rather than "unknown".
-
     Returns:
-        ``{at, cpu, ram, vram, devices}``.
+        ``{at, cpu, cores, cpu_temps, ram, vram, devices}``.
     """
     reading: dict = {"at": time.time()}
 
     tool = _psutil()
     if tool is not None:
         try:
-            # Without an interval this is the load since the previous call, which is exactly
-            # the window between samples and costs nothing to take.
             reading["cpu"] = round(tool.cpu_percent(interval=None), 1)
             cores = tool.cpu_percent(interval=None, percpu=True)
             if cores:
@@ -214,8 +181,6 @@ def sample() -> dict:
         free = mm.get_free_memory(cpu_device)
         reading["ram"] = {"total": total, "free": free, "used": total - free}
 
-        # Every device, not just the one ComfyUI happens to prefer: a machine with four cards
-        # is a machine where the interesting question is which of them is busy.
         extras = {one.get("index"): one for one in _nvml_readings()}
         devices = []
         for device in mm.get_all_torch_devices():
@@ -231,11 +196,10 @@ def sample() -> dict:
                 "free": vram_free,
                 "used": vram_total - vram_free,
             }
-            # NVML orders its devices the same way torch does unless CUDA_VISIBLE_DEVICES has
-            # reordered them, so a mismatch means no temperature rather than a wrong one.
             extra = extras.get(entry["index"])
             if extra and (not extra.get("name") or extra["name"] in entry["name"]):
-                for key in ("temp", "util", "watts", "watt_limit"):
+                for key in ("temp", "util", "mem_util", "watts", "watt_limit",
+                            "clock_events"):
                     if key in extra:
                         entry[key] = extra[key]
             devices.append(entry)
@@ -243,19 +207,13 @@ def sample() -> dict:
             reading["devices"] = devices
             reading["vram"] = devices[0]
     except Exception:
-        # A build without torch, or a device that will not answer. The rest of the sample
-        # still stands.
         pass
 
     return reading
 
 
 def _pin_state(patcher, device) -> dict:
-    """What this build knows about a model's pinned host memory.
-
-    Pinning and block streaming are a fork's business and the shapes differ between them, so
-    every field is reached for separately and a missing one is simply absent.
-    """
+    """What this build knows about a model's pinned host memory."""
     found: dict = {}
     try:
         pins = getattr(patcher.model, "dynamic_pins", None)
@@ -284,16 +242,12 @@ def _pin_state(patcher, device) -> dict:
 def models() -> dict:
     """The models ComfyUI is holding, and where each one's weights actually are.
 
-    A model can be resident on the device, offloaded to host memory, or split between them
-    while it streams; the figures that matter are therefore what it weighs and how much of
-    that is on the device right now, not simply that it is "loaded".
-
     Returns:
         ``{ok, models, totals, reason}``.
     """
     try:
         import comfy.model_management as mm
-    except Exception as error:  # noqa: BLE001 - a build without it is not an error here
+    except Exception as error:  # noqa: BLE001
         return {"ok": False, "models": [], "totals": {}, "reason": str(error)[:120]}
 
     rows = []
@@ -301,14 +255,11 @@ def models() -> dict:
         try:
             patcher = entry.model
             if patcher is None:
-                # A weak reference that has gone; the model is on its way out.
                 continue
             total = int(entry.model_memory() or 0)
             resident = int(entry.model_loaded_memory() or 0)
             inner = getattr(patcher, "model", None)
             row = {
-                # Identity rather than position: the list is sorted for reading and shifts as
-                # models come and go, so a row has to say which model it means.
                 "id": id(patcher),
                 "name": type(inner).__name__ if inner is not None else "unknown",
                 "device": str(getattr(entry, "device", "")),
@@ -330,7 +281,6 @@ def models() -> dict:
                 row["pins"] = pins
             rows.append(row)
         except Exception:
-            # One model that will not answer should not lose the rest of the list.
             continue
 
     rows.sort(key=lambda row: -row["total"])
@@ -348,11 +298,8 @@ def models() -> dict:
     }
 
 
-#: What a page of a streamed model can be. The flags come from the streaming library: bit one
-#: means the page is on the card, bit two means it is pinned there.
 PAGE_STATES = ("host", "on device", "pinned", "on device, pinned", "not allocated yet")
 
-#: Page size the streaming library states in its own header, 32 MiB, as a shift.
 VBAR_SHIFT = 25
 
 UNSEEN = len(PAGE_STATES) - 1
@@ -487,10 +434,6 @@ def _stream_churn(now: float) -> tuple[float, float] | None:
 def _vbar_pages(patcher, entry, cells: int):
     """The residency of a streamed model, a page at a time, or ``None``.
 
-    The streaming library keeps the model in a virtual range and reports which of its pages
-    are on the card. That is the authority on what is resident; nothing else on the model
-    knows it, and the parameters themselves go on reporting the host.
-
     Returns:
         The same shape :func:`blocks` returns, or ``None`` where this model does not stream.
     """
@@ -526,9 +469,6 @@ def _vbar_pages(patcher, entry, cells: int):
     seen = [state for state in range(len(PAGE_STATES)) if counts[state]]
     seats = {state: position for position, state in enumerate(seen)}
 
-    # Each square is asked which pages it covers, rather than each page being told which
-    # square to fall in. A model with fewer pages than squares then reads as bands rather
-    # than as a scatter of dots with gaps between them.
     packed = []
     for cell in range(cells):
         low = (cell * total) // cells
@@ -619,17 +559,8 @@ def _module_bytes(mm, module) -> int:
 def blocks(index: int = 0, cells: int = 240) -> dict:
     """Where each part of one model's weights currently sits.
 
-    A model is not simply on the card or off it. Under block streaming its modules are moved
-    between host and device as it runs, so the useful picture is the layout: which stretches
-    of the model are resident and which are not, in the order the model is written.
-
-    The modules are walked in order and their bytes poured into a fixed number of cells, the
-    way a disk map pours sectors into squares. A cell takes the colour of whichever device
-    owns most of it, so a long resident stretch reads as a block of one colour rather than as
-    a thousand separate readings.
-
     Args:
-        index: Which of the loaded models, newest first as :func:`models` lists them.
+        index: Which of the loaded models, largest first as :func:`models` lists them.
         cells: How many squares to divide it into.
 
     Returns:
@@ -653,10 +584,6 @@ def blocks(index: int = 0, cells: int = 240) -> dict:
 
     cells = max(24, min(2048, int(cells or 240)))
 
-    # The device a module's parameters report is where its home copy lives, which under block
-    # streaming is the host for the whole model even while all of it is resident. Asking the
-    # streaming machinery directly is the only way to get the real picture, so that is tried
-    # first and the module walk is only a fallback for models that do not stream.
     paged = _vbar_pages(patcher, entry, cells)
     if paged is not None:
         paged["name"] = type(inner).__name__
@@ -685,12 +612,6 @@ def blocks(index: int = 0, cells: int = 240) -> dict:
         return {"ok": False, "cells": [], "reason": "that model reports no weights"}
     cells = max(1, min(cells, len(segments)))
 
-    # Each module occupies a stretch of the model, and each square a stretch of the same
-    # length; the overlap between them is what a square gets.
-    #
-    # Done in whole bytes rather than by pouring out a running remainder. A remainder carried
-    # in floating point lands a hair past a boundary, leaves a room of about nothing, and the
-    # loop then advances by about nothing for as long as you let it.
     grid = [dict() for _ in range(cells)]
     at = 0
     for size, where in segments:
@@ -725,35 +646,62 @@ def blocks(index: int = 0, cells: int = 240) -> dict:
         "index": index,
         "total": total,
         "modules": len(segments),
-        # One number per square, indexing into the device list, so this stays small enough to
-        # ask for repeatedly.
         "cells": packed,
         "devices": [{"device": name, "bytes": devices[name]} for name in order],
         "reason": "",
     }
 
 
-# --- what the machine is doing --------------------------------------------------------------
-
-#: Share of a card's power limit above which it is plainly doing arithmetic.
 BUSY_POWER = 0.35
 
-#: Utilisation above which it is plainly busy, whatever the wattage says.
 BUSY_UTIL = 25
 
-#: How full memory has to be before a quiet card is suspicious rather than merely quiet.
 TIGHT_MEMORY = 0.94
 
-#: Seconds a quiet, memory-tight run must stay on the same node before this stops hedging and
-#: calls it stalled. Long, because a slow node is not a stall and saying so would be wrong.
 STALL_CONFIRM = 45.0
 
-#: Seconds an out-of-memory failure keeps the light red.
 OOM_WINDOW = 120.0
 
-#: What the last few samples saw, so "it has not moved" can be said with a stopwatch rather
-#: than guessed from one reading.
-_watch: dict = {"node": None, "quiet_since": 0.0}
+PINNED_UTIL = 90
+
+PINNED_MEM_UTIL = 10
+
+PINNED_POWER = 0.25
+
+WORKING_POWER = 0.60
+
+BANDWIDTH_BOUND = 60
+
+CLOCK_IDLE = 0x1
+
+CLOCK_CAPPED = 0x4 | 0x8 | 0x20 | 0x40 | 0x80
+
+HANG_WATCH = 15.0
+
+HANG_CONFIRM = 45.0
+
+HANG_HOLD = 8
+
+HANG_CAP = 24
+
+HANG_REARM = 30.0
+
+PID_EVERY = 5.0
+
+PID_LOOKBACK = 2.0
+
+PID_MAJORITY = 0.5
+
+_watch: dict = {"quiet_since": 0.0, "mark": None, "resident": None,
+                "bucket": 0, "since": 0.0, "rearm": 0.0}
+
+_pid_seen: dict = {}
+
+
+def _reset_watch() -> None:
+    """Forget what the stopwatches were counting."""
+    _watch.update({"quiet_since": 0.0, "mark": None, "resident": None,
+                   "bucket": 0, "since": 0.0, "rearm": 0.0})
 
 
 def _queue_state() -> tuple:
@@ -762,22 +710,23 @@ def _queue_state() -> tuple:
         from server import PromptServer
 
         return PromptServer.instance.prompt_queue.get_current_queue_volatile()
-    except Exception:  # noqa: BLE001 - no queue means nothing is running, for our purposes
+    except Exception:  # noqa: BLE001
         return ([], [])
 
 
-def _recent_oom(now: float) -> str:
-    """An out-of-memory failure in the recent past, described, or an empty string.
+def _recent_oom(now: float) -> tuple[int, str] | None:
+    """An out-of-memory failure in the recent past, or ``None``.
 
-    Read from ComfyUI's own history rather than from the log, so it carries the time it
-    happened and stops being reported once it is old news.
+    Returns:
+        ``(seconds ago, node)``, where the node is the type or id the failure names and an
+        empty string where it names neither.
     """
     try:
         from server import PromptServer
 
         history = PromptServer.instance.prompt_queue.get_history(max_items=8)
     except Exception:  # noqa: BLE001
-        return ""
+        return None
     newest = 0.0
     said = ""
     for entry in (history or {}).values():
@@ -799,9 +748,8 @@ def _recent_oom(now: float) -> str:
                 newest = when
                 said = str(data.get("node_type") or data.get("node_id") or "")
     if not newest or now - newest > OOM_WINDOW:
-        return ""
-    ago = int(now - newest)
-    return f"ran out of memory {ago}s ago" + (f" in {said}" if said else "")
+        return None
+    return (int(now - newest), said)
 
 
 def _busiest(reading: dict) -> dict:
@@ -812,109 +760,367 @@ def _busiest(reading: dict) -> dict:
     return max(devices, key=lambda one: (one.get("util") or 0, one.get("used") or 0))
 
 
+def _run_device(reading: dict) -> dict:
+    """The device the prompt is running on, or the busiest where that cannot be asked."""
+    devices = reading.get("devices") or []
+    if not devices:
+        return {}
+    try:
+        import comfy.model_management as mm
+
+        wanted = mm.get_torch_device()
+        index = wanted.index if wanted.index is not None else 0
+        for one in devices:
+            if one.get("type") == wanted.type and one.get("index") == index:
+                return one
+    except Exception:  # noqa: BLE001
+        pass
+    return _busiest(reading)
+
+
+def _pinned(device: dict, share: float | None) -> bool:
+    """Whether the card is holding kernels without doing arithmetic."""
+    util = device.get("util")
+    mem_util = device.get("mem_util")
+    events = device.get("clock_events")
+    if share is None or share > PINNED_POWER:
+        return False
+    if not isinstance(util, (int, float)) or util < PINNED_UTIL:
+        return False
+    if not isinstance(mem_util, (int, float)) or mem_util > PINNED_MEM_UTIL:
+        return False
+    if isinstance(events, int) and (events & (CLOCK_IDLE | CLOCK_CAPPED)):
+        return False
+    return True
+
+
+def _running_id(running) -> str:
+    """The id of the prompt being run, or an empty string."""
+    try:
+        return str(running[0][1])
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _progress_mark() -> tuple:
+    """A value that changes whenever the run advances.
+
+    Returns:
+        Something comparable, empty only where neither the registry nor the server can be
+        reached.
+    """
+    mark: list = []
+    try:
+        module = sys.modules.get("comfy_execution.progress")
+        registry = getattr(module, "global_progress_registry", None) if module else None
+        if registry is not None:
+            nodes = list(registry.nodes.values())
+            steps = 0.0
+            for one in nodes:
+                try:
+                    steps += float(one.get("value") or 0)
+                except Exception:  # noqa: BLE001
+                    continue
+            mark.extend([str(registry.prompt_id), len(nodes), round(steps, 3)])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from server import PromptServer
+
+        mark.append(PromptServer.instance.last_node_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return tuple(mark)
+
+
+def _mark_step(now: float, prompt: str) -> bool | None:
+    """Whether the run has advanced since the last reading.
+
+    Returns:
+        ``True`` where it has, ``False`` where it has not, ``None`` where the two readings
+        cannot be compared: a different prompt, or too long a gap between them.
+    """
+    mark = _progress_mark()
+    was = _watch.get("mark")
+    _watch["mark"] = (mark, now, prompt)
+    if not was or was[2] != prompt or now - was[1] > _interval() * 3:
+        return None
+    return mark != was[0]
+
+
+def _resident_bytes() -> int | None:
+    """Weight bytes the loaded models have on the card, or ``None``."""
+    try:
+        import comfy.model_management as mm
+    except Exception:  # noqa: BLE001
+        return None
+    total = 0
+    found = False
+    for entry in list(getattr(mm, "current_loaded_models", [])):
+        try:
+            total += int(entry.model_loaded_memory() or 0)
+            found = True
+        except Exception:  # noqa: BLE001
+            continue
+    return total if found else None
+
+
+def _resident_step(now: float, prompt: str) -> tuple | None:
+    """How many weight bytes have arrived on the card since the last reading.
+
+    Returns:
+        ``(bytes, seconds)``, or ``None`` where the two readings cannot be compared: nothing
+        to read, a different prompt, or too long a gap to call the difference a rate.
+    """
+    total = _resident_bytes()
+    was = _watch.get("resident")
+    _watch["resident"] = (total, now, prompt) if total is not None else None
+    if total is None or not was or was[2] != prompt:
+        return None
+    span = now - was[1]
+    if span <= 0 or span > _interval() * 3:
+        return None
+    return (total - was[0], span)
+
+
+def _pid_share(device: dict, now: float) -> float | None:
+    """This process's share of a card's utilisation, or ``None`` where it cannot be said."""
+    index = device.get("index")
+    handles = _nvml_handles()
+    if not isinstance(index, int) or index >= len(handles):
+        return None
+    was = _pid_seen.get(index)
+    if was and now - was[0] < PID_EVERY:
+        return was[1]
+    found = None
+    try:
+        since = int((time.time() - PID_LOOKBACK) * 1_000_000)
+        ours = os.getpid()
+        total = 0
+        mine = 0
+        for row in _nvml.nvmlDeviceGetProcessUtilization(handles[index], since) or []:
+            one = int(getattr(row, "smUtil", 0) or 0)
+            total += one
+            if int(getattr(row, "pid", -1)) == ours:
+                mine += one
+        if total:
+            found = mine / total
+    except Exception:  # noqa: BLE001
+        found = None
+    _pid_seen[index] = (now, found)
+    return found
+
+
+def _hang_watch(now: float, qualifies: bool, advanced: bool) -> tuple[int, float]:
+    """Advance the stopwatch on a card that is busy without working.
+
+    Returns:
+        ``(readings held, seconds held)``.
+    """
+    was = int(_watch.get("bucket") or 0)
+    if advanced:
+        bucket = 0
+    elif qualifies:
+        bucket = min(HANG_CAP, was + 1)
+    else:
+        bucket = max(0, was - 2)
+    _watch["bucket"] = bucket
+    if not bucket:
+        _watch["since"] = 0.0
+        if was >= HANG_HOLD:
+            _watch["rearm"] = now + HANG_REARM
+    elif not _watch.get("since"):
+        _watch["since"] = now
+    return bucket, now - float(_watch.get("since") or now)
+
+
 def activity(reading: dict | None = None) -> dict:
     """What the machine is doing, in one word, with the reasoning attached.
-
-    Five states, and the hedging is deliberate. A card that is quiet is not stalled: it may
-    be waiting on the disk, on a node that runs on the processor, or on a model being moved.
-    So quiet only becomes suspicious when memory is nearly full, and suspicion only becomes a
-    claim once nothing has moved for the better part of a minute. Saying "stalled" about a
-    slow node would teach the reader to ignore the light.
 
     Args:
         reading: A sample to read the devices from. Taken fresh where none is given.
 
     Returns:
-        ``{state, label, detail}`` where state is one of ``idle``, ``working``,
-        ``stalling``, ``stalled``, ``thrashing``, ``oom``.
+        ``{state, label, facts, detail}`` where state is one of ``idle``, ``working``,
+        ``streaming``, ``stalling``, ``stalled``, ``thrashing``, ``hang``, ``oom``, facts is
+        a list of ``[label, value]`` pairs already formatted for reading, and detail is one
+        sentence that stands on its own.
     """
     now = time.time()
     reading = reading if reading is not None else sample()
+    ram = reading.get("ram") or {}
 
     oom = _recent_oom(now)
     if oom:
-        _watch["quiet_since"] = 0.0
-        return {"state": "oom", "label": "Out of memory",
-                "detail": f"The last run {oom}. ComfyUI unloaded everything it was holding."}
+        _reset_watch()
+        ago, node = oom
+        facts = [["Failed", f"{_span(ago)} ago"]]
+        if node:
+            facts.append(["Node", node])
+        facts += _memory_rows(_run_device(reading), ram, True)
+        return {"state": "oom", "label": "Out of memory", "facts": facts,
+                "detail": "The run failed for want of memory, so ComfyUI let go of "
+                          "everything it held."}
 
     running, pending = _queue_state()
     held = models() if not running else {"totals": {}}
     if not running:
-        _watch["node"] = None
-        _watch["quiet_since"] = 0.0
+        _reset_watch()
         totals = held.get("totals") or {}
         count = int(totals.get("count") or 0)
-        waiting = f", {len(pending)} queued" if pending else ""
-        if not count:
-            return {"state": "idle", "label": "Idle",
-                    "detail": f"Nothing running and nothing in memory{waiting}."}
-        return {"state": "idle", "label": "Idle",
-                "detail": f"Nothing running{waiting}. {count} model"
-                          f"{'' if count == 1 else 's'} still held, "
-                          f"{_size(totals.get('resident') or 0)} resident."}
+        facts = []
+        if pending:
+            facts.append(["Queued", f"{len(pending)} prompt{'' if len(pending) == 1 else 's'}"])
+        if held.get("ok"):
+            facts.append(["Models held", str(count)])
+        if count:
+            facts.append(["Resident", _size(totals.get("resident") or 0)])
+        facts += _memory_rows(_run_device(reading), ram)
+        return {"state": "idle", "label": "Idle", "facts": facts,
+                "detail": "Nothing is running; models stay loaded until the room is needed."
+                          if count else "Nothing is running and no weights are loaded."}
 
-    device = _busiest(reading)
+    prompt = _running_id(running)
+    device = _run_device(reading)
     util = device.get("util")
+    mem_util = device.get("mem_util")
+    events = device.get("clock_events")
     watts = device.get("watts")
     limit = device.get("watt_limit") or 0
     share = (watts / limit) if (watts and limit) else None
-    busy = (isinstance(util, (int, float)) and util >= BUSY_UTIL) \
-        or (share is not None and share >= BUSY_POWER)
 
-    where = []
-    if isinstance(util, (int, float)):
-        where.append(f"{util}% busy")
-    if watts is not None:
-        where.append(f"{watts:g} W" + (f" of {limit:g} W" if limit else ""))
+    idling = isinstance(events, int) and bool(events & CLOCK_IDLE)
+    computing = (isinstance(events, int) and bool(events & CLOCK_CAPPED)) \
+        or (share is not None and share >= WORKING_POWER) \
+        or (isinstance(mem_util, (int, float)) and mem_util >= BANDWIDTH_BOUND)
+    busy = computing or (share is not None and share >= BUSY_POWER) \
+        or (isinstance(util, (int, float)) and util >= BUSY_UTIL and not idling)
+
+    counters = _counters(device)
+    vram_share = (device.get("used") or 0) / (device.get("total") or 1)
+    ram_share = (ram.get("used") or 0) / (ram.get("total") or 1)
+    tight = max(vram_share, ram_share) >= TIGHT_MEMORY
+    memory = _memory_rows(device, ram)
+
+    advanced = _mark_step(now, prompt)
+    step = _resident_step(now, prompt)
+    arriving = bool(step and step[0] > 0)
+    weighed = [["Weights in", _size(step[0]) if arriving else "none"]] if step else []
 
     if busy:
         _watch["quiet_since"] = 0.0
         churn = _stream_churn(now)
-        if churn and churn[0] >= THRASH_RATE and churn[1] / churn[0] >= THRASH_SHARE:
-            return {"state": "thrashing", "label": "Streaming thrash",
-                    "detail": f"Running{': ' + ', '.join(where) if where else ''}, but "
-                              f"{churn[0]:.0f} page faults a second and {churn[1]:.0f} of them "
-                              "are pages coming back. The card is busy fetching weights it "
-                              "already had rather than getting through the run."}
-        return {"state": "working", "label": "Working",
-                "detail": "Running" + (f": {', '.join(where)}" if where else "") + "."}
+        thrash = bool(churn and churn[0] >= THRASH_RATE
+                      and churn[1] / churn[0] >= THRASH_SHARE)
+        qualifies = _pinned(device, share) and tight and not arriving \
+            and not (churn and churn[0] > 0)
+        bucket, since = _hang_watch(now, qualifies, advanced is True)
 
-    # Quiet. Only worth worrying about if there is no room to work in.
-    vram_share = (device.get("used") or 0) / (device.get("total") or 1)
-    ram = reading.get("ram") or {}
-    ram_share = (ram.get("used") or 0) / (ram.get("total") or 1)
-    tight = max(vram_share, ram_share) >= TIGHT_MEMORY
+        if bucket >= HANG_HOLD and since >= HANG_CONFIRM \
+                and now >= float(_watch.get("rearm") or 0):
+            owned = _pid_share(device, now)
+            if owned is not None and owned >= PID_MAJORITY:
+                return {"state": "hang", "label": "Possible GPU hang",
+                        "facts": [["No progress", _span(since)], *counters, *weighed, *memory],
+                        "detail": "Reads as a card holding a kernel rather than working "
+                                  "through one."}
+        if thrash:
+            back = round(churn[1] / churn[0] * 100)
+            return {"state": "thrashing", "label": "Streaming thrash",
+                    "facts": [["Page faults", f"{churn[0]:.0f}/s"],
+                              ["Pages back", f"{churn[1]:.0f}/s ({back}%)"],
+                              *counters, *memory],
+                    "detail": "The card is fetching weights it already had rather than "
+                              "getting through the run."}
+        if arriving and not computing and not idling:
+            return {"state": "streaming", "label": "Streaming weights",
+                    "facts": [["Weights in", f"{_size(step[0])} in {_span(step[1])}"],
+                              *counters, *memory],
+                    "detail": "The card is fetching the model rather than waiting on it."}
+        if bucket and since >= HANG_WATCH:
+            return {"state": "stalling", "label": "Potential GPU hang",
+                    "facts": [["Watching", _span(since)], *counters, *weighed, *memory],
+                    "detail": "Could be a long kernel or a hang: too early to say which."}
+        return {"state": "working", "label": "Working", "facts": [*counters, *memory],
+                "detail": "The card is computing, and work is going through."}
+
+    _watch["bucket"] = 0
+    _watch["since"] = 0.0
+    quiet = [*counters, *_cpu_rows(reading), *memory]
     if not tight:
         _watch["quiet_since"] = 0.0
-        return {"state": "working", "label": "Working",
-                "detail": "Running, and quiet at the moment"
-                          + (f": {', '.join(where)}" if where else "")
-                          + ". Memory is not tight, so this is a node that does not use the "
-                            "card rather than a hold-up."}
+        return {"state": "working", "label": "Working", "facts": quiet,
+                "detail": "Memory is not tight, so this is a node that does not use the card."}
 
-    node = None
-    try:
-        from server import PromptServer
-
-        node = PromptServer.instance.last_node_id
-    except Exception:  # noqa: BLE001
-        pass
-    if node != _watch.get("node"):
-        _watch["node"] = node
-        _watch["quiet_since"] = now
-    elif not _watch.get("quiet_since"):
+    if advanced is not False or not _watch.get("quiet_since"):
         _watch["quiet_since"] = now
 
     stuck = now - float(_watch["quiet_since"] or now)
-    full = f"{round(max(vram_share, ram_share) * 100)}% of memory in use"
-    facts = ", ".join([*where, full])
     if stuck >= STALL_CONFIRM:
         return {"state": "stalled", "label": "Memory stalled",
-                "detail": f"Running, but nothing has moved for {int(stuck)}s and memory is "
-                          f"full: {facts}. This is thrashing rather than working."}
+                "facts": [["No progress", _span(stuck)], *quiet],
+                "detail": "Memory is full and nothing is moving: thrashing, not working."}
     return {"state": "stalling", "label": "Potential memory stall",
-            "detail": f"Running quietly with memory nearly full: {facts}. Watching for "
-                      f"{int(stuck)}s; it may simply be a slow step."}
+            "facts": [["Watching", _span(stuck)], *quiet],
+            "detail": "Memory is nearly full and nothing is moving; it may be a slow step."}
+
+def _span(seconds: float) -> str:
+    """A duration at the coarseness a reader can act on."""
+    count = int(max(0, seconds))
+    if count < 60:
+        return f"{count}s"
+    if count < 3600:
+        return f"{count // 60}m {count % 60}s"
+    return f"{count // 3600}h {count % 3600 // 60}m"
+
+
+def _pct(value) -> str:
+    """A percentage as a whole number, or an empty string where there is no reading."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    return f"{round(value)}%"
+
+
+def _fill(used, total) -> str:
+    """A share of a memory total, or an empty string where the total is unknown."""
+    if not total:
+        return ""
+    return f"{round((used or 0) / total * 100)}% of {_size(total)}"
+
+
+def _counters(device: dict) -> list:
+    """The card's three counters, leaving out whatever it will not report."""
+    rows = []
+    util = _pct(device.get("util"))
+    traffic = _pct(device.get("mem_util"))
+    watts = device.get("watts")
+    limit = device.get("watt_limit") or 0
+    if util:
+        rows.append(["Utilisation", util])
+    if traffic:
+        rows.append(["Memory traffic", traffic])
+    if watts is not None:
+        rows.append(["Power", f"{round(watts)} W" + (f" of {round(limit)} W" if limit else "")])
+    return rows
+
+
+def _cpu_rows(reading: dict) -> list:
+    """Processor load, where psutil answered."""
+    load = _pct(reading.get("cpu"))
+    return [["CPU", load]] if load else []
+
+
+def _memory_rows(device: dict, ram: dict, host: bool = False) -> list:
+    """Card memory, and host memory where it is asked for or is itself tight."""
+    rows = []
+    card = _fill(device.get("used"), device.get("total"))
+    if card:
+        rows.append(["VRAM", card])
+    total = ram.get("total") or 0
+    held = _fill(ram.get("used"), total)
+    if held and (host or (ram.get("used") or 0) / total >= TIGHT_MEMORY):
+        rows.append(["RAM", held])
+    return rows
 
 
 def _size(value: int) -> str:
@@ -927,18 +1133,8 @@ def _size(value: int) -> str:
     return f"{value} B"
 
 
-# --- giving memory back -----------------------------------------------------------------------
-
 def free(vram: bool = False, ram: bool = False) -> dict:
     """Ask ComfyUI to let go of what it is holding.
-
-    Done the way ComfyUI does it itself: a flag the prompt worker picks up, so the freeing
-    happens on the thread that owns the models rather than under one that does not. The
-    worker is woken as the flag is set, so this is not a wait for the next prompt.
-
-    ComfyUI frees the two together in one direction: clearing the cached results also unloads
-    the models, because the results hold references to them. Unloading models does not clear
-    the cache. That asymmetry is its own, and it is passed on rather than papered over.
 
     Args:
         vram: Unload every model.
@@ -966,13 +1162,10 @@ def free(vram: bool = False, ram: bool = False) -> dict:
 def unload(model_id: int, name: str = "") -> dict:
     """Unload one model ComfyUI is holding, with its clones.
 
-    Refused while a prompt is running. Pulling weights out from under a sampler is a way to
-    fail a run that was going to succeed, and there is no ordering here that makes that safe.
-
     Args:
         model_id: The ``id`` the model list reported for it.
-        name: The class name it was listed under, checked so a list that has moved on cannot
-            unload something other than the row that was clicked.
+        name: The class name it was listed under, or empty. The unload is refused when it
+            is given and differs from the model's.
 
     Returns:
         ``{ok, reason, freed, name}``.
@@ -985,8 +1178,7 @@ def unload(model_id: int, name: str = "") -> dict:
     running, _ = _queue_state()
     if running:
         return {"ok": False, "freed": 0, "name": "",
-                "reason": "a prompt is running. Unloading a model it is using would fail the "
-                          "run, so this waits until the queue is idle."}
+                "reason": "a prompt is running"}
 
     for entry in list(getattr(mm, "current_loaded_models", [])):
         patcher = getattr(entry, "model", None)
@@ -996,7 +1188,7 @@ def unload(model_id: int, name: str = "") -> dict:
         listed = type(inner).__name__ if inner is not None else "unknown"
         if name and listed != name:
             return {"ok": False, "freed": 0, "name": listed,
-                    "reason": "the list has moved on since it was drawn; refresh and try again"}
+                    "reason": "the model list has changed"}
         try:
             freed = int(entry.model_memory() or 0)
         except Exception:  # noqa: BLE001
@@ -1022,7 +1214,7 @@ def state() -> dict:
     """Who is watching, and how often."""
     _expire(time.time())
     return {
-        "watching": len(_leases),
+        "viewers": len(_leases),
         "interval": _interval(),
         "running": _task is not None and not _task.done(),
         "watching": watching(),
@@ -1044,9 +1236,6 @@ async def _loop() -> None:
             asked = _interval()
             wait = asked
             try:
-                # The light rides along with the reading rather than being asked for
-                # separately: it is read from the same figures, and a panel that has the
-                # reading should not have to make a second request to know what it means.
                 started = time.monotonic()
                 reading = await asyncio.to_thread(sample)
                 took = time.monotonic() - started
@@ -1055,10 +1244,10 @@ async def _loop() -> None:
                 reading["every"] = round(wait, 2)
                 try:
                     reading["activity"] = activity(reading)
-                except Exception as error:  # noqa: BLE001 - a reading without it is still one
+                except Exception as error:  # noqa: BLE001
                     logger.debug("activity failed (%s: %s)", type(error).__name__, error)
                 PromptServer.instance.send_sync(CHANNEL, reading)
-            except Exception as error:  # noqa: BLE001 - a bad sample must not end the loop
+            except Exception as error:  # noqa: BLE001
                 logger.debug("monitor sample failed (%s: %s)", type(error).__name__, error)
             await asyncio.sleep(wait)
     finally:
@@ -1094,7 +1283,7 @@ def lease(client: str, interval: float = DEFAULT_INTERVAL, watch: bool = False) 
 
 
 def release(client: str) -> dict:
-    """Stop wanting readings. The lease would lapse anyway; this is just prompt about it."""
+    """Drop one viewer's lease."""
     _leases.pop((client or "")[:120], None)
     _sync_watch()
     return state()

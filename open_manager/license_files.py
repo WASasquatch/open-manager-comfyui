@@ -1,8 +1,4 @@
-"""Resolve a pack's licence from its repository when the registry only references a file.
-
-The repository's LICENSE file is read from the raw content host and identified, and supersedes a
-``{"file": "LICENSE"}`` reference. Each repository is read once and cached on disk.
-"""
+"""Resolve a pack's licence from its repository when the registry only references a file."""
 
 from __future__ import annotations
 
@@ -20,66 +16,36 @@ from . import licenses, paths
 
 __all__ = ["Options", "cached", "resolve", "resolve_many"]
 
-#: Seconds a fetch may take before it is abandoned.
 TIMEOUT = 12
 
-#: Most repositories read at once. A preference above this is clamped, so a mistyped
-#: setting cannot turn a listing into a flood.
 MAX_CONCURRENCY = 32
 
-#: GitHub's licence endpoint, which names a repository's licence in one request instead of
-#: guessing at filenames. Unauthenticated callers get 60 requests an hour, a token 5,000.
 API_URL = "https://api.github.com/repos/{owner}/{repo}/license"
 
-#: Seconds an API call may take.
 API_TIMEOUT = 10
 
-#: Longest the API is left alone after its rate limit is reached, however far off the reset
-#: the header claims to be.
 API_MAX_COOLDOWN = 3600.0
 
-#: Seconds between writes of the cache while a batch is running. The final write is forced,
-#: so at most a second of resolutions is ever lost.
 SAVE_INTERVAL = 1.0
 
-#: Largest licence file read, in characters.
 LIMIT = 40000
 
-#: Days a "no licence found" answer stands before it is looked for again. A resolved name
-#: never expires on age alone.
 NEGATIVE_DAYS = 21
 
-#: Which revision of the detector produced a cached name. A resolved name is kept forever,
-#: so a correction to the detector would otherwise never reach anyone who had already looked
-#: the repository up. Raise this whenever detection changes and every older entry is read
-#: again once.
-#:
-#: 2: the GNU licences are matched on their title. Before this, any text merely mentioning
-#:    the Affero licence -- which GPL-3 section 13 does -- was reported as AGPL-3.0.
 DETECTION_REVISION = 2
 
-#: Longest repository string parsed for an owner and repo.
 _MAX_URL = 400
 
-#: Filenames a licence is commonly held under, tried in order on each branch.
 _NAMES = ("LICENSE", "LICENSE.md", "LICENSE.txt", "LICENCE", "LICENCE.md", "COPYING", "COPYING.md")
 
-#: Branches a repository's default is commonly named, both spellings of main before the
-#: older master. Raw content URLs are case sensitive, so "Main" is a separate candidate.
 _BRANCHES = ("main", "Main", "master")
 
-#: Owner and repo of a GitHub URL. The owner class excludes separators; the repo name keeps
-#: dots, and a trailing ``.git`` is stripped after.
 _GITHUB = re.compile(r"github\.com[/:]+([^/#?:]+)/([^/#?]+)", re.I)
 
 _MEMO: dict | None = None
 
 _last_save = 0.0
 
-#: While the API's rate limit is spent, no call is made until this monotonic time. Without
-#: it every repository in a listing would pay a refused request before falling back, which
-#: is strictly worse than not asking at all. Anonymous callers get 60 an hour, so this is
-#: the normal case rather than an edge one.
 _api_blocked_until = 0.0
 
 
@@ -129,9 +95,6 @@ def _load() -> dict:
 def _save(force: bool = False) -> None:
     """Persist the cache, at most once every :data:`SAVE_INTERVAL` unless forced.
 
-    Resolving a listing writes an entry per repository, so an unthrottled save would rewrite
-    the whole file thousands of times over one batch.
-
     Args:
         force: Write regardless of when the last write happened.
     """
@@ -171,11 +134,7 @@ def _key(repository: str) -> str:
 
 
 def _fresh(entry: dict) -> bool:
-    """Whether a cache entry still stands.
-
-    An entry written by an older detector is stale whatever it says, so a correction reaches
-    repositories that were already looked up.
-    """
+    """Whether a cache entry still stands."""
     if entry.get("rev") != DETECTION_REVISION:
         return False
     if entry.get("name"):
@@ -262,10 +221,7 @@ async def _from_api(
         token: GitHub token, or empty for an anonymous call.
 
     Returns:
-        ``(name, decided)``. ``decided`` is only ever true alongside a name. GitHub
-        recognises a narrower set of licences than :mod:`.licenses` does and only looks at
-        a few filenames, so "no licence" from the API is treated as unproven and the files
-        are still read. The API can then add an answer but never take one away.
+        ``(name, decided)``. ``decided`` is only ever true alongside a name.
     """
     global _api_blocked_until
     if time.monotonic() < _api_blocked_until:
@@ -279,8 +235,6 @@ async def _from_api(
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=API_TIMEOUT),
         ) as answer:
-            # A 404 means GitHub did not recognise a licence, not that there is none:
-            # it misses British spellings and unusual filenames that a file read catches.
             if answer.status != 200:
                 if answer.headers.get("X-RateLimit-Remaining") == "0":
                     _api_blocked_until = time.monotonic() + _cooldown(answer.headers)
@@ -323,8 +277,6 @@ async def _from_files(
                     return name, failed
         return "", failed
 
-    # Raced: every candidate is fetched together, then the results are read back in
-    # preference order, so the answer does not depend on which reply arrived first.
     texts = await asyncio.gather(*(_read_file(session, url) for url in urls))
     failed = any(text is None for text in texts)
     for text in texts:
@@ -343,8 +295,7 @@ async def resolve(
     Args:
         repository: A repository URL.
         session: Session the reads run on.
-        options: How to carry out the lookup. Defaults leave the behaviour as it was
-            before the API and racing were offered.
+        options: How to carry out the lookup, or None for the defaults.
 
     Returns:
         The licence name, empty where the repository is not on GitHub or holds no licence
@@ -361,8 +312,6 @@ async def resolve(
 
     opts = options or Options()
     name, failed = "", False
-    # The API answers in one request where it can. Anything it does not settle falls back
-    # to reading the files, so a rate limit degrades rather than breaks the lookup.
     if opts.use_api:
         name, decided = await _from_api(owner, repo, session, opts.token)
         if not name and not decided:
@@ -370,8 +319,6 @@ async def resolve(
     else:
         name, failed = await _from_files(owner, repo, session, opts.race)
 
-    # A name, or an absence confirmed by reads that all completed, is cached. A failed fetch
-    # is not.
     if name or not failed:
         _load()[key] = {"name": name, "at": time.time(), "rev": DETECTION_REVISION}
         _save()
@@ -405,6 +352,5 @@ async def resolve_many(
     try:
         await asyncio.gather(*(one(url) for url in unique))
     finally:
-        # Whatever was resolved before any failure is still worth keeping.
         _save(force=True)
     return out

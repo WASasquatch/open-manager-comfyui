@@ -1,9 +1,4 @@
-"""Map a ComfyUI node class to the pack that provides it.
-
-The community node index is a JSON file mapping each pack's repository to the node classes it
-registers. It is fetched, cached, and read in reverse to answer which pack a missing node
-class belongs to.
-"""
+"""Map a ComfyUI node class to the pack that provides it."""
 
 from __future__ import annotations
 
@@ -16,15 +11,12 @@ import aiohttp
 
 from . import metadata
 
-__all__ = ["NODE_MAP_URL", "repo_name", "resolve"]
+__all__ = ["NODE_MAP_URL", "classes_for", "repo_name", "resolve"]
 
-#: The community node index, mapping repository to the classes it registers.
 NODE_MAP_URL = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI-Manager/main/extension-node-map.json"
 
-#: Seconds the index is reused before it is fetched again.
 CACHE_TTL = 86400
 
-#: Seconds the fetch may take.
 TIMEOUT = 60
 
 _GITHUB = re.compile(r"github\.com[:/]+[^/]+/([^/#?]+)", re.I)
@@ -129,3 +121,28 @@ async def resolve(classes, session: aiohttp.ClientSession) -> tuple[dict, list]:
         group = groups.setdefault(url, {"title": title, "classes": []})
         group["classes"].append(node_class)
     return groups, unresolved
+
+
+async def classes_for(repo: str, session: aiohttp.ClientSession) -> dict:
+    """What the community index says one repository registers.
+
+    Args:
+        repo: The pack's repository URL.
+        session: Session a fetch would run on.
+
+    Returns:
+        ``{title, classes}``, empty where the index does not carry that repository.
+    """
+    wanted = repo_name(repo).lower()
+    if not wanted:
+        return {}
+    data = await _raw_index(session)
+    for url, value in data.items():
+        if repo_name(url).lower() != wanted:
+            continue
+        if not isinstance(value, list) or not value:
+            continue
+        classes = value[0] if isinstance(value[0], list) else []
+        title = value[1].get("title_aux", "") if len(value) > 1 and isinstance(value[1], dict) else ""
+        return {"title": str(title)[:120], "classes": [str(one) for one in classes][:2000]}
+    return {}

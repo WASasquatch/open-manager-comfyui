@@ -1,9 +1,4 @@
-"""Pack metadata scraped from its repository, cached until its versions change.
-
-The registry carries a pack's license, category, tags and system support. The README is read
-from the repository when the enrichment feature is on. A scrape is keyed by a signature of the
-pack's version list and re-runs only when a version is added or changes status.
-"""
+"""Pack metadata scraped from its repository, cached until its versions change."""
 
 from __future__ import annotations
 
@@ -23,24 +18,12 @@ from . import developer, paths
 __all__ = ["MEDIA_TTL", "Metadata", "attachment_media", "cache_dir", "fetch",
            "fetch_repo", "signature"]
 
-#: Which revision of the scrape produced a cached entry. A scrape is kept until the pack's
-#: versions change, so a change in what we read would otherwise never reach anyone who had
-#: already looked a pack up. Raise this whenever the shape of what is scraped changes.
-#:
-#: 2: pattern and directory entries in the developer table are resolved against the
-#:    repository's files, and the conventional workflow directories are read.
-#: 3: a workflow's preview image is paired with it, and a gallery may hold clips.
-#: 4: the stargazer count travels, so a pack page can show GitHub's own figure.
 CACHE_REVISION = 4
 
-#: Seconds any single request may take.
 TIMEOUT = 20
 
-#: Bytes of README kept. A repository README runs long; a modal shows an excerpt.
 README_LIMIT = 200_000
 
-#: Owner and repo of a GitHub URL. The owner class excludes the separators so a long run of
-#: colons cannot backtrack; the repo name keeps dots and a trailing ``.git`` is stripped after.
 _GITHUB = re.compile(r"github\.com[/:]+([^/#?:]+)/([^/#?]+)", re.I)
 
 
@@ -57,9 +40,7 @@ class Metadata:
         license: SPDX identifier, empty where unknown.
         requires_python: ``requires-python`` from pyproject, empty where absent.
         requires_comfyui: ``[tool.comfy] requires-comfyui`` from pyproject.
-        stars: Stargazer count as GitHub reports it. The registry keeps its own copy and
-            refreshes it on its own schedule, so where the two differ this is the current one.
-            Reported as found: nothing here second-guesses a figure that looks wrong.
+        stars: Stargazer count as GitHub reports it.
         open_issues: Open issue count, excluding pull requests.
         open_prs: Open pull request count.
         pushed_at: ISO timestamp of the last push.
@@ -168,7 +149,6 @@ def _read_cache(node_id: str, sig: str) -> Metadata | None:
         return None
     if data.get("signature") != sig:
         return None
-    # An entry from an older scrape is read again rather than served as it stands.
     if int(data.get("revision") or 0) < CACHE_REVISION:
         return None
     return Metadata.from_json(data)
@@ -229,8 +209,7 @@ async def _json(session: aiohttp.ClientSession, url: str, token: str = "") -> di
     Args:
         session: Session the request runs on.
         url: Absolute URL.
-        token: GitHub token, which lifts the hourly limit from 60 requests to 5,000. A pack
-            page spends up to three, so without one a browsing session runs out quickly.
+        token: GitHub token, or empty for an anonymous call.
     """
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "open-manager"}
     if token:
@@ -309,8 +288,6 @@ async def fetch(
         return meta
 
     meta = await _scrape(owner_repo[0], owner_repo[1], sig, session, token)
-    # A record keyed by the version signature is kept until the pack publishes again, so a
-    # scrape that came back with nothing at all is left uncached and tried again instead.
     if not _is_blank(meta):
         _write_cache(node_id, meta)
     return meta
@@ -347,11 +324,8 @@ async def fetch_repo(
     return meta
 
 
-#: Filenames a README is commonly held under, tried in order.
 README_NAMES = ("README.md", "README.MD", "readme.md", "README.rst", "README")
 
-#: A ref the panel will read: a branch name or a commit sha. Slashes are allowed because
-#: branches carry them; a leading dash and any traversal are not.
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$")
 
 
@@ -372,9 +346,6 @@ async def read_at_ref(
     owner: str, repo: str, ref: str, session: aiohttp.ClientSession
 ) -> dict:
     """Read a repository's README and pyproject at one branch or commit.
-
-    Only the raw content host is used, so this costs nothing against the API's hourly limit
-    and keeps working when that limit is spent.
 
     Args:
         owner: Repository owner.
@@ -408,10 +379,6 @@ async def read_at_ref(
 
 async def _tree_lister(owner: str, repo: str, ref: str, session: aiohttp.ClientSession):
     """A lister for :func:`developer.expand`, backed by the repository's file tree.
-
-    One call returns every path in the repository, which is what resolving a pattern or a
-    bare directory needs for a pack that is not installed locally. Failure is not fatal: the
-    lister then sees nothing and every entry is left as the pack wrote it.
 
     Args:
         owner: Repository owner.
@@ -451,10 +418,6 @@ async def _tree_lister(owner: str, repo: str, ref: str, session: aiohttp.ClientS
 def _is_blank(meta: Metadata) -> bool:
     """Whether a scrape came back with nothing at all.
 
-    A repository that yields neither a README nor a single field did not fail to find
-    anything, it failed to ask: GitHub's hourly limit, or no network. Caching that would
-    leave the pack page empty until its next release, so it is not cached.
-
     Args:
         meta: The record a scrape produced.
 
@@ -491,13 +454,7 @@ async def _scrape(
     info = await _json(session, f"https://api.github.com/repos/{owner}/{repo}", token)
     open_issues, open_prs = await _issue_counts(session, owner, repo, info, token)
 
-    # Where the API answered, it named the branch. Where it did not -- an outage, or the
-    # hourly limit spent -- the branch is a guess, and the raw host is case sensitive, so
-    # the usual names are tried rather than assuming "main". This keeps the README, the
-    # pyproject and the gallery readable when only the API is unavailable.
     named = info.get("default_branch") or ""
-    # Both spellings of main are tried before master: a repository carrying either name
-    # alongside an old master should be read from the one it actually develops on.
     branches = (named,) if named else ("main", "Main", "master")
 
     readme, fmt, branch = "", "markdown", named or "main"
@@ -513,10 +470,6 @@ async def _scrape(
         if readme:
             break
 
-    # The pyproject carries requires-python and the [tool.open_manager] table, the gallery
-    # among it. Where the branch was guessed, a miss is retried on the other candidates
-    # rather than assumed absent: a repository can hold a README on one branch and its
-    # pyproject on another.
     pyproject = ""
     for candidate in (branch, *(b for b in branches if b != branch)):
         pyproject = await _text(
@@ -549,14 +502,12 @@ async def _scrape(
     )
 
 
-#: Asset UUID inside a signed media URL GitHub renders for a README attachment.
 _SIGNED_MEDIA = re.compile(
     r"https://private-user-images\.githubusercontent\.com/[^\s\"'<>]*?"
     r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
     r"[^\s\"'<>]*"
 )
 
-#: Seconds a signed media URL is good for. GitHub mints them with a five minute window.
 MEDIA_TTL = 300
 
 
@@ -564,10 +515,6 @@ async def attachment_media(
     repository: str, session: aiohttp.ClientSession, token: str = ""
 ) -> dict:
     """Signed URLs for the attachments a README embeds, keyed by asset id.
-
-    A ``github.com/user-attachments/assets/<id>`` URL answers 404 for many assets. GitHub's
-    own rendering rewrites them to signed ``private-user-images`` URLs, and the rendered HTML
-    the API returns carries those.
 
     Args:
         repository: Repository URL.

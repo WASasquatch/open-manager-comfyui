@@ -1,10 +1,4 @@
-"""Comfy Registry client that asks for every version status.
-
-The registry at ``https://api.comfy.org`` records a status per published version: ``Active``,
-``Pending``, ``Flagged``, ``Banned`` or ``Deleted``. Requests here are unfiltered and every
-version carries its status. ``latest_version`` on a node record names an ``Active`` release
-only, and :func:`resolve_versions` reports ``newest`` beside it.
-"""
+"""Comfy Registry client that asks for every version status."""
 
 from __future__ import annotations
 
@@ -30,16 +24,12 @@ __all__ = [
     "search",
 ]
 
-#: Registry origin. Overridable so a mirror or a private index can be used instead.
 BASE_URL = "https://api.comfy.org"
 
-#: Seconds a node record or version list is reused before it is fetched again.
 CACHE_SECONDS = 300
 
-#: Seconds any single request may take.
 TIMEOUT = 20
 
-#: Prefixes the registry puts in front of its status constants.
 _STATUS_PREFIXES = ("NodeVersionStatus", "PublisherStatus", "NodeStatus")
 
 _cache: dict[str, tuple[float, Any]] = {}
@@ -91,9 +81,6 @@ class NodeVersion:
     created_at: str = ""
     deprecated: bool = False
     changelog: str = ""
-    # Declared per version, and only per version: the node-level copies of these are empty
-    # for every pack that fills them in, so the pack page was describing the newest release
-    # no matter which version was being looked at.
     supported_os: tuple[str, ...] = ()
     supported_comfyui: str = ""
     supported_frontend: str = ""
@@ -123,8 +110,7 @@ class NodeRecord:
         description: Publisher's summary.
         publisher: Publisher identifier.
         publisher_status: Publisher account status.
-        publisher_name: The publisher's display name, which the registry fills in for almost
-            every pack while ``author`` is nearly always empty.
+        publisher_name: The publisher's display name.
         publisher_members: Names of the people on the publisher account.
         status: Node-level status, separate from any version status.
         repository: Source repository URL.
@@ -247,9 +233,6 @@ def _cached(key: str) -> Any | None:
 
 def _members(publisher: dict) -> tuple[str, ...]:
     """The people on a publisher account, in the order the registry lists them.
-
-    The registry nests each one as ``{"user": {"name": ...}}``. Names repeat where somebody
-    appears twice, so they are folded while keeping the order they arrived in.
 
     Args:
         publisher: The publisher object from a node payload.
@@ -389,16 +372,11 @@ async def fetch_versions(node_id: str, session: aiohttp.ClientSession) -> tuple[
     return versions
 
 
-#: Distinct scanner findings named in one summary before the rest are counted.
 _REASON_KINDS = 4
 
 
 def _summarise_reason(raw: str) -> str:
     """One line explaining why a version carries the status it does.
-
-    The registry answers in three shapes: plain prose, an object carrying an admin
-    ``message``, and an array of scanner findings. All three are reduced to a sentence,
-    because the raw form runs to megabytes of code snippets and YARA matches.
 
     Args:
         raw: The ``status_reason`` field as the registry sent it.
@@ -444,10 +422,6 @@ def _summarise_reason(raw: str) -> str:
 async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> dict:
     """Why each version of a pack carries its status.
 
-    The registry only returns these when asked, and the raw answer is very large -- several
-    megabytes for one pack, most of it code snippets -- so it is summarised here and only
-    the sentence travels on.
-
     Args:
         node_id: Registry identifier.
         session: Session the request runs on.
@@ -477,13 +451,8 @@ async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> 
     return reasons
 
 
-#: Pages of node classes to follow before giving up. At 100 a page this is far more than any
-#: real pack ships, and it stops a bad ``totalNumberOfPages`` turning one page view into an
-#: unbounded crawl of someone else's server.
 _NODE_PAGE_CAP = 8
 
-#: How many node classes to ask for at once. The default page size is ten, which turns a large
-#: pack into twenty-odd requests.
 _NODE_PAGE_SIZE = 100
 
 
@@ -537,11 +506,6 @@ async def fetch_comfy_nodes(
 ) -> tuple[dict, ...]:
     """The node classes one published version registers, as the registry recorded them.
 
-    Roughly three packs in five have this filled in, so an empty answer means the registry was
-    never told rather than that the pack adds no nodes. Callers have to say which of those two
-    they are looking at, because "no nodes" and "nobody said" read very differently next to a
-    pack you are deciding whether to install.
-
     Args:
         node_id: Registry identifier.
         version: Exact published version.
@@ -579,8 +543,6 @@ async def fetch_comfy_nodes(
             "description": str(row.get("description") or ""),
             "deprecated": bool(row.get("deprecated")),
             "experimental": bool(row.get("experimental")),
-            # The registry stores these JSON-encoded inside strings, so they have to be
-            # decoded rather than iterated: a bare `for` over '["STRING"]' yields characters.
             "inputs": _input_count(row.get("input_types")),
             "outputs": _decoded_list(row.get("return_types")),
         }

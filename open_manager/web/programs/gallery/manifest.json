@@ -1,0 +1,28 @@
+{
+  "id": "gallery",
+  "name": "Gallery",
+  "hint": "Browse the images and videos this install has made",
+  "tags": [
+    "images",
+    "video",
+    "browse",
+    "assets",
+    "output",
+    "workflows"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "gallery.svg",
+  "surfaces": {
+    "desktop": true,
+    "start": true
+  },
+  "look": {
+    "tint": "purple"
+  },
+  "capabilities": [
+    "assets",
+    "workflows",
+    "storage"
+  ]
+}

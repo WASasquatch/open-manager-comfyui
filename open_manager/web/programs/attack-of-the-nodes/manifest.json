@@ -1,0 +1,23 @@
+{
+  "id": "attack-of-the-nodes",
+  "name": "Attack of the Nodes",
+  "hint": "A game",
+  "tags": [
+    "game",
+    "arcade",
+    "shooter",
+    "nodes"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "attack-of-the-nodes.svg",
+  "group": "Games",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "purple"
+  },
+  "capabilities": []
+}

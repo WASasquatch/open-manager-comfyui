@@ -1,0 +1,27 @@
+{
+  "id": "comfy-settings",
+  "name": "ComfyUI Settings",
+  "hint": "Every ComfyUI setting, in a window",
+  "tags": [
+    "settings",
+    "preferences",
+    "options",
+    "comfyui",
+    "configuration"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "comfy-settings.svg",
+  "group": "ComfyUI",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "grey"
+  },
+  "capabilities": [
+    "Reads every registered setting",
+    "Writes settings back to ComfyUI"
+  ]
+}

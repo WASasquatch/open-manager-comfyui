@@ -1,0 +1,27 @@
+{
+  "id": "comfy-outputs",
+  "name": "Outputs",
+  "hint": "What this ComfyUI has made, newest first, filling in as runs finish",
+  "tags": [
+    "outputs",
+    "results",
+    "history",
+    "queue",
+    "assets"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "comfy-outputs.svg",
+  "group": "ComfyUI",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "amber"
+  },
+  "capabilities": [
+    "Reads the run history",
+    "Opens a result in the viewer"
+  ]
+}

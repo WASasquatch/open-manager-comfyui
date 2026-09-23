@@ -1,9 +1,4 @@
-"""Registry browsing that warns rather than refuses.
-
-:mod:`.registry` reads the Comfy Registry without a status filter, :mod:`.risk` turns
-what it finds into findings, :mod:`.advisories` records published compromises, and
-:mod:`.routes` serves them to the panel.
-"""
+"""Registry browsing that warns rather than refuses."""
 
 from __future__ import annotations
 

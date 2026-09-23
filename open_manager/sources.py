@@ -1,8 +1,4 @@
-"""GitHub repositories a user added by hand, kept in ComfyUI's user tree.
-
-The list lives outside the pack directory, so removing and reinstalling Open Manager leaves
-it in place.
-"""
+"""GitHub repositories a user added by hand, kept in ComfyUI's user tree."""
 
 from __future__ import annotations
 
@@ -15,10 +11,8 @@ from . import paths
 
 __all__ = ["add", "load", "path", "remove"]
 
-#: Most repositories held in the list.
 LIMIT = 500
 
-#: Owner and repo of a GitHub URL, with any trailing ``.git`` stripped after.
 _GITHUB = re.compile(r"github\.com[/:]+([^/#?:]+)/([^/#?]+)", re.I)
 
 

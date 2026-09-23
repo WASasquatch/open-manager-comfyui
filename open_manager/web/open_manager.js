@@ -4,7 +4,34 @@ import { nodeTint, refreshExtras, registerThemes, repairLinkMode, watchThemeExtr
 
 const API = "/open_manager/v1/api";
 
-const ICON_TAB = new URL("./discovery.svg", import.meta.url).href;
+const OM_BUILD = "0.2.0-desktop";
+
+const iconUrl = (name) =>
+  `${new URL(name, import.meta.url).href}?v=${encodeURIComponent(OM_BUILD)}`;
+
+const ICON_TAB = iconUrl("./discovery.svg");
+
+const ICON_BRAND = iconUrl("./open-manager.svg");
+
+const ICON_PROGRAM = iconUrl("./program.svg");
+
+const ICON_MEMORY = iconUrl("./memory.svg");
+
+const ICON_DOWNLOADS = iconUrl("./downloads.svg");
+
+const ICON_LIBRARY = iconUrl("./library.svg");
+
+const ICON_DESKTOP = iconUrl("./desktop.svg");
+
+const ICON_FOLDER = iconUrl("./folder.svg");
+
+const ICON_NOTE = iconUrl("./note.svg");
+
+const ICON_FILE = iconUrl("./file.svg");
+
+const ICON_BIN = iconUrl("./bin.svg");
+
+const ICON_FLOW = iconUrl("./workflow.svg");
 
 const STATUS_COLOUR = {
   active: "#3fb950",
@@ -21,27 +48,20 @@ const SEVERITY_COLOUR = {
   note: "#8b949e",
 };
 
-//: Where our surfaces sit, measured against ComfyUI's own: canvas menu 999, topbar 1001,
-//: canvas controls 1200, dialogs 1701 and 1702, toasts 10000, node tooltip 99999.
-//:
-//: The host's dialogs win. A ComfyUI settings dialog is the reader answering ComfyUI rather
-//: than us, and a window of ours over it is one they cannot get out from under. So the band
-//: ends below 1701, and starts above 1200 so a window still covers the canvas controls.
 const FLOAT_Z = 1300;
-const FLOAT_Z_TOP = 1399;
+const FLOAT_Z_TOP = 1398;
+const TASKBAR_Z = 1399;
 
-//: Modals over windows, menus over both, all three under the host's dialogs. Toasts and the
-//: lightbox stay above: ComfyUI puts its own toasts at 10000, over its settings dialog, and a
-//: progress line that hides whenever a dialog opens is a progress line nobody sees.
+const DESK_Z = 900;
+
 const MODAL_Z = 1400;
 const MENU_Z = 1450;
+const HOST_MENU_Z = 1900;
 
-//: How long a read may take before it is worth saying so, in milliseconds.
 const LOADING_GRACE = 180;
 
 const style = document.createElement("style");
 style.textContent = `
-/* Chrome follows the active ComfyUI theme; status and licence colours stay fixed. */
 :root {
   --om-bg: var(--comfy-menu-bg, #16181d);
   --om-surface: var(--comfy-input-bg, #1b1f24);
@@ -51,15 +71,13 @@ style.textContent = `
   --om-text: var(--fg-color, #e6edf3);
   --om-text-2: var(--input-text, #adbac7);
   --om-muted: var(--descrip-text, #8b949e);
-  /* Scrollbar thumb. Follows the theme's muted text, which is chosen to read against the
-     panel background, so it stays visible in light palettes as well as dark ones. */
+  --om-bar-h: 0px;
   --om-scroll: var(--descrip-text, #8b949e);
 }
 .om-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);
   display: flex; align-items: center; justify-content: center; z-index: ${MODAL_Z};
 }
-/* Width and height follow the viewport rather than a fixed breakpoint. */
 .om-dialog {
   position: relative;
   width: min(75vw, 2200px); height: min(84vh, 1500px);
@@ -72,8 +90,6 @@ style.textContent = `
   background: none; border: none; color: var(--om-muted); font-size: 26px; line-height: 1;
   cursor: pointer; padding: 2px 6px; }
 .om-x:hover { color: var(--om-text); }
-/* Banner left, metadata inline to its right. Registry banners run from wide to portrait,
-   so the whole banner is fit inside its box rather than cropped. */
 .om-hero { display: flex; gap: 18px; padding: 16px 20px; border-bottom: 1px solid var(--om-border);
   align-items: flex-start; }
 .om-banner { flex: none; width: 460px; max-width: 40%; height: 200px;
@@ -108,8 +124,6 @@ style.textContent = `
 [data-om-titled] .workflow-label { display: none !important; }
 .om-tab-title { display: inline-block; max-width: 150px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
-/* Rows added to ComfyUI's own tab menu. They wear that menu's item class for their spacing,
-   so only what is inside them is ours. */
 .om-tab-row { display: flex !important; align-items: center; gap: 10px;
   justify-content: space-between; cursor: default; }
 .om-tab-row-label { color: var(--om-muted, #8b949e); font-size: 12px; }
@@ -139,34 +153,48 @@ style.textContent = `
 .om-tip-on { opacity: 1; }
 .om-tip-lead { font-weight: 600; }
 .om-tip-line { color: var(--om-muted, #8b949e); margin-top: 2px; }
-.om-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 10001;
+.om-tip-data { max-width: 380px; }
+.om-tip-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 14px; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.om-tip-facts:first-child { margin-top: 0; }
+.om-tip-facts dt { color: var(--om-muted, #8b949e); }
+.om-tip-facts dd { margin: 0; color: var(--om-text, #e6edf3); overflow-wrap: anywhere; }
+.om-tip-facts + .om-tip-line { margin-top: 5px; padding-top: 4px;
+  border-top: 1px solid var(--om-border, #2c332b); }
+.om-toasts { position: fixed; right: 16px; bottom: calc(16px + var(--om-bar-h, 0px));
+  z-index: 10001;
   display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.comfyui-body .fixed.bottom-0 { bottom: var(--om-bar-h, 0px); }
+.comfyui-body .fixed.bottom-2 { bottom: calc(0.5rem + var(--om-bar-h, 0px)); }
+.comfyui-body .fixed.bottom-4 { bottom: calc(1rem + var(--om-bar-h, 0px)); }
+.comfyui-body .fixed.bottom-6 { bottom: calc(1.5rem + var(--om-bar-h, 0px)); }
+.comfyui-body .fixed.bottom-8 { bottom: calc(2rem + var(--om-bar-h, 0px)); }
 .om-toast { background: var(--om-surface); color: var(--om-text); border: 1px solid var(--om-border);
   border-left: 3px solid #388bfd; border-radius: 8px; padding: 10px 14px;
-  font: 13px/1.4 system-ui, sans-serif; max-width: 420px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+  font: 13px/1.4 system-ui, sans-serif; max-width: 420px; box-shadow: 0 6px 20px rgba(0,0,0,.4);
+  display: flex; gap: 10px; align-items: center; }
 .om-toast-ok { border-left-color: #2ea043; }
 .om-toast-warn { border-left-color: #d29922; }
-.om-restart { display: flex; gap: 12px; align-items: center; }
-.om-restart .om-btn { flex: none; }
+.om-toast-text { flex: 1; min-width: 0; }
+.om-toast-x { flex: none; align-self: flex-start; background: none; border: none; padding: 0 2px;
+  margin: 0 -6px 0 0; color: var(--om-muted); font-size: 18px; line-height: 1.1; cursor: pointer; }
+.om-toast-x:hover { color: var(--om-text); }
+.om-restart { gap: 12px; }
+.om-toast .om-btn { flex: none; }
 .om-note { background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border); border-radius: 10px;
   padding: 18px 20px; width: min(90vw, 460px); font: 13px/1.5 system-ui, sans-serif;
   display: flex; flex-direction: column; gap: 12px; }
 .om-note-title { font-size: var(--om-title-size, 15px); font-weight: 600; }
 .om-note-body { color: var(--om-text-2); white-space: pre-wrap; }
 .om-note-foot { display: flex; gap: 10px; justify-content: flex-end; }
-/* Main button and caret read as one control: the button keeps its status colour and rounds
-   only on the left, the caret is a neutral surface and rounds only on the right. */
 .om-ictl { display: inline-flex; align-items: stretch; }
 .om-ictl > .om-btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0;
   border-right: none; }
-/* border-left follows border-color, which would otherwise reset the divider it sets. */
 .om-ictl .om-btn.om-caret { margin-left: 0; padding: 6px 9px; font-size: 11px; line-height: 1;
   border-top-left-radius: 0; border-bottom-left-radius: 0;
   background: var(--om-border); border-color: var(--om-border); color: var(--om-text-2);
   border-left: 1px solid rgba(1, 4, 9, .4); }
 .om-ictl .om-btn.om-caret:hover { background: var(--om-hover); }
-/* Hover fills both halves with one colour, so the divider takes the control's accent to
-   stay visible. */
 .om-ictl:hover > .om-btn.om-caret { border-left-color: var(--om-muted); }
 .om-ictl:hover > .om-btn.om-caret.installed { border-left-color: #2ea043; }
 .om-ictl:hover > .om-btn.om-caret.installing { border-left-color: #388bfd; }
@@ -178,10 +206,11 @@ style.textContent = `
 .om-menu-item { padding: 7px 12px; border-radius: 6px; cursor: pointer; color: var(--om-text); }
 .om-menu-item:hover { background: var(--om-border); }
 .om-menu-danger { color: #f85149; }
+[data-reka-popper-content-wrapper]:has([data-reka-menu-content]),
+[data-reka-popper-content-wrapper]:has([data-reka-context-menu-content]),
+[data-reka-popper-content-wrapper]:has([role="menu"]) { z-index: ${HOST_MENU_Z} !important; }
 .om-side-ictl .om-btn { padding: 5px 12px; font-size: 12px; }
 .om-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 20px; }
-/* The header sits inside the scrolling body; the negative margin pulls it back out to the
-   dialog's edges so its divider still spans the full width. */
 .om-body > .om-hero { margin: -16px -20px 16px; }
 .om-notice { border-left: 3px solid #d29922; background: #1c1a12; padding: 10px 14px; margin-bottom: 14px; }
 .om-release { border-left: 3px solid #388bfd; background: var(--om-surface); padding: 10px 14px;
@@ -202,8 +231,6 @@ style.textContent = `
 .om-tag-go { font: inherit; font-size: 11px; border: none; cursor: pointer; }
 .om-tag-go:hover { filter: brightness(1.35); }
 .om-readme-status { color: var(--om-muted); }
-/* Centred, and set down from the top rather than pinned to it: a result that is on its way
-   should look like the page is working, not like a line of text that failed to become one. */
 .om-loading { display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 48px 16px 40px; color: var(--om-muted); }
 .om-loading-spin { width: 26px; height: 26px; border-radius: 50%;
@@ -214,20 +241,15 @@ style.textContent = `
 @keyframes om-spin { to { transform: rotate(360deg); } }
 @keyframes om-ellipsis { 0% { content: ""; } 25% { content: "."; }
   50% { content: ".."; } 75% { content: "..."; } }
-/* Movement is decoration here; the words carry the meaning. */
 @media (prefers-reduced-motion: reduce) {
   .om-loading-spin { animation: none; border-top-color: var(--om-border); }
   .om-loading-text::after { content: "..."; animation: none; }
 }
-/* Capped for reading rather than filled to the dialog: a line that runs the whole width of
-   a wide panel is hard to follow, which is the width GitHub settles on too. */
 .om-readme-body { line-height: 1.6; overflow-wrap: anywhere; padding-inline: 24px; }
 .om-readme-body img { max-width: 100%; height: auto; }
 .om-readme-body pre { background: var(--om-input); padding: 10px; border-radius: 6px; overflow: auto; }
 .om-readme-body h1, .om-readme-body h2 { border-bottom: 1px solid var(--om-border); padding-bottom: 4px; }
 .om-readme-body a { color: #539bf5; }
-/* A link that opens here rather than leaving is marked as such, so the difference is visible
-   before it is clicked. */
 .om-readme-body a.om-doc-link::after { content: " \\2197"; opacity: .55; font-size: .85em; }
 .om-doc-trail { display: flex; align-items: center; gap: 10px; margin: 0 0 16px;
   padding: 16px 0 10px; border-bottom: 1px solid var(--om-border); }
@@ -242,22 +264,15 @@ style.textContent = `
   padding: 0 3px; border-radius: 4px; line-height: 1;
 }
 .om-repo-link:hover { color: var(--om-text); background: var(--om-hover); }
-/* The mark takes the colour of the control it sits in, so it reads as part of the interface
-   rather than as a pasted-in logo, and follows every theme without a second asset. */
 .om-gh-mark { display: block; }
 .om-repo-link { display: inline-flex; align-items: center; }
 .om-icon-btn { display: inline-flex; align-items: center; justify-content: center;
   padding: 6px 10px; text-decoration: none; box-sizing: border-box; }
 a.om-btn { text-decoration: none; color: var(--om-text); }
 .om-gh-fallback { font-size: 13px; line-height: 1; }
-/* The Comfy mark keeps its own colour: it is a brand asset, not an interface glyph, so it is
-   the one icon here that does not follow the theme. */
 .om-comfy-mark { display: block; width: 14px; height: 14px; }
 .om-icon-btn .om-comfy-mark { width: 16px; height: 16px; }
 .om-registry-link:hover { background: var(--om-hover); }
-/* Long URLs need breaking anywhere, but the same rule inside a table breaks mid-word and
-   collapses every column, which is why READMEs rendered here looked squished against
-   GitHub. Tables wrap on word boundaries and scroll sideways instead. */
 .om-readme-body table {
   overflow-wrap: normal; word-break: normal; border-collapse: collapse;
   display: block; width: max-content; max-width: 100%; overflow-x: auto; margin: 12px 0;
@@ -268,15 +283,11 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
 }
 .om-readme-body th { background: var(--om-surface); font-weight: 600; }
 .om-readme-body tr:nth-child(even) td { background: color-mix(in srgb, var(--om-surface) 45%, transparent); }
-/* Media the README linked, shown in place of the bare URL. */
 .om-readme-media { max-width: 100%; height: auto; border-radius: 6px; margin: 12px 0; display: block; }
-/* A link standing in for media that could not be shown, with the reason beside it. */
 .om-readme-gone { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   margin: 12px 0; padding: 8px 12px; border-left: 3px solid var(--om-border);
   background: var(--om-surface); border-radius: 0 6px 6px 0; }
 .om-readme-gone-note { color: var(--om-muted); font-size: 12px; }
-/* Honour the alignment attribute a README uses, which the markdown renderer may pass
-   through but browsers no longer style on their own. */
 .om-readme-body [align="center"] { text-align: center; }
 .om-readme-body [align="right"] { text-align: right; }
 .om-readme-body div[align="center"] > img,
@@ -287,7 +298,6 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
   border: 1px solid var(--om-border); border-radius: 8px; margin-bottom: 8px; background: var(--om-surface);
 }
 .om-versions { border: 1px solid var(--om-border); border-radius: 8px; max-height: 42vh; overflow-y: auto; background: var(--om-bg); }
-/* A section that shows only its header bar when closed. */
 .om-panel { border: 1px solid var(--om-border); border-radius: 8px; background: var(--om-bg);
   overflow: hidden; margin: 12px 0; }
 .om-panel-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
@@ -301,23 +311,20 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-panel-chevron { flex: none; color: var(--om-muted); transition: transform .15s ease; }
 .om-panel[open] .om-panel-chevron { transform: rotate(180deg); }
-/* The panel already draws the border, so the list inside drops its own. */
 .om-panel .om-versions { border: none; border-radius: 0; background: transparent; }
 .om-versions .om-row { padding-right: 10px; }
 .om-versions .om-row { border: none; border-bottom: 1px solid var(--om-surface); border-radius: 0; margin: 0; background: transparent; }
 .om-versions .om-row:last-child { border-bottom: none; }
-/* A version the publisher no longer recommends recedes, and comes back the moment the pointer
-   is on it. Nothing is disabled: a deprecated version still installs, and a reader looking
-   straight at the row should read it at full strength. */
-.om-versions .om-row-deprecated { opacity: .55; transition: opacity .12s ease; }
+.om-versions .om-badge-local { background: var(--om-input); color: var(--om-text-2);
+  border: 1px solid var(--om-border); }
+.om-row-local .om-ver { color: var(--om-text); }
+.om-row-deprecated { opacity: .55; transition: opacity .12s ease; }
 .om-versions .om-row-deprecated:hover,
 .om-versions .om-row-deprecated:focus-within { opacity: 1; }
 .om-ver { font-weight: 600; font-family: ui-monospace, monospace; }
 .om-badge { padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; color: var(--om-input); display: inline-block; }
 .om-marks { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
-/* Amber, not red: the version installs, and the declaration may well be the publisher's
-   mistake rather than a real limit. */
 .om-ver-flag { margin-left: 6px; color: #d29922; font-weight: 700; cursor: help; }
 .om-chip.om-chip-differs { border-color: #d29922; }
 .om-why { color: var(--om-muted); }
@@ -331,9 +338,6 @@ a.om-btn { text-decoration: none; color: var(--om-text); }
   gap: 10px; align-items: center; color: var(--om-muted); }
 .om-find { border: 1px solid var(--om-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
 .om-find h4 { margin: 0 0 4px; font-size: 14px; }
-/* A finding long enough to need a second paragraph gets one. Wrapping is unchanged; only a
-   blank line an author wrote deliberately survives, which is what stops a six-line warning
-   reading as one undifferentiated block. */
 .om-find-detail { white-space: pre-line; }
 .om-ev { font-family: ui-monospace, monospace; font-size: 11px; color: var(--om-muted); margin-top: 6px; }
 .om-ack { border-left: 3px solid #f85149; background: #1c1214; padding: 12px 14px; margin: 12px 0; }
@@ -359,18 +363,25 @@ const el = (tag, cls, text) => {
   return node;
 };
 
-// Pack, registry and advisory URLs all reach here. `javascript:` passed to window.open or
-// an href runs in ComfyUI's origin, so nothing is opened unchecked.
 const safeUrl = (value) => {
   const text = String(value ?? "").trim();
   return /^https?:\/\//i.test(text) ? text : "";
+};
+
+const ART_BAD = /["'()\\\s<>]/;
+
+const safeArt = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text || ART_BAD.test(text)) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  return /^\/(?!\/)/.test(text) ? text : "";
 };
 
 const openUrl = (value) => {
   const url = safeUrl(value);
   if (url) window.open(url, "_blank", "noopener,noreferrer");
   else if (String(value ?? "").trim()) {
-    notify("Link not opened", "This link is not an http(s) URL, so it was not opened.");
+    notify("Link not opened", "This link is not an http(s) URL.");
   }
 };
 
@@ -380,15 +391,8 @@ const badge = (status) => {
   return node;
 };
 
-// `dismiss` is for a backdrop whose closing has to do more than remove the node: a panel has
-// its size and place to write away and an onClose to run. Defaults to removing it, which is
-// all a plain dialog needs.
 function closeOn(backdrop, dismiss) {
   const shut = dismiss || (() => backdrop.remove());
-  // A click is dispatched on the nearest ancestor shared by the press and the release, so a
-  // drag that starts inside the dialog and finishes outside it reports the backdrop as the
-  // target. Selecting text or moving a scrollbar would then shut the window. Both ends of
-  // the click have to land on the backdrop for it to count as clicking away.
   let pressedAway = false;
   backdrop.addEventListener("mousedown", (event) => {
     pressedAway = event.target === backdrop;
@@ -398,7 +402,6 @@ function closeOn(backdrop, dismiss) {
     pressedAway = false;
   });
   const onKey = (event) => {
-    // Closed by other means, so the listener lets go rather than outliving its dialog.
     if (!backdrop.isConnected) {
       window.removeEventListener("keydown", onKey);
       return;
@@ -411,7 +414,6 @@ function closeOn(backdrop, dismiss) {
   window.addEventListener("keydown", onKey);
 }
 
-// A clean state, asserted with a checkmark rather than a sentence.
 const stateRow = (label) => {
   const row = el("div", "om-state");
   row.appendChild(el("span", "om-state-mark", "✓"));
@@ -442,8 +444,6 @@ const findingCard = (finding) => {
   return card;
 };
 
-// What the version would change in this environment. The pip dry run is server-side and
-// is fetched after the dialog is on screen.
 async function appendImpact(packId, version, slot, gate) {
   slot.replaceChildren(el("div", "om-why", "Checking dependencies..."));
   let report;
@@ -465,7 +465,6 @@ async function appendImpact(packId, version, slot, gate) {
     for (const finding of report.findings || []) slot.appendChild(findingCard(finding));
   }
   if (report.dependencies?.length) slot.appendChild(dependencyList(report.dependencies));
-  // A core downgrade or an ABI-breaking major change relabels the confirmation.
   const replacements = report.replacements || [];
   if (replacements.some((item) => item.abi)) {
     gate.textContent = "Install anyway (breaks binary packages)";
@@ -476,7 +475,6 @@ async function appendImpact(packId, version, slot, gate) {
   }
 }
 
-// The pack's declared requirements, each checked against the environment and ComfyUI.
 const DEP_STATE = {
   satisfied: { label: "installed", color: "#3fb950" },
   missing: { label: "not installed", color: "var(--om-muted)" },
@@ -504,7 +502,6 @@ function dependencyList(dependencies) {
   return wrap;
 }
 
-// Compares two dotted version strings numerically, falling back to string order.
 function compareVersions(a, b) {
   const pa = String(a).split(".");
   const pb = String(b).split(".");
@@ -518,15 +515,12 @@ function compareVersions(a, b) {
   return 0;
 }
 
-// Describes moving from an installed version to a chosen one, or null when there is no
-// installed version or it is the same.
 function versionSwitch(installed, chosen) {
   if (!installed || installed === "present" || installed === chosen) return null;
   const cmp = compareVersions(chosen, installed);
   return { from: installed, to: chosen, direction: cmp < 0 ? "downgrade" : cmp > 0 ? "upgrade" : "reinstall" };
 }
 
-// Confirmation. Findings are shown in full; both buttons are always present.
 function confirmInstall(packId, entry, change) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
@@ -543,7 +537,6 @@ function confirmInstall(packId, entry, change) {
     const body = el("div", "om-body");
     const assessment = entry.assessment || { findings: [], acknowledgement: "" };
 
-    // A version switch replaces what is installed, and a downgrade is stated as one.
     if (change) {
       const banner = el("div", change.direction === "downgrade" ? "om-ack" : "om-notice");
       const verb = { downgrade: "Downgrade", upgrade: "Upgrade", reinstall: "Reinstall" }[change.direction];
@@ -583,16 +576,12 @@ function confirmInstall(packId, entry, change) {
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
 
     appendImpact(packId, entry.version, impactSlot, go);
   });
 }
 
-// --- toasts -------------------------------------------------------------------------
 
 function toastHost() {
   let host = document.querySelector(".om-toasts");
@@ -600,15 +589,28 @@ function toastHost() {
   return host;
 }
 
+function toastShut(node, after) {
+  const close = el("button", "om-toast-x", "×");
+  close.title = "Close";
+  close.setAttribute("aria-label", "Close");
+  close.onclick = () => { node.remove(); after?.(); };
+  node.appendChild(close);
+  return close;
+}
+
 function toast(message, opts = {}) {
-  const node = el("div", `om-toast${opts.kind ? " om-toast-" + opts.kind : ""}`, message);
+  const node = el("div", `om-toast${opts.kind ? " om-toast-" + opts.kind : ""}`);
+  const body = el("span", "om-toast-text", message);
+  node.appendChild(body);
+  let timer = 0;
+  toastShut(node, () => clearTimeout(timer));
   toastHost().appendChild(node);
-  let timer = opts.sticky ? 0 : setTimeout(() => node.remove(), opts.duration || 4000);
+  timer = opts.sticky ? 0 : setTimeout(() => node.remove(), opts.duration || 4000);
   return {
-    set: (text) => { node.textContent = text; },
+    set: (text) => { body.textContent = text; },
     kind: (k) => { node.className = `om-toast om-toast-${k}`; },
     settle: (text, kind, duration = 6000) => {
-      node.textContent = text;
+      body.textContent = text;
       node.className = `om-toast om-toast-${kind}`;
       clearTimeout(timer);
       timer = setTimeout(() => node.remove(), duration);
@@ -617,19 +619,17 @@ function toast(message, opts = {}) {
   };
 }
 
-// --- restart reminder ---------------------------------------------------------------
 
 let restartToast = null;
 
-// A sticky toast, shown once after files change, offering to restart the server. Installing,
-// removing or switching a pack only takes effect after ComfyUI reloads.
 function remindRestart() {
   if (restartToast) return;
   const node = el("div", "om-toast om-toast-warn om-restart");
-  node.appendChild(el("span", null, "Restart to load the changes."));
+  node.appendChild(el("span", "om-toast-text", "Restart to load the changes."));
   const button = el("button", "om-btn om-go", "Restart server");
   button.onclick = () => restartServer(button);
   node.appendChild(button);
+  toastShut(node, () => { if (restartToast === node) restartToast = null; });
   toastHost().appendChild(node);
   restartToast = node;
 }
@@ -638,13 +638,10 @@ async function restartServer(button) {
   button.disabled = true;
   button.textContent = "Restarting...";
   try {
-    // The content type is what tells the server this came from its own page rather
-    // than from another site, so it is sent even though there is nothing to say.
     await api.fetchApi(`${API}/reboot`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
     });
   } catch (error) {
-    // The connection drops as the server goes down.
   }
   const started = Date.now();
   const waitForUp = async () => {
@@ -652,21 +649,18 @@ async function restartServer(button) {
       const answer = await api.fetchApi("/system_stats", { cache: "no-store" });
       if (answer.ok) { location.reload(); return; }
     } catch (error) {
-      // still down
     }
     if (Date.now() - started < 180000) {
       setTimeout(waitForUp, 1500);
     } else {
       button.disabled = false;
       button.textContent = "Restart server";
-      notify("Restart timed out", "The server did not come back within three minutes. Restart it by hand.");
+      notify("Restart timed out", "The server did not come back within three minutes.");
     }
   };
-  // Give the server a moment to actually go down before polling for it to return.
   setTimeout(waitForUp, 3000);
 }
 
-// --- live tooltips ------------------------------------------------------------------
 
 const TIP_DELAY = 220;
 
@@ -684,12 +678,52 @@ function tipNode() {
   return tip.node;
 }
 
-function tipSay(said) {
+const tipLines = (value) => (Array.isArray(value) ? value : [value])
+  .flatMap((one) => String(one ?? "").split("\n"))
+  .map((one) => one.trim())
+  .filter(Boolean);
+
+function tipShape(said) {
+  if (said && typeof said === "object" && !Array.isArray(said)) {
+    const lead = tipLines(said.lead);
+    return {
+      lead: lead[0] || "",
+      facts: (said.facts || []).filter((one) => Array.isArray(one) && one[1]),
+      lines: [...lead.slice(1), ...tipLines(said.lines)],
+    };
+  }
+  const lines = tipLines(said || "");
+  return { lead: lines.shift() || "", facts: [], lines };
+}
+
+const tipBare = (shape) => !shape.lead && !shape.facts.length && !shape.lines.length;
+
+function tipWith(said, ...more) {
+  const lines = more.filter(Boolean);
+  if (!lines.length) return said;
+  const shape = tipShape(said);
+  return { ...shape, lines: [...shape.lines, ...lines] };
+}
+
+function tipSpoken(shape) {
+  const said = [];
+  if (shape.lead) said.push(shape.lead);
+  if (shape.facts.length) {
+    said.push(shape.facts.map(([label, value]) => `${label} ${value}`).join(", "));
+  }
+  said.push(...shape.lines);
+  return said.map((one) => (/[.:;?!]$/.test(one) ? one : `${one}.`)).join(" ");
+}
+
+function tipSay(shape) {
   const node = tipNode();
-  const lines = String(said).split("\n").filter((one) => one.trim());
-  const first = lines.shift() || "";
-  node.replaceChildren(el("div", "om-tip-lead", first),
-                       ...lines.map((one) => el("div", "om-tip-line", one)));
+  const parts = [];
+  if (shape.lead) parts.push(el("div", "om-tip-lead", shape.lead));
+  if (shape.facts.length) parts.push(factList(shape.facts, "om-tip-facts"));
+  for (const line of shape.lines) parts.push(el("div", "om-tip-line", line));
+  node.replaceChildren(...parts);
+  node.classList.toggle("om-tip-data", shape.facts.length > 0);
+  node.setAttribute("aria-label", tipSpoken(shape));
   return node;
 }
 
@@ -716,17 +750,17 @@ function tipClose() {
 }
 
 function tipOpen(host) {
-  const said = host.__omTip?.();
-  if (!said) { tipClose(); return; }
+  const shape = tipShape(host.__omTip?.());
+  if (tipBare(shape)) { tipClose(); return; }
   tip.host = host;
   host.setAttribute("aria-describedby", "om-tip");
-  tipSay(said).classList.add("om-tip-on");
+  tipSay(shape).classList.add("om-tip-on");
   tipPlace(host);
   clearInterval(tip.timer);
   tip.timer = setInterval(() => {
     if (!tip.host?.isConnected || tip.host !== host) { tipClose(); return; }
-    const now = host.__omTip?.();
-    if (!now) { tipClose(); return; }
+    const now = tipShape(host.__omTip?.());
+    if (tipBare(now)) { tipClose(); return; }
     tipSay(now);
     tipPlace(host);
   }, TIP_BEAT);
@@ -751,7 +785,6 @@ function liveTip(host, say) {
   return host;
 }
 
-// --- modal (replaces window.alert / window.prompt) ----------------------------------
 
 function notify(title, message) {
   const backdrop = el("div", "om-backdrop");
@@ -788,9 +821,6 @@ function askText(title, value = "", actionLabel = "Open") {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(null); });
     input.focus();
     input.addEventListener("keydown", (event) => { if (event.key === "Enter") ok.click(); });
@@ -813,18 +843,12 @@ function confirmAction(title, message, actionLabel, danger) {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
   });
 }
 
-// What a decision is about, stated as labelled values rather than described in a sentence.
-// Rows whose value is empty are dropped, so a caller can list what it might know without
-// checking each one first.
-function factList(rows) {
-  const list = el("dl", "om-facts");
+function factList(rows, cls = "om-facts") {
+  const list = el("dl", cls);
   for (const [label, value] of rows) {
     if (!value) continue;
     list.appendChild(el("dt", null, label));
@@ -833,24 +857,20 @@ function factList(rows) {
   return list;
 }
 
-// Like confirmAction but with more than one way to say yes. Resolves the chosen action's
-// key, or an empty string where the reader backed out.
-function chooseAction(title, message, choices, { wide = false, facts = [] } = {}) {
+function chooseAction(title, message, choices,
+                     { wide = false, facts = [], extra = null } = {}) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
-    // A choice that names an account carries that name on its button, which does not fit
-    // the width a plain yes/no needs.
     const box = el("div", `om-note${wide ? " om-note-wide" : ""}`);
     box.appendChild(el("div", "om-note-title", title));
     if (facts.length) box.appendChild(factList(facts));
+    if (extra) box.appendChild(extra);
     if (message) {
       const body = el("div", "om-note-body", message);
       body.style.whiteSpace = "pre-line";
       box.appendChild(body);
     }
     const foot = el("div", "om-note-foot");
-    // With nothing to choose between, this dialog is telling the reader something rather
-    // than asking them, and "Cancel" invites them to look for what they just cancelled.
     const cancel = el("button", "om-btn", choices.length ? "Cancel" : "Close");
     cancel.onclick = () => { backdrop.remove(); resolve(""); };
     foot.appendChild(cancel);
@@ -864,17 +884,11 @@ function chooseAction(title, message, choices, { wide = false, facts = [] } = {}
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(""); });
   });
 }
 
-// --- install control ----------------------------------------------------------------
 
-// A button that moves Install -> Queued -> Installing -> Installed. Once installed and
-// withMenu is set, it becomes a split control with a caret opening reinstall / uninstall.
 function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, items }) {
   const wrap = el("span", "om-ictl");
   const control = { el: wrap };
@@ -897,8 +911,6 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
   };
 
   control.setInstall = (verb) => {
-    // `verb` names the move where one is being made: installing 3.1.0 over 3.2.0 is a
-    // downgrade, and calling it "Install" hides the thing worth knowing.
     const label = button(verb || "Install", "om-btn",
       onInstall || (() => install({ packId, entry, control, rowsRoot })));
     if (verb) label.title = `${verb} to ${entry?.version || ""}`.trim();
@@ -912,15 +924,12 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
     if (!withMenu) { wrap.replaceChildren(label); return; }
     wrap.replaceChildren(label, caretFor("installed"));
   };
-  // An update is offered: a one-click primary that installs the newer version, plus the menu.
   control.setUpdate = (target, onUpdate) => {
     const label = button("Update", "om-btn installing", onUpdate);
     label.title = `Update to ${target}`;
     if (!withMenu) { wrap.replaceChildren(label); return; }
     wrap.replaceChildren(label, caretFor("installing"));
   };
-  // The installed version's registry status: labelled "Installed" like the rest, coloured
-  // amber where the version is flagged and red where it is banned.
   control.setStatusInstalled = (status) => {
     const cls = status === "banned" ? "banned" : status === "flagged" ? "flagged" : "installed";
     const label = button("Installed", `om-btn ${cls}`);
@@ -933,8 +942,13 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
 
 function openRowMenu(anchor, { packId, entry, control, rowsRoot, items, align = "left" }) {
   const open = document.querySelector(".om-menu");
-  if (open) { open.remove(); return; }
+  if (open) {
+    const again = open._omAnchor === anchor;
+    open.remove();
+    if (again) return;
+  }
   const menu = el("div", "om-menu");
+  menu._omAnchor = anchor;
   const item = (text, danger, fn) => {
     const node = el("div", `om-menu-item${danger ? " om-menu-danger" : ""}`, text);
     node.onclick = () => { menu.remove(); fn(); };
@@ -956,10 +970,6 @@ function openRowMenu(anchor, { packId, entry, control, rowsRoot, items, align = 
   setTimeout(() => document.addEventListener("mousedown", close), 0);
 }
 
-// A menu hangs below its button, which is fine until the button is at the foot of a panel at
-// the foot of the window: there is nothing below to hang into. And a button pinned to the
-// right of a card opening a left-aligned menu throws the menu back across the card it belongs
-// to. So measure first, then flip or align as the space actually allows.
 function placeRowMenu(menu, anchor, align) {
   const rect = anchor.getBoundingClientRect();
   const width = menu.offsetWidth;
@@ -972,28 +982,13 @@ function placeRowMenu(menu, anchor, align) {
   menu.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`;
 }
 
-// --- install queue, driven by one progress toast ------------------------------------
 
-// The registry list builds and discards rows as it scrolls, so what a pack is doing belongs
-// to the pack rather than to the control that started it. Without this, scrolling past an
-// installing row and back would offer Install again while the install was still running.
 const installState = new Map();
 
-// What is already on disk, so a row can say so before anything is installed this session.
-// installState above records what this session did; this records what it found.
 const installedIndex = new Map();
 
 const foldId = (value) => String(value ?? "").trim().toLowerCase().replace(/_/g, "-");
 
-// Index one /installed payload. Keyed every way a row might ask: registry id, pyproject
-// name and directory name, because a row only knows the registry's spelling.
-// Build the lookup from pack id to the copy on disk.
-//
-// Several directories can carry the same id: a pack switched off keeps its pyproject, so
-// `thing`, `thing.dev.disabled` and `thing.v3.disabled` all answer to `thing`. Taking the last
-// one seen meant a row could report the version of a copy that is switched off, and offer to
-// switch it on alongside the live one. The copy actually in use wins, and among equals the
-// higher version does.
 function indexInstalled(packs) {
   installedIndex.clear();
   const better = (candidate, held) => {
@@ -1005,8 +1000,6 @@ function indexInstalled(packs) {
     for (const key of [pack.registry_id, pack.id, pack.dir]) {
       const folded = foldId(key);
       if (!folded) continue;
-      // A directory name is unambiguous, so it always names its own copy; the shared ids are
-      // the ones that have to be judged between.
       if (folded === foldId(pack.dir) || better(pack, installedIndex.get(folded))) {
         installedIndex.set(folded, pack);
       }
@@ -1020,7 +1013,6 @@ async function loadInstalledIndex() {
     const data = await answer.json();
     if (answer.ok) indexInstalled(data.packs);
   } catch {
-    // Rows fall back to offering Install, which is what they did before.
   }
 }
 
@@ -1028,13 +1020,6 @@ function installedPack(packId) {
   return installedIndex.get(foldId(packId)) || null;
 }
 
-// The version an installed pack could move up to, or an empty string.
-//
-// Args:
-//   record: The pack as the installed index holds it, or null for one not on disk.
-//   newest: The newest version the other side knows about.
-// Returns:
-//   That version where it is a release, ahead of what is installed, and the pack is not held.
 function updateTarget(record, newest) {
   if (!record || !newest) return "";
   if (!isRelease(record.version) || !isRelease(newest)) return "";
@@ -1042,52 +1027,17 @@ function updateTarget(record, newest) {
   return compareVersions(newest, record.version) > 0 ? String(newest) : "";
 }
 
-// The install control a registry row carries, in whichever view is on screen.
-//
-// The list, the table and the cards each built this themselves, nine identical lines apiece
-// differing only in the class appended at the end. Three copies of a thing that has to agree
-// is three chances for it to stop agreeing, which is how the menus drifted apart.
-//
-// Args:
-//   entry: The catalogue entry the row is for.
-//   cls: The view's own class for the control.
-// Returns:
-//   The control, already restored to whatever state its pack is actually in.
-//: A leading or trailing "ComfyUI" in a pack name, however its author spelled it. Two names
-//: in three carry one, and in a ComfyUI pack manager it is the one part that says nothing:
-//: every entry here is a ComfyUI pack. Only the ends are matched -- a name like
-//: `Diffusion_pipe_in_ComfyUI_Win` is using the word as a word, and cutting it out of the
-//: middle would leave nonsense.
 const COMFY_LEAD = /^comfy[\s_-]?ui[\s_.-]+/i;
 const COMFY_TRAIL = /[\s_.-]+comfy[\s_-]?ui$/i;
 
-//: What is left has to still be a name. `ComfyUI-J` shortens to "J" and `ComfyUI-988` to
-//: "988", which are worse than the originals, so a remainder this short keeps its prefix.
 const NAME_FLOOR = 4;
 
-// The name a row should show: the author's, less the word that is true of every pack here.
-//
-// Args:
-//   name: The pack name as published.
-// Returns:
-//   The name to display, which is the original wherever shortening it would not help.
 function shortPackName(name) {
   const text = String(name || "").trim();
   const cut = text.replace(COMFY_LEAD, "").replace(COMFY_TRAIL, "").trim();
   return cut.length >= NAME_FLOOR ? cut : text;
 }
 
-// A pack name element showing the shortened name, with the published one on hover.
-//
-// The full name is what the reader will search for, paste into an issue and compare against
-// the registry, so it stays one hover away and is never what gets stored or matched -- only
-// what is drawn is shortened.
-//
-// Args:
-//   name: The pack name as published.
-//   cls: Class for the element holding it.
-// Returns:
-//   An element containing the name to show.
 function packName(name, cls) {
   const text = String(name || "");
   const shown = shortPackName(text);
@@ -1096,12 +1046,6 @@ function packName(name, cls) {
   return holder;
 }
 
-// Everything known about one published version, as the row says it on hover.
-//
-// Args:
-//   entry: One version from the pack route.
-// Returns:
-//   Lines of text, or an empty string where there is nothing beyond what the row shows.
 function versionFacts(entry) {
   const when = (entry.created_at || "").slice(0, 10);
   const lines = [[entry.version, entry.status, when && `published ${when}`]
@@ -1115,14 +1059,6 @@ function versionFacts(entry) {
   }
   const deps = (entry.dependencies || []).length;
   if (deps) lines.push(`${deps} requirement${deps === 1 ? "" : "s"}.`);
-  // Titles, not details. The findings themselves are a click away in the confirmation, and a
-  // blocked row's own chip carries the reason; repeating either here makes a wall of text.
-  //
-  // Counted rather than repeated: one finding is raised per offending requirement, so a pack
-  // with three git URLs said the same sentence three times.
-  //
-  // The deprecation and compatibility findings are skipped: the lines above already say both,
-  // in more detail than their titles do.
   const tally = new Map();
   for (const found of entry.assessment?.findings || []) {
     if (/^(Marked deprecated|Declared )/.test(found.title)) continue;
@@ -1135,13 +1071,10 @@ function versionFacts(entry) {
 }
 
 function registryControl(entry, cls) {
-  // Open Manager's own entry is listed so it can be found and read, but a manager cannot be
-  // installed through itself: the control says what it is and sends the reader to the place
-  // that does know how to update it.
   if (entry.is_self) {
     const here = el("div", `om-ictl ${cls}`);
     const button = el("button", "om-btn", "About");
-    button.title = "This is Open Manager. Updating it is under About and updates.";
+    button.title = "About and updates";
     button.onclick = (event) => { event.stopPropagation(); openAboutDialog(); };
     here.appendChild(button);
     return { el: here, setInstall() {}, setInstalled() {}, setQueued() {}, setInstalling() {},
@@ -1166,26 +1099,6 @@ function registryControl(entry, cls) {
   return control;
 }
 
-// Everything that can be done to a pack already on disk.
-//
-// There were three of these: one here for registry rows, one written inline in the Installed
-// tab, and a two-item fallback inside makeInstallControl that the version rows on a pack page
-// fell through to. They disagreed -- the comment on this one used to claim it matched the
-// Installed tab while offering neither Reinstall, Hold nor Switch off -- so which actions you
-// were given depended on which list you happened to open the menu from. One list now, with
-// each entry present only where it can actually be carried out.
-//
-// `getControl` rather than the control itself: a caller builds these while its own
-// `const control` is still being initialised, so reading it here would throw.
-//
-// Args:
-//   record: The installed pack, as the installed index holds it. Null for a pack not on disk.
-//   entry: The specific version the menu was opened against, where there is one.
-//   getControl: Returns the control the actions should drive.
-//   rowsRoot: The container whose sibling rows an install should update.
-//   refresh: Called after an action that changes the list it was opened from.
-// Returns:
-//   Menu items, in the order they should read.
 function installedMenu(record, entry, getControl, rowsRoot, refresh) {
   const items = [];
   if (!record) return items;
@@ -1197,9 +1110,6 @@ function installedMenu(record, entry, getControl, rowsRoot, refresh) {
     items.push({ label: `Update to ${record.latest}`,
                  fn: () => updateInstalled(record, rowsRoot, getControl()) });
   }
-  // A pack can be reinstalled from wherever it came from. The registry is one source; a
-  // repository is the other, and a pack that was placed by hand has neither, which is why
-  // this is a question rather than an assumption.
   if (record.registry_id) {
     items.push({ label: "Reinstall",
                  fn: () => install({ packId: record.registry_id, entry: current,
@@ -1239,7 +1149,6 @@ function rememberInstall(packId, state) {
   else installState.delete(packId);
 }
 
-// Put a freshly built control into whatever state its pack is actually in.
 function restoreInstall(packId, control) {
   const state = installState.get(packId);
   if (state === "queued") control.setQueued();
@@ -1263,10 +1172,7 @@ function enqueueInstall(job) {
 
 async function runInstallQueue() {
   queueRunning = true;
-  //: Installs that left the Python environment changed and did not finish cleanly. Collected
-  //: through the run and offered once at the end.
   const restoreOffers = [];
-  //: Requirements failures, shown one dialog each after the run rather than interrupting it.
   const failures = [];
   const progress = toast("", { sticky: true });
   let done = 0;
@@ -1285,10 +1191,7 @@ async function runInstallQueue() {
         body: JSON.stringify({
           id: job.packId, version: job.entry.version,
           status: job.entry.status, overwrite: !!job.overwrite,
-          // Read now rather than when the job was queued: the block is the reader's, and
-          // the answer that counts is the one standing when the install actually runs.
           allow_banned: allowBanned(),
-          // Held back so the files can be looked at before anything joins the environment.
           with_deps: !job.scanFirst,
         }),
       });
@@ -1297,7 +1200,6 @@ async function runInstallQueue() {
       result = { ok: false, reason: error.message };
     }
     if (result.ok) {
-      // Clear any sibling still marked installed, and record the version now in place.
       if (job.rowsRoot) {
         job.rowsRoot._installedVersion = job.entry.version;
         job.rowsRoot.querySelectorAll(".om-ictl").forEach((w) => {
@@ -1311,8 +1213,6 @@ async function runInstallQueue() {
       if (result.pip_ran && !result.pip_ok) {
         const summary = environmentSummary(result.environment);
         const first = (result.pip_errors || [])[0];
-        // The list at the end of a run is a summary; it now carries the first thing pip
-        // complained about, so even the summary says something.
         issues.push(`${job.name}: ${first || "requirements did not install cleanly"}`);
         failures.push({ job, result, summary });
       }
@@ -1325,8 +1225,6 @@ async function runInstallQueue() {
   }
   queueTotal = 0;
   queueRunning = false;
-  // Shown at the end rather than one per pack mid-queue, so a run of ten installs does not
-  // stop ten times to ask.
   for (const failure of failures) {
     const choice = await showInstallFailure(failure.job, failure.result).catch(() => "");
     if (choice === "restore" && failure.result.environment_id) {
@@ -1345,19 +1243,12 @@ async function runInstallQueue() {
   if (done > issues.length) remindRestart();
 }
 
-// What recent installs did to the Python environment, and the offer to undo one.
-//
-// This exists because the install that breaks something is rarely the one you are watching.
-// A pack installs, ComfyUI restarts a day later and something else has stopped working; the
-// answer is usually a package an install moved, and without a record there is nothing to
-// point at. The record survives the restart, so the question can still be asked afterwards.
 async function openEnvironmentDialog() {
   const backdrop = el("div", "om-backdrop");
   const box = el("div", "om-note om-note-wide");
   box.appendChild(el("div", "om-note-title", "Environment changes"));
   box.appendChild(el("div", "om-dl-note",
-    "Package lists taken either side of each install, newest first. An install that changed "
-    + "nothing is not listed. Restoring runs your installer and needs a restart afterwards."));
+    "Installs that changed packages, newest first. Restoring needs a restart."));
   const list = el("div", "om-keys");
   list.appendChild(loadingBlock("Reading the record"));
   box.appendChild(list);
@@ -1383,8 +1274,7 @@ async function openEnvironmentDialog() {
     const entries = data?.entries || [];
     if (!entries.length) {
       list.replaceChildren(el("div", "om-side-status",
-        "Nothing recorded. Either no pack has been installed through Open Manager yet, or "
-        + "none of them changed a package."));
+        "No package changes recorded."));
       return;
     }
     list.replaceChildren();
@@ -1396,8 +1286,6 @@ async function openEnvironmentDialog() {
       row.appendChild(head);
       row.appendChild(el("div", "om-dl-note", environmentSummary(entry.diff) || "no change"));
 
-      // The detail, closed by default: a pack pulling in forty packages would otherwise bury
-      // the rest of the list.
       const changed = [...(entry.diff?.changed || [])]
         .map((c) => `${c.name} ${c.was} \u2192 ${c.now}`);
       const added = (entry.diff?.added || []).map((a) => `${a.name} ${a.version}`);
@@ -1438,21 +1326,13 @@ async function openEnvironmentDialog() {
   paint();
 }
 
-// Why a pack's requirements did not install, with what pip said and what it left behind.
-//
-// The one-line "requirements did not install cleanly" that used to appear said nothing a
-// reader could act on: not which requirement, not why, not whether anything was left changed.
-// All of that was already coming back from the server and being discarded here.
-//
-// Returns the reader's choice, so the caller can offer a restore without asking twice.
 async function showInstallFailure(job, result) {
   const backdrop = el("div", "om-backdrop");
   const box = el("div", "om-note om-note-wide");
   box.appendChild(el("div", "om-note-title",
     `${job.name}: requirements did not install`));
   box.appendChild(el("div", "om-dl-note",
-    "The pack itself is on disk. Its Python requirements are what failed, so it may not load "
-    + "or may load with parts missing until they are resolved."));
+    "The pack is on disk but may not load, or may load with parts missing."));
 
   const ran = result.installer === "uv" ? "uv" : "pip";
   const errors = result.pip_errors || [];
@@ -1485,7 +1365,7 @@ async function showInstallFailure(job, result) {
 
   const summary = environmentSummary(result.environment);
   box.appendChild(el("div", "om-dl-note", summary
-    ? `Your Python environment changed on the way: ${summary}. That can be put back.`
+    ? `Python environment changed: ${summary}.`
     : "Nothing in your Python environment was changed."));
 
   const foot = el("div", "om-note-foot");
@@ -1521,12 +1401,6 @@ async function showInstallFailure(job, result) {
   return choice;
 }
 
-// What an install did to the Python environment, said plainly.
-//
-// Args:
-//   diff: The `environment` block an install returns.
-// Returns:
-//   A sentence, or empty where nothing changed.
 function environmentSummary(diff) {
   if (!diff?.total) return "";
   const parts = [];
@@ -1539,11 +1413,6 @@ function environmentSummary(diff) {
   return parts.join(", ");
 }
 
-// Offer to put the environment back as it was before one install.
-//
-// Destructive, so the exact commands are shown first and the reader has to say yes to them
-// rather than to a description of them. Packages the restore will not touch are named too: a
-// restore that silently leaves numpy where an install moved it is not the undo it looks like.
 async function offerRestore(entryId, packName) {
   let preview;
   try {
@@ -1553,7 +1422,7 @@ async function offerRestore(entryId, packName) {
     return;
   }
   if (!preview?.ok) {
-    notify("Could not read the record", preview?.reason || "The record could not be read.");
+    notify("Could not read the record", preview?.reason || "");
     return;
   }
   const plan = preview.plan || {};
@@ -1563,18 +1432,15 @@ async function offerRestore(entryId, packName) {
   for (const one of plan.refused || []) {
     facts.push([`Left alone: ${one.name}`, one.reason]);
   }
-  facts.push(["Afterwards", "ComfyUI has to restart. Packages already imported stay loaded "
-    + "until it does."]);
+  facts.push(["Afterwards", "ComfyUI needs a restart."]);
   if (!plan.uninstall?.length && !plan.install?.length) {
     notify("Nothing to put back",
-      "Everything this install changed is on the list Open Manager will not touch, because "
-      + "pip or ComfyUI depends on it.");
+      "Everything this install changed is left alone: pip or ComfyUI depends on it.");
     return;
   }
 
   const go = await chooseAction(`Restore packages to before ${packName}?`,
-    "This runs the commands below. Other packs installed since may depend on what "
-    + "is about to be changed, and this does not check for that.",
+    "Packs installed since may depend on these packages.",
     [{ key: "go", label: "Restore packages", primary: true, danger: true }],
     { wide: true, facts });
   if (!go) return;
@@ -1600,12 +1466,8 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
       || "Blocked by policy. Open Manager's settings decide whether banned versions install.");
     return;
   }
-  // A different version already installed makes this a switch. The installed version is
-  // tracked on the row container.
   const installed = rowsRoot ? rowsRoot._installedVersion : "";
   const change = versionSwitch(installed, entry.version);
-  // Off by default: a registry pack carries a status and a scan, which a repository does
-  // not. Turned on, the same question is asked here so one answer covers both.
   if (panelSetting("openManager.trustRegistry", false) === true) {
     const repository = await repositoryForPack(packId, entry, rowsRoot);
     const parts = repoOwnerName(repository);
@@ -1613,14 +1475,11 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
   }
   if (!(await confirmInstall(packId, entry, change))) return;
 
-  // Where a scan is meant to run first, the requirements are held until it has. If the
-  // day's allowance is gone the choice is offered rather than taken away.
   let scanFirst = vtReady() && panelSetting("openManager.scanOnInstall", false) === true;
   if (scanFirst && (await vtRemaining()) === 0) {
     const go = await confirmAction(
       "VirusTotal allowance spent",
-      `Today's ${500} lookups are used up, so ${packId} cannot be scanned before it installs. `
-      + "Install without scanning?",
+      `${packId} cannot be scanned before it installs. Install without scanning?`,
       "Skip scan and install",
     );
     if (!go) return;
@@ -1635,10 +1494,6 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
   });
 }
 
-// Confirmation for a GitHub install: a prominent unvetted-source warning, plus the archive
-// inspection and dependency dry run loaded in place.
-//: Owners the reader has trusted, folded for comparison. Filled at startup and kept in step
-//: as decisions are made, so a row can say so without asking the server per row.
 const trustedAuthors = new Set();
 
 async function loadTrustedAuthors() {
@@ -1648,18 +1503,14 @@ async function loadTrustedAuthors() {
     trustedAuthors.clear();
     for (const row of authors) trustedAuthors.add(foldId(row.owner));
   } catch {
-    // Nothing trusted, which prompts rather than assumes.
   }
 }
 
-// Whether a catalogue entry's repository belongs to a trusted author.
 function byTrustedAuthor(entry) {
   const parts = repoOwnerName(entry?.repository || "");
   return !!parts && trustedAuthors.has(foldId(parts.owner));
 }
 
-// A row's mark that its author is trusted. Absent otherwise: the badge says something
-// positive was decided, and no badge says nothing has been.
 function trustBadge(entry) {
   if (!byTrustedAuthor(entry)) return null;
   const parts = repoOwnerName(entry.repository);
@@ -1668,9 +1519,6 @@ function trustBadge(entry) {
   return pill;
 }
 
-// A pack's repository, from whatever the caller already holds, and from the catalogue where
-// it holds nothing. Install reaches here from several places carrying different data, so the
-// lookup is done once here rather than threaded through each of them.
 async function repositoryForPack(packId, entry, rowsRoot) {
   const known = entry?.repository || rowsRoot?._repository || installedPack(packId)?.repository;
   if (known) return known;
@@ -1682,9 +1530,6 @@ async function repositoryForPack(packId, entry, rowsRoot) {
   }
 }
 
-// Whether this owner has been trusted before, and what is known about them. A repository
-// install has no registry status behind it, so the question that decides it is whether the
-// account is trusted -- which is about the account, not this one repository.
 async function authorStanding(owner, repo, consultList) {
   const standing = { owner, trusted: false, stars: null, created: null, pushed: null, packs: 0 };
   if (consultList) {
@@ -1692,17 +1537,15 @@ async function authorStanding(owner, repo, consultList) {
       const answer = await api.fetchApi(`${API}/trust?owner=${encodeURIComponent(owner)}`);
       standing.trusted = (await answer.json()).trusted === true;
     } catch {
-      // Treated as untrusted, which asks rather than assumes.
     }
     if (standing.trusted) return standing;
   }
-  // Facts worth having before deciding. All best-effort: the prompt stands without them.
   try {
     const answer = await api.fetchApi(`${API}/repo-meta?repo=${encodeURIComponent(repo)}`);
     const meta = await answer.json();
     standing.stars = meta.stars ?? null;
     standing.pushed = meta.pushed_at || null;
-  } catch { /* left blank */ }
+  } catch {}
   try {
     const answer = await api.fetchApi(`${API}/installed`);
     const packs = (await answer.json()).packs || [];
@@ -1710,18 +1553,10 @@ async function authorStanding(owner, repo, consultList) {
       const url = (pack.repository || "").toLowerCase();
       return url.includes(`github.com/${owner.toLowerCase()}/`);
     }).length;
-  } catch { /* left blank */ }
+  } catch {}
   return standing;
 }
 
-// Ask before something published by a stranger is installed or loaded.
-//
-// The mode decides what an answer buys. "By author" remembers the account, so the question
-// is asked once and covers everything they publish. "By action" asks every time, naming the
-// account, and remembers nothing -- a reminder rather than a decision.
-//
-// Either way this gates the prompt, never the findings: an advisory or a scan result is
-// about the code, not who published it, and is shown regardless.
 async function confirmAuthorTrust(owner, repo, what) {
   const byAuthor = panelSetting("openManager.trustMode", "author") !== "action";
   const standing = await authorStanding(owner, repo, byAuthor);
@@ -1759,7 +1594,7 @@ async function confirmAuthorTrust(owner, repo, what) {
       });
       trustedAuthors.add(foldId(owner));
     } catch {
-      toast(`Could not remember ${owner}; continuing anyway.`, { kind: "warn" });
+      toast(`Could not remember ${owner}.`, { kind: "warn" });
     }
   }
   return true;
@@ -1782,8 +1617,7 @@ function confirmRepoInstall(pack) {
     const warn = el("div", "om-ack");
     warn.appendChild(el("b", null, "Not on the Comfy Registry. Installed straight from GitHub."));
     warn.appendChild(el("div", null,
-      "This source is not registry-scanned. A custom node runs with ComfyUI's privileges. "
-      + "Review what it contains and changes below before installing."));
+      "Not scanned by the registry. A pack runs with ComfyUI's privileges."));
     if (pack.overwrite) {
       warn.appendChild(el("div", null,
         "The copy already in custom_nodes is removed first and replaced by this one."));
@@ -1808,9 +1642,6 @@ function confirmRepoInstall(pack) {
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(false); });
 
     (async () => {
@@ -1884,7 +1715,7 @@ async function uninstall({ packId, entry, control, rowsRoot, registryId }) {
   const name = entry.name || packId;
   const ok = await confirmAction(
     `Uninstall ${name}`,
-    `This removes ${packId} from custom_nodes. Other packs are untouched.`,
+    `This removes ${packId} from custom_nodes.`,
     "Uninstall", true);
   if (!ok) return;
   const progress = toast(`Uninstalling ${name}...`, { sticky: true });
@@ -1902,10 +1733,6 @@ async function uninstall({ packId, entry, control, rowsRoot, registryId }) {
   if (result.ok) {
     if (rowsRoot) rowsRoot._installedVersion = "";
     control?.setInstall();
-    // The registry list remembers what a pack is doing so its rows survive being rebuilt
-    // as it scrolls. That memory is keyed by registry id, which is not always the
-    // directory the pack was installed under, so both are cleared here; leaving either
-    // behind would show Installed for something that is no longer there.
     rememberInstall(packId, null);
     rememberInstall(registryId, null);
     loadInstalledIndex();
@@ -1917,14 +1744,11 @@ async function uninstall({ packId, entry, control, rowsRoot, registryId }) {
   }
 }
 
-// Owner and repo from a GitHub URL, or null.
 function repoOwnerName(url) {
   const match = /github\.com[/:]+([^/]+)\/([^/#?]+)/i.exec(url || "");
   return match ? { owner: match[1], repo: match[2].replace(/\.git$/, "") } : null;
 }
 
-// A Star button. Without a configured token it opens the repository on GitHub; with one it
-// stars in place.
 function makeStarButton(repository, stars) {
   const button = el("button", "om-btn om-star");
   button.appendChild(document.createTextNode(stars != null ? `★ ${stars.toLocaleString()}` : "☆ Star"));
@@ -1943,7 +1767,6 @@ async function reflectStar(repository, button) {
       button.firstChild.textContent = "★ Starred";
     }
   } catch {
-    // No star state is not worth saying anything about.
   }
 }
 
@@ -1952,8 +1775,6 @@ async function starRepo(repository, button) {
   if (!parts) { if (repository) openUrl(repository); return; }
   const openRepo = () =>
     window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener,noreferrer");
-  // Without a token there is nothing to star with, so the repository is opened instead and
-  // the reader can do it there.
   if (!keysHeld.github) { openRepo(); return; }
   const starred = button.classList.contains("om-starred");
   const answer = await dlPost("/star",
@@ -1970,12 +1791,6 @@ async function starRepo(repository, button) {
   toast(answer.starred ? "Starred on GitHub." : "Unstarred on GitHub.", { kind: "ok" });
 }
 
-// One tag, as a button that searches for it.
-//
-// A tag names something a pack does, and the obvious question on reading one is which other
-// packs do the same. It fills the registry search with `topic:<name>`, which is a query that
-// can be seen, edited and cleared, rather than putting the list into a state with no handle
-// on it.
 function tagChip(tag) {
   const chip = el("button", "om-tag om-tag-go", tag);
   chip.title = `Find other packs tagged ${tag}`;
@@ -1983,23 +1798,13 @@ function tagChip(tag) {
   return chip;
 }
 
-// The element a pack page was built into, whichever shape it took.
-//
-// The page goes into a modal's `.om-dialog` or into a window's `.om-float` depending on a
-// setting, so anything reaching back out of the page for another part of it -- the header
-// chips, the version list -- has to ask for both. Asking for the dialog alone is how the
-// repository metadata ended up in a row of its own at the foot of the page instead of beside
-// the publisher and the licence where it belongs.
 function packRoot(node) {
   return node?.closest(".om-dialog, .om-float") || null;
 }
 
 async function openPack(packId) {
-  // Already open: bring it forward. Checked before anything is drawn, because the loading
-  // dialog below would otherwise be built and torn down again, which reads as a flicker.
   const already = floatingPanel(`pack:${packId}`);
   if (already) { already.present(); return already; }
-  // The same again as a modal is the page that is already in front of the reader.
   const showing = document.querySelector(".om-backdrop[data-om-pack]");
   if (showing?.dataset.omPack === packId) return;
 
@@ -2010,13 +1815,9 @@ async function openPack(packId) {
   backdrop.appendChild(dialog);
   closeOn(backdrop);
 
-  // Held back rather than shown at once. A cached registry answer returns inside this, and a
-  // dialog that appears for two frames reads as a fault rather than as progress.
   let waiting = null;
   const showWaiting = () => {
     if (waiting !== "shown") {
-      // One pack page at a time. A README link to another pack replaces the page rather than
-      // stacking a dialog over it, which left no way back but closing each in turn.
       for (const other of document.querySelectorAll(".om-backdrop[data-om-pack]")) other.remove();
       document.body.appendChild(backdrop);
     }
@@ -2034,8 +1835,6 @@ async function openPack(packId) {
     doneWaiting();
   } catch (error) {
     doneWaiting();
-    // The registry not having an entry is not the same as there being nothing to show. A
-    // pack sitting in custom_nodes doing its job has a page's worth of information in it.
     const local = await localPack(packId);
     if (local) {
       if (asWindow("packs")) {
@@ -2060,19 +1859,11 @@ async function openPack(packId) {
   const { pack, resolution, versions } = data;
   dialog.replaceChildren();
 
-  // Borderless close, top-right of the modal.
   const close = el("button", "om-x", "×");
   close.title = "Close";
   close.onclick = () => backdrop.remove();
   dialog.appendChild(close);
 
-  // Everything below builds the page from whatever the registry returned. A pack with a shape
-  // nothing else has -- no versions, a field the registry stopped sending -- would otherwise
-  // throw partway through and leave a window containing nothing but the close button, which
-  // reads as the interface being broken rather than as one pack being odd.
-  // A modal is right for a quick look and wrong for reading a README while building a graph.
-  // The same page goes into one of the floating windows instead, keyed per pack so several
-  // can be open at once and each remembers where it was put.
   if (asWindow("packs")) {
     backdrop.remove();
     showPackWindow(packId, { pack, resolution, versions });
@@ -2087,7 +1878,6 @@ async function openPack(packId) {
   showWaiting();
 }
 
-//: The setting behind each surface that can be either a window or a modal.
 const WINDOW_SETTINGS = {
   manager: "openManager.windowManager",
   packs: "openManager.windowPacks",
@@ -2096,73 +1886,45 @@ const WINDOW_SETTINGS = {
   memory: "openManager.windowMemory",
 };
 
-// Whether one surface opens as a window. Each is asked separately because they are not used
-// the same way: a Memory panel is glanced at and dismissed, while a pack README is read
-// alongside the graph it is about.
 function asWindow(surface) {
   return panelSetting(WINDOW_SETTINGS[surface], true) !== false;
 }
 
-//: How much bigger or smaller than its own default a window opens.
 const WINDOW_SCALE = { compact: 0.8, standard: 1, large: 1.25 };
 
-//: What each window asks for by default, as a share of the viewport rather than a count of
-//: pixels: a figure that suits a laptop is a postage stamp on a 4K monitor, and one that suits
-//: the monitor does not fit the laptop at all.
-//:
-//: `vh` is the share of the whole window, title bar included, because that is what the reader
-//: sees; the body is worked out from it. The bounds keep it honest at the extremes: the floor
-//: stops a window becoming unusable in a narrow browser, and the ceiling stops one spanning an
-//: ultrawide, where a README set in a single line across 3,000 pixels is harder to read.
 const WINDOW_SIZES = {
   manager: { vw: 0.66, vh: 0.70, min: [420, 320], max: [1600, 1200] },
   pack: { vw: 0.72, vh: 0.74, min: [420, 340], max: [1800, 1300] },
   downloads: { vw: 0.56, vh: 0.50, min: [380, 280], max: [1300, 900] },
   library: { vw: 0.62, vh: 0.58, min: [420, 320], max: [1500, 1000] },
   memory: { vw: 0.44, vh: 0.60, min: [340, 320], max: [1000, 1000] },
+  desktop: { vw: 0.34, vh: 0.62, min: [360, 420], max: [720, 1000] },
+  folder: { vw: 0.34, vh: 0.46, min: [300, 240], max: [760, 900] },
+  note: { vw: 0.40, vh: 0.56, min: [340, 280], max: [900, 1100] },
+  props: { vw: 0.24, vh: 0.44, min: [280, 260], max: [520, 760] },
 };
 
-//: However large the reader asks for, this much of the screen is left showing. A window that
-//: covers the graph entirely is a modal wearing a title bar, and the point of a window is
-//: being able to see what it is about.
 const WINDOW_ROOM = { width: 0.94, height: 0.88 };
 
-// The size a window opens at before the reader has given it one of their own.
-//
-// Args:
-//   name: Which window, as a key of WINDOW_SIZES.
-// Returns:
-//   `{width, height}` in pixels, taken from the viewport, scaled by the size setting and held
-//   inside that window's bounds.
 function windowSize(name) {
-  const spec = WINDOW_SIZES[name] || WINDOW_SIZES.manager;
+  const spec = Object.hasOwn(WINDOW_SIZES, name) ? WINDOW_SIZES[name] : WINDOW_SIZES.manager;
   const scale = windowScale();
   const pick = (share, extent, low, high, room) => Math.round(
-    // The floor wins last, so a browser too small for the floor gets the floor and scrolls
-    // rather than a window sized to nothing.
     Math.max(low, Math.min(high, extent * room, extent * share * scale)));
-  const tall = pick(spec.vh, window.innerHeight, spec.min[1], spec.max[1], WINDOW_ROOM.height);
+  const tall = pick(spec.vh, workHeight(), spec.min[1], spec.max[1], WINDOW_ROOM.height);
   return {
     width: pick(spec.vw, window.innerWidth, spec.min[0], spec.max[0], WINDOW_ROOM.width),
-    // `height` is the body; the bar sits above it and counts towards what the reader sees.
     height: Math.max(120, tall - headerHeight()),
   };
 }
 
-// The scale a window's default size is multiplied by. Applied to each window's own figures
-// rather than to a single size for all of them, so the Memory panel stays smaller than a pack
-// page instead of every window becoming the same shape.
 function windowScale() {
   const asked = String(panelSetting("openManager.windowSize", "standard") || "standard");
   return WINDOW_SCALE[asked] ?? 1;
 }
 
-//: Bounds for the two text settings. A window whose text is 4px or 90px is not a window.
 const TEXT_LIMITS = { title: [10, 28], body: [10, 22] };
 
-// Push the look settings out as custom properties on the document, so they reach modals and
-// windows alike and take effect on what is already open rather than only on the next thing
-// drawn.
 function applyWindowLook() {
   const clamp = ([low, high], value, fallback) =>
     Math.min(high, Math.max(low, Number(value) || fallback));
@@ -2175,29 +1937,37 @@ function applyWindowLook() {
     panelSetting("openManager.windowShadow", true) !== false
       ? "0 10px 40px rgba(0,0,0,.5)"
       : "none");
-  // A class rather than a property: the rule it switches on is a filter, and a filter set to
-  // `none` still makes the element its own containing block, which moves fixed children.
   document.body.classList.toggle("om-blur-inactive",
     panelSetting("openManager.blurInactive", false) !== false);
-  const icons = panelSetting("openManager.windowIcons", true) !== false;
-  for (const mark of document.querySelectorAll(".om-float-icon")) {
-    mark.hidden = !icons || !mark.getAttribute("src");
-  }
+  root.style.setProperty("--om-blur-back",
+    `${clamp([1, 12], panelSetting("openManager.blurAmount", 3), 3)}px`);
+  applyAero();
+  for (const panel of floatPanels.values()) panel.refreshIcon?.();
 }
 
-// The same page, in a window that outlives a click on the canvas. Keyed by pack, so opening
-// one that is already open raises it instead of drawing a second copy of it.
+function applyAero() {
+  const root = document.documentElement;
+  const on = panelSetting("openManager.aero", false) === true;
+  document.body.classList.toggle("om-aero", on);
+  if (!on) return;
+  const held = (name, low, high, fallback) =>
+    Math.min(high, Math.max(low, Number(panelSetting(name, fallback)) || fallback));
+  root.style.setProperty("--om-aero-alpha",
+    `${held("openManager.aeroAlpha", 10, 100, 55)}%`);
+  root.style.setProperty("--om-aero-dark",
+    String(held("openManager.aeroDark", 0, 70, 18) / 100));
+  root.style.setProperty("--om-aero-blur",
+    `${held("openManager.aeroBlur", 0, 40, 12)}px`);
+}
+
 function showPackWindow(packId, data) {
   const panel = createFloatingPanel({
     key: `pack:${packId}`,
     title: data.pack?.name || packId,
-    // The largest share of the screen of any of them, because this one is a page: a banner,
-    // the metadata, the version list and a README.
     ...windowSize("pack"),
     centred: true,
   });
   panel.setIcon(data.pack?.icon || "");
-  // An already-open window comes back with its contents; only a fresh one needs filling.
   if (panel.body.childElementCount) return panel;
   try {
     buildPackBody(panel.body, data);
@@ -2208,7 +1978,6 @@ function showPackWindow(packId, data) {
   return panel;
 }
 
-//: What the disk knows about a pack, or null where nothing is installed under that name.
 async function localPack(packId) {
   try {
     const answer = await api.fetchApi(`${API}/local/${encodeURIComponent(packId)}`);
@@ -2219,7 +1988,6 @@ async function localPack(packId) {
   }
 }
 
-// The same page in a window, following the setting every other page follows.
 function showLocalPackWindow(packId, info) {
   const panel = createFloatingPanel({
     key: `pack:${packId}`,
@@ -2233,10 +2001,6 @@ function showLocalPackWindow(packId, info) {
   return panel;
 }
 
-// A clone's remote as something a browser can open.
-//
-// git records `git@host:owner/repo.git` for an SSH remote, which is not a URL. Turning it
-// into one is the difference between a link and a string nobody can use.
 function remoteToUrl(remote) {
   const text = String(remote || "").trim();
   if (!text) return "";
@@ -2245,12 +2009,6 @@ function remoteToUrl(remote) {
   return safeUrl(text.replace(/\.git$/, "")) || "";
 }
 
-// Build a pack page from the copy on disk.
-//
-// For a pack the registry has no entry for: written locally, pulled, or placed by hand. There
-// is no version list and no registry status, because there is no registry entry; what there
-// is comes from the pack's own files and is labelled as such, so nothing here can be mistaken
-// for something the registry vouched for.
 function buildLocalPackBody(container, info) {
   const project = info.pyproject || {};
   const git = info.git || {};
@@ -2298,9 +2056,8 @@ function buildLocalPackBody(container, info) {
   const notice = el("div", "om-notice");
   notice.appendChild(el("b", null, "Not in the Comfy Registry"));
   notice.appendChild(document.createTextNode(
-    " Everything below is read from the files in this directory. There is no published "
-    + "version list, no registry status and no findings, because there is no entry to read "
-    + "them from."));
+    " Read from the files in this directory. No published versions, registry status or "
+    + "findings."));
   body.appendChild(notice);
 
   if (info.classes?.length) {
@@ -2317,9 +2074,8 @@ function buildLocalPackBody(container, info) {
     const nodes = panel("Nodes", "none registered", { open: false });
     nodes.body.appendChild(el("div", "om-side-status",
       info.disabled
-        ? "This pack is switched off, so it has registered nothing this session."
-        : "ComfyUI has no node classes attributed to this pack. It may have failed to "
-          + "import, or it may add something other than nodes."));
+        ? "This pack is switched off."
+        : "ComfyUI lists no nodes from this pack."));
     body.appendChild(nodes);
   }
 
@@ -2346,8 +2102,6 @@ function buildLocalPackBody(container, info) {
   container.appendChild(body);
 }
 
-// The sentence a failed pack page shows, with the close button kept so the window can still be
-// dismissed and the detail kept so it can be reported.
 function packProblem(title, error, backdrop) {
   const box = el("div", "om-body");
   box.appendChild(el("div", "om-empty-title", title));
@@ -2360,8 +2114,6 @@ function packProblem(title, error, backdrop) {
   return box;
 }
 
-// What went wrong upstream, in words. The registry answers errors as JSON, and our own route
-// passes that through as `detail`, so without this the reader is shown a wire payload.
 function registryReason(data, status) {
   const detail = data?.detail ?? data?.reason ?? "";
   if (typeof detail === "string" && detail.trim().startsWith("{")) {
@@ -2370,7 +2122,6 @@ function registryReason(data, status) {
       const said = inner.message || inner.error;
       if (said) return `the registry says: ${said}`;
     } catch {
-      // Not JSON after all; the raw text is still better than nothing.
     }
   }
   if (data?.status === 404 || status === 404) return "the registry has no entry for it";
@@ -2379,7 +2130,6 @@ function registryReason(data, status) {
 
 function buildPackBody(dialog, { pack, resolution, versions }) {
 
-  // Banner left, all metadata inline to its right.
   const hero = el("div", "om-hero");
   if (pack.banner) {
     const banner = el("img", "om-banner");
@@ -2406,9 +2156,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   info.appendChild(titleRow);
 
   const stats = el("div", "om-stats");
-  // Stars are not here: the star control beside these shows the same number and can change
-  // it, so two readings of one figure were on screen at once. Which figure the registry
-  // holds is the registry's business, not something to second-guess here.
   for (const [label, value] of [
     ["downloads", pack.downloads.toLocaleString()],
     ["versions", String(versions.length)],
@@ -2420,7 +2167,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   }
   info.appendChild(stats);
 
-  // Actions and metadata chips. Status is a colour, not a word.
   const actions = el("div", "om-actions om-hero-actions");
   const registry = registryButton(pack.id);
   if (registry) actions.appendChild(registry);
@@ -2437,7 +2183,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     node.appendChild(document.createTextNode(" " + value));
     chips.appendChild(node);
   };
-  // A chip whose value is a registry status, shown as a colour-coded dot.
   const statusChip = (label, value, status, hint = "") => {
     if (!value) return;
     const node = el("span", "om-chip");
@@ -2450,9 +2195,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     if (hint) node.title = hint;
     chips.appendChild(node);
   };
-  // The registry fills in a display name for almost every publisher and an `author` string
-  // for almost none, so the name is shown and the account id kept for the tooltip: the id is
-  // what Trust the author records, so it still has to be findable.
   statusChip("publisher", pack.publisher_name || pack.publisher, pack.publisher_status,
     pack.publisher_name && pack.publisher_name !== pack.publisher
       ? `Publisher account: ${pack.publisher}`
@@ -2469,13 +2211,8 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     chips.appendChild(node);
   }
   chip("category", pack.category);
-  // `author` is set on about one pack in ten; the publisher's member list is set on nine, and
-  // names the same people. The declared author wins where there is one.
   const members = pack.publisher_members || [];
   chip("author", pack.author || members.join(", "));
-  // These are declared per version, not per pack: the registry's pack-level copies are empty
-  // for every pack that fills them in. The chip therefore describes one particular version,
-  // the newest that declares anything, and says so rather than implying it covers all of them.
   const declaring = versions.find((entry) => entry.compatibility?.declared);
   if (declaring) {
     const node = el("span", "om-chip");
@@ -2483,8 +2220,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     node.appendChild(document.createTextNode(" "
       + declaring.compatibility.notes.map((n) => `${n.label} ${n.declared}`).join(" · ")));
     if (declaring.compatibility.state === "differs") node.classList.add("om-chip-differs");
-    node.title = `As declared by version ${declaring.version}. Each version declares its own; `
-      + "the list below marks any that do not match this install.";
+    node.title = `Declared by version ${declaring.version}.`;
     chips.appendChild(node);
   }
   chip("first published", (pack.created_at || "").slice(0, 10));
@@ -2499,14 +2235,10 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
 
   hero.appendChild(info);
 
-  // The header scrolls with the page rather than being pinned above it, so a long README
-  // gets the whole dialog once you have read past the title.
   const body = el("div", "om-body");
   body.appendChild(hero);
   body.appendChild(el("div", "om-release-slot"));
 
-  // The registry advertises only an active release. Where a newer one is published, the
-  // gap is stated as fact.
   if (resolution.newest_is_hidden) {
     const notice = el("div", "om-notice");
     notice.appendChild(el("b", null,
@@ -2514,56 +2246,39 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     body.appendChild(notice);
   }
 
-  // Versions live in their own bordered, scrolling box.
   const versionsBox = el("div", "om-versions");
   versionsBox._installedVersion = pack.installed_version || "";
   for (const entry of versions) {
     const row = el("div", "om-row");
-    // The row carries what is known about the version, because the row has room for a date
-    // and one finding and this has the rest: what it declares, what it pulls in, why it is
-    // blocked. Set on the row so anywhere in it answers.
     row.title = versionFacts(entry);
     if (entry.deprecated) row.classList.add("om-row-deprecated");
     const number = el("div", "om-ver", entry.version);
-    // Kept in the version cell rather than beside the status badge, so the badge cell holds
-    // one thing and every row stays one line high.
     if (entry.compatibility?.state === "differs") {
       const flag = el("span", "om-ver-flag", "!");
       flag.title = entry.compatibility.notes
         .filter((n) => n.state === "differs")
         .map((n) => `Declares ${n.label} ${n.declared}; this install reports ${n.yours}.`)
         .join("\n")
-        + "\nPublishers often declare a range wider or narrower than a pack needs. It installs "
-        + "either way.";
+        + "\nIt installs either way.";
       number.appendChild(flag);
     }
     row.appendChild(number);
     const marks = el("div", "om-marks");
     const mark = badge(entry.status);
     mark.dataset.version = entry.version;
-    // The registry's reason arrives separately and lands here; until then the badge says
-    // only what the status is, which the reader can already see.
     mark.title = `Status: ${entry.status}`;
     marks.appendChild(mark);
-    // No second badge for deprecated. A version carrying both wrapped this cell onto a second
-    // line and grew the row, so a handful of old versions set the height of the whole list.
-    // The dimmed row says it instead, and the row's own tooltip spells it out.
     row.appendChild(marks);
     row.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
 
     const worst = entry.assessment?.findings?.[0];
     row.appendChild(el("div", "om-why", worst ? worst.title : "no findings"));
 
-    // A banned version is blocked, not offered. Everything else installs after its warning.
     if (entry.installable === false) {
       const blocked = el("span", "om-blocked", "Blocked");
       blocked.title = entry.blocked_reason || "Blocked by policy";
       row.appendChild(blocked);
     } else {
-      // The menu is the installed pack's -- reinstall it, hold it, switch it off, remove it --
-      // so it belongs to the row of the version actually installed. On any other row it
-      // described a different version than the one the row is for: "Hold at 3.2.0" sitting
-      // beside 3.2.1, which is not what that row does.
       const isInstalledRow = Boolean(pack.installed_version)
         && entry.version === pack.installed_version;
       const onDisk = isInstalledRow ? installedPack(pack.id) : null;
@@ -2581,7 +2296,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       if (isInstalledRow) {
         control.setInstalled();
       } else {
-        // Named for the move it makes from whatever is installed.
         const change = versionSwitch(pack.installed_version || "", entry.version);
         control.setInstall(change
           ? { downgrade: "Downgrade", upgrade: "Upgrade", reinstall: "Reinstall" }[change.direction]
@@ -2591,9 +2305,42 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     }
     versionsBox.appendChild(row);
   }
-  // What the header says when the section is closed: enough to know whether to open it.
+  const localVersion = pack.installed_version || installedPack(pack.id)?.version || "";
+  if (localVersion && !versions.some((one) => one.version === localVersion)) {
+    const record = installedPack(pack.id);
+    const row = el("div", "om-row om-row-local");
+    row.title = `${localVersion} is installed here and not published on the registry.`;
+    row.appendChild(el("div", "om-ver", localVersion));
+    const marks = el("div", "om-marks");
+    const chip = el("span", "om-badge om-badge-local", "local");
+    chip.title = "Installed here, and not a version the registry publishes.";
+    marks.appendChild(chip);
+    row.appendChild(marks);
+    row.appendChild(el("div", "om-why", record?.installed_at
+      ? installedText(new Date(Number(record.installed_at) * 1000))
+      : "on disk"));
+    row.appendChild(el("div", "om-why",
+      record?.from_git ? "from a repository" : "not assessed"));
+    let control;
+    control = makeInstallControl({
+      packId: pack.id,
+      entry: { version: localVersion, status: "active", name: pack.name || pack.id },
+      rowsRoot: versionsBox,
+      withMenu: Boolean(record),
+      items: record
+        ? installedMenu(record, { version: localVersion, name: pack.name || pack.id },
+                        () => control, versionsBox)
+        : undefined,
+    });
+    control.setInstalled();
+    row.appendChild(control.el);
+    versionsBox.insertBefore(row, versionsBox.firstChild);
+  }
   const versionNote = [`${versions.length} published`];
-  if (pack.installed_version) versionNote.push(`installed ${pack.installed_version}`);
+  if (pack.installed_version) {
+    versionNote.push(`installed ${pack.installed_version}`
+      + (versions.some((one) => one.version === pack.installed_version) ? "" : " (local)"));
+  }
   else if (resolution.newest) versionNote.push(`newest ${resolution.newest}`);
   const tabs = tabbedPanel({ remember: "om-pack-tab" });
   body.appendChild(tabs.root);
@@ -2606,41 +2353,69 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   });
   attachStatusReasons(pack.id, versionsBox, versions);
 
-  // What the pack adds to the graph. The registry records this per version and holds it for
-  // roughly three packs in five, so the section is offered for every pack and says plainly
-  // when the registry was never told, rather than implying the pack adds nothing.
-  const shownVersion = pack.installed_version || resolution.newest || versions[0]?.version;
+  const shownVersion = pack.installed_version
+    || (installedPack(pack.id)?.version || (installedPack(pack.id) ? "installed" : ""))
+    || resolution.newest || versions[0]?.version;
   if (shownVersion) {
     const nodesPane = el("div", "om-tabpane");
 
-    // Which version's list is on screen. The registry keeps one per version and fills it in
-    // for some and not others, so the version that happens to be installed is often the one
-    // with nothing in it while an earlier one has the lot. Pinning the panel to a single
-    // version made that data unreachable; the ref selector above only moves GitHub branches
-    // and has no bearing on what the registry holds.
     let atVersion = shownVersion;
+    let held = [];
+    let source = "";
+    let term = "";
+    let group = "";
+    let installedHere = "";
 
+    const pickable = versions.map((entry) => entry.version);
+    const onDisk = installedPack(pack.id);
+    const mineVersion = pack.installed_version || onDisk?.version || "";
     const picker = el("select", "om-side-select om-nodes-at");
-    for (const entry of versions) {
-      const option = el("option", null, entry.version);
-      option.value = entry.version;
-      if (entry.version === shownVersion) option.selected = true;
-      picker.appendChild(option);
+    const option = (version, label) => {
+      const made = el("option", null, label || version);
+      made.value = version;
+      if (version === shownVersion) made.selected = true;
+      return made;
+    };
+    for (const version of pickable) {
+      picker.appendChild(option(version,
+        version === mineVersion ? `${version} (Installed)` : version));
     }
-    picker.title = "Which published version's node list to read";
+    if (mineVersion && !pickable.includes(mineVersion)) {
+      const mine = option(mineVersion, `${mineVersion} (Installed)`);
+      const after = [...picker.options]
+        .find((one) => compareVersions(mineVersion, one.value) > 0);
+      picker.insertBefore(mine, after || null);
+    } else if (!mineVersion && onDisk) {
+      picker.insertBefore(option("installed", "Installed copy"), picker.firstChild);
+    }
+    picker.title = "Which version's node list to show";
     picker.onclick = (event) => event.stopPropagation();
 
-    // Fetched when it is first opened, and again whenever the version changes: it is a
-    // request per version, and most readers never look. `loaded` keeps a reopen from asking
-    // for the same version twice.
+    const finder = el("input", "om-search om-nodes-find");
+    finder.type = "search";
+    finder.placeholder = "Filter by name, category or description";
+    finder.spellcheck = false;
+    finder.onclick = (event) => event.stopPropagation();
+    const groups = el("select", "om-side-select om-nodes-group");
+    groups.onclick = (event) => event.stopPropagation();
+    groups.title = "Show one category only";
+
+    const bar = el("div", "om-nodes-bar");
+    bar.appendChild(el("span", "om-ref-label", "version"));
+    bar.appendChild(picker);
+    bar.appendChild(finder);
+    bar.appendChild(groups);
+    const nodesBar = () => bar;
+
     let loaded = false;
-    const fill = async () => {
-      if (loaded) return;
+    const fill = async (wantIndex = false) => {
+      if (loaded && !wantIndex) return;
       loaded = true;
       nodesPane.replaceChildren(loadingBlock("Reading the node list"));
       let data;
       try {
-        const query = new URLSearchParams({ version: atVersion });
+        const query = new URLSearchParams({ version: atVersion, repo: pack.repository || "" });
+        if (wantIndex) query.set("index", "1");
         const answer = await api.fetchApi(
           `${API}/comfy-nodes/${encodeURIComponent(pack.id)}?${query}`);
         data = await answer.json();
@@ -2652,49 +2427,107 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
         return;
       }
       if (!data.known) {
-        const said = el("div", "om-side-status",
-          `No node list published for ${atVersion}.`);
-        nodesPane.replaceChildren(nodesBar(), said);
+        const empty = el("div", "om-nodelist");
+        empty.appendChild(el("div", "om-side-status",
+          installedHere && installedHere !== atVersion
+            ? `No node list published for ${atVersion}. Version ${installedHere} is installed here.`
+            : `No node list published for ${atVersion}.`));
+        if (data.indexable) {
+          const ask = el("button", "om-btn", "Look in the community index");
+          ask.title = "Class names the repository registers, tied to no version.";
+          ask.onclick = () => fill(true);
+          const row = el("div", "om-actions");
+          row.appendChild(ask);
+          empty.appendChild(row);
+        }
+        nodesPane.replaceChildren(nodesBar(), empty);
         nodesTab.note("no list");
         return;
       }
+      held = data.nodes;
+      source = data.source || "";
+      installedHere = data.installed || "";
+      const seen = [...new Set(held.map((one) => one.category || "").filter(Boolean))].sort();
+      groups.replaceChildren(el("option", null, "Every category"));
+      groups.firstChild.value = "";
+      for (const name of seen) {
+        const option = el("option", null, name);
+        option.value = name;
+        groups.appendChild(option);
+      }
+      groups.style.display = seen.length > 1 ? "" : "none";
+      group = seen.includes(group) ? group : "";
+      groups.value = group;
+      nodesTab.note(`${countNote(held.length, "node")}`
+        + (source === "registry" ? ` in ${atVersion}`
+          : source === "install"
+            ? (atVersion === "installed" ? " in the installed copy" : ` in ${atVersion}, as installed`)
+            : " from the index, no version"));
+      render();
+    };
+
+    const matches = (one) => {
+      if (group && (one.category || "") !== group) return false;
+      if (!term) return true;
+      const hay = (`${one.name} ${one.display_name || ""} ${one.category || ""} `
+        + `${one.description || ""}`).toLowerCase();
+      return term.split(/\s+/).every((word) => hay.includes(word));
+    };
+
+    const render = () => {
       const list = el("div", "om-nodelist");
-      for (const one of data.nodes) {
+      if (source && source !== "registry") {
+        const from = el("div", "om-side-status om-nodelist-from",
+          source === "install"
+            ? (atVersion === "installed"
+              ? "From the installed copy, which states no version."
+              : `From the installed copy. The registry publishes no list for ${atVersion}.`)
+            : `From the community index: the pack as last indexed, not ${atVersion}.`);
+        list.appendChild(from);
+      }
+      const shown = held.filter(matches);
+      if (!shown.length) {
+        list.appendChild(el("div", "om-side-status",
+          `Nothing matches${term ? ` "${finder.value.trim()}"` : ""}`
+          + `${group ? ` in ${group}` : ""}. ${held.length} in the list.`));
+        nodesPane.replaceChildren(nodesBar(), list);
+        return;
+      }
+      for (const one of shown) {
         const item = el("div", "om-nodelist-item");
         const head = el("div", "om-chg-head");
-        head.appendChild(el("div", "om-node-name", one.name));
+        head.appendChild(el("div", "om-node-name", one.display_name || one.name));
+        if (one.display_name && one.display_name !== one.name) {
+          head.appendChild(el("div", "om-why", one.name));
+        }
         if (one.deprecated) head.appendChild(el("span", "om-chg-here", "deprecated"));
         if (one.experimental) head.appendChild(el("span", "om-chg-here", "experimental"));
         if (one.category) head.appendChild(el("div", "om-why", one.category));
         item.appendChild(head);
         if (one.description) {
-          // Publisher text, set as text for the same reason the changelog is.
           const note = el("div", "om-chg-text");
           note.textContent = one.description;
           item.appendChild(note);
         }
-        // What the node wires up to, which is the part that decides whether it fits the
-        // graph you had in mind.
         const ports = [];
         const inputs = one.inputs || {};
         if (inputs.required) ports.push(countNote(inputs.required, "required input"));
         if (inputs.optional) ports.push(`${inputs.optional} optional`);
         if (one.outputs?.length) ports.push(`outputs ${one.outputs.join(", ")}`);
         if (ports.length) item.appendChild(el("div", "om-why", ports.join(" · ")));
+        nodeDragFrom(item, one);
         list.appendChild(item);
       }
-      nodesTab.note(`${countNote(data.nodes.length, "node")} in ${atVersion}`);
+      if (shown.length !== held.length) {
+        list.appendChild(el("div", "om-side-status om-nodelist-from",
+          `${shown.length} of ${held.length} shown.`));
+      }
       nodesPane.replaceChildren(nodesBar(), list);
     };
 
-    // The picker sits above whatever the panel is showing, so it is in the same place
-    // whether the answer is a list, an emptiness or an error.
-    const nodesBar = () => {
-      const bar = el("div", "om-nodes-bar");
-      bar.appendChild(el("span", "om-ref-label", "version"));
-      bar.appendChild(picker);
-      return bar;
-    };
+    finder.oninput = () => { term = finder.value.trim().toLowerCase(); render(); };
+    groups.onchange = () => { group = groups.value; render(); };
+
     picker.onchange = () => {
       atVersion = picker.value;
       loaded = false;
@@ -2705,14 +2538,10 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       title: "Nodes",
       order: 30,
       pane: nodesPane,
-      // Asked for the first time the tab is looked at, and once per version after that.
       onShow: fill,
     });
   }
 
-  // The registry carries a changelog per version, which almost nothing fills in. Where it is
-  // filled in it is the only place a reader can find out what an update actually did, so the
-  // section appears when there is something in it and stays out of the way when there is not.
   const noted = versions.filter((entry) => entry.changelog);
   {
     const list = el("div", "om-chg");
@@ -2728,8 +2557,6 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       }
       head.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
       item.appendChild(head);
-      // Publisher text, set as text. The registry does not say what format it is in, and
-      // guessing markdown on a field anyone can publish to is how a pack page runs script.
       const note = el("div", "om-chg-text");
       note.textContent = entry.changelog;
       item.appendChild(note);
@@ -2742,12 +2569,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       order: 20,
       pane: list,
     });
-    // Every section that exists before the pack's metadata arrives is registered, so the
-    // opening tab is the first of those rather than whichever was built first.
     tabs.start();
   }
 
-  // README, below the version list, only when enrichment is enabled.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
     const readme = el("div", "om-readme");
     readme.appendChild(loadingBlock("Reading the repository"));
@@ -2758,12 +2582,11 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   dialog.appendChild(body);
 }
 
-// A pack matched from GitHub but not on the registry. A bare page: the repository, the node
-// types it provides, its README, and the same GitHub install the row offers.
 function openRepoPack(pack) {
+  if (asWindow("packs")) return showRepoPackWindow(pack);
+
   const backdrop = el("div", "om-backdrop");
   const dialog = el("div", "om-dialog");
-  // Full width like the registry pack page, with height following content.
   dialog.style.height = "auto";
   dialog.style.maxHeight = "84vh";
   backdrop.appendChild(dialog);
@@ -2775,6 +2598,23 @@ function openRepoPack(pack) {
   close.onclick = () => backdrop.remove();
   dialog.appendChild(close);
 
+  buildRepoPackBody(dialog, pack);
+  return backdrop;
+}
+
+function showRepoPackWindow(pack) {
+  const panel = createFloatingPanel({
+    key: `pack:${pack.repo}`,
+    title: pack.title || repoName(pack.repo),
+    ...windowSize("pack"),
+    centred: true,
+  });
+  if (panel.body.childElementCount) return panel;
+  buildRepoPackBody(panel.body, pack);
+  return panel;
+}
+
+function buildRepoPackBody(container, pack) {
   const hero = el("div", "om-hero");
   const info = el("div", "om-hero-info");
   const titleRow = el("div", "om-title-row");
@@ -2814,12 +2654,9 @@ function openRepoPack(pack) {
 
   hero.appendChild(info);
 
-  // The header scrolls with the page rather than being pinned above it, so a long README
-  // gets the whole dialog once you have read past the title.
   const body = el("div", "om-body");
   body.appendChild(hero);
   body.appendChild(el("div", "om-release-slot"));
-  // The README is read from GitHub behind the same enrichment setting the registry page uses.
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {
     const readme = el("div", "om-readme");
     readme.appendChild(loadingBlock("Reading the repository"));
@@ -2828,26 +2665,21 @@ function openRepoPack(pack) {
       `${API}/repo-meta?repo=${encodeURIComponent(pack.repo)}`));
   } else {
     body.appendChild(el("div", "om-readme-status",
-      "Enable README enrichment in Open Manager settings to read the repository here."));
+      "Read pack README and repository metadata is off in Settings > Open Manager > Registry."));
   }
-  dialog.appendChild(body);
+  container.appendChild(body);
 }
 
-// The repository name from a GitHub URL, for a title where none was matched.
 function repoName(url) {
   const match = /github\.com[:/]+[^/]+\/([^/#?]+)/i.exec(url || "");
   return match ? match[1].replace(/\.git$/, "") : (url || "repository");
 }
 
-// Fetches and renders the pack README below the version list. The scrape is cached
-// server-side by version signature.
 async function appendReadme(packId, slot) {
   return renderMetaInto(slot, api.fetchApi(
     `${API}/readme/${encodeURIComponent(packId)}`));
 }
 
-// Renders repository facts and the README into a slot from a metadata fetch. Shared by the
-// registry pack page and the not-on-registry repository page.
 async function renderMetaInto(slot, fetchPromise) {
   let meta;
   try {
@@ -2860,9 +2692,6 @@ async function renderMetaInto(slot, fetchPromise) {
   }
   slot.replaceChildren();
 
-  // Issue counts, the last push and the rest are facts about the repository, so they join
-  // the header's chips rather than sitting under the version list. The metadata arrives
-  // after the header is drawn, which is why they are appended to it here.
   const heroActions = packRoot(slot)?.querySelector(".om-hero-actions");
   let facts = heroActions?.querySelector(".om-chips");
   if (heroActions && !facts) {
@@ -2871,8 +2700,6 @@ async function renderMetaInto(slot, fetchPromise) {
   }
   const inHeader = Boolean(facts);
   if (!facts) facts = el("div", "om-chips");
-  // The registry already names some of these from its own record; a second chip saying the
-  // same thing under a different source would only be noise.
   const already = new Set([...facts.querySelectorAll(".om-chip b")]
     .map((b) => b.textContent.trim().toLowerCase()));
   const fact = (label, value) => {
@@ -2898,15 +2725,12 @@ async function renderMetaInto(slot, fetchPromise) {
   }
   fact("python", meta.requires_python);
   fact("comfyui", meta.requires_comfyui);
-  // GitHub's own count, replacing the registry's on the star control once it arrives. Shown
-  // as GitHub reports it; a figure that looks wrong is the registry's to correct, and a rule
-  // here for spotting one would be guessing at other people's data.
   if (meta.stars) {
     const star = packRoot(slot)?.querySelector(".om-star");
     const label = star?.lastChild;
     if (label && !star.classList.contains("om-starred")) {
       label.textContent = `★ ${Number(meta.stars).toLocaleString()}`;
-      star.title = `${Number(meta.stars).toLocaleString()} stars on GitHub. Click to star.`;
+      star.title = `Star on GitHub (${Number(meta.stars).toLocaleString()} stars)`;
     }
   }
   fact("open issues", String(meta.open_issues));
@@ -2919,21 +2743,13 @@ async function renderMetaInto(slot, fetchPromise) {
     (heroActions || slot).appendChild(tags);
   }
 
-  // Everything the ref decides lives in one container, so switching branch or commit
-  // replaces it rather than redrawing the page.
   const body = el("div", "om-at-ref");
-  // The picker belongs with the header's other controls rather than above the README, so it
-  // is placed there where a header exists and left in the body where one does not.
   const picker = buildRefPicker(meta, body);
   if (picker.firstChild) (heroActions || slot).appendChild(picker);
   slot.appendChild(body);
   await paintPackBody(body, meta, meta);
 }
 
-// The declared table and the README as they stand at one ref. Called first with the pack's
-// own metadata, and again with whatever the picker reads.
-// Something to look at while a repository is read. Centred and set down from the top, so it
-// reads as the page thinking rather than as a line of text that failed to become a page.
 function loadingBlock(what) {
   const box = el("div", "om-loading");
   box.appendChild(el("div", "om-loading-spin"));
@@ -2941,14 +2757,11 @@ function loadingBlock(what) {
   return box;
 }
 
-// Where a document sits, so a link inside it resolves against its own folder rather than
-// against the root. `docs/guide.md` linking `images.md` means `docs/images.md`.
 function docFolder(path) {
   const cut = String(path || "").lastIndexOf("/");
   return cut < 0 ? "" : String(path).slice(0, cut);
 }
 
-// Resolve a relative link against a folder, honouring ./ and ../ the way a path does.
 function docResolve(base, href) {
   const parts = String(base || "").split("/").filter(Boolean);
   for (const step of String(href || "").split("/")) {
@@ -2959,10 +2772,6 @@ function docResolve(base, href) {
   return parts.join("/");
 }
 
-//: Declarations honoured from a README's inline `style`. Layout and type only. `position`,
-//: `z-index`, `transform` and the offsets are left out: a README should not be able to place
-//: anything over the interface around it. Nothing here can fetch, so no `background-image`
-//: and no shorthand that hides a `url()`.
 const STYLE_ALLOWED = new Set([
   "width", "height", "max-width", "max-height", "min-width", "min-height",
   "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "margin-inline",
@@ -2974,24 +2783,10 @@ const STYLE_ALLOWED = new Set([
   "border", "border-radius", "border-width", "border-style", "border-color",
 ]);
 
-//: Values refused whatever the property. `url()` would let a README fetch from a third party
-//: on open; the rest are ways of smuggling something that is not a value.
 const STYLE_REFUSED = /url\(|image-set\(|expression\(|javascript:|@import|[<>{}]|\\/i;
 
-//: A fenced block, an inline code span, or an HTML tag. Ordered alternation, so a tag written
-//: inside an example is consumed as part of the example and stays one.
-//:
-//: Indented lines are deliberately not treated as code. Four-space indentation inside a
-//: `<div align="center">` is how the markup in issue #15 is written, and protecting it meant
-//: the one case this exists for was the one case it skipped.
 const MD_SCAN = /```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]+`|<\/?[a-zA-Z][^>]*>/g;
 
-// Carry each inline `style` past ComfyUI's sanitiser, which empties the attribute.
-//
-// Args:
-//   text: Markdown as published.
-// Returns:
-//   The same markdown with style attributes renamed, to be read back by applyInlineStyle.
 function carryInlineStyle(text) {
   let inCode = 0;
   return String(text || "").replace(MD_SCAN, (chunk) => {
@@ -3003,10 +2798,6 @@ function carryInlineStyle(text) {
   });
 }
 
-// Apply what the author asked for, one declaration at a time, refusing anything not listed.
-//
-// Args:
-//   view: The rendered markdown.
 function applyInlineStyle(view) {
   for (const node of view.querySelectorAll("[data-om-style]")) {
     const asked = node.getAttribute("data-om-style") || "";
@@ -3022,14 +2813,11 @@ function applyInlineStyle(view) {
         value = value.replace(/!\s*important$/i, "").trim();
       }
       if (!value || !STYLE_ALLOWED.has(name) || STYLE_REFUSED.test(value)) continue;
-      try { node.style.setProperty(name, value, priority); } catch { /* browser said no */ }
+      try { node.style.setProperty(name, value, priority); } catch {}
     }
   }
 }
 
-// Render markdown into a view and wire everything that follows from it. One path, so a
-// linked document behaves exactly as the README does: same sanitising, same media, same
-// heading links, same workflow offers.
 async function renderMarkdownInto(view, text, meta, ref, base) {
   try {
     const html = await app.extensionManager.renderMarkdownToHtml(carryInlineStyle(text));
@@ -3048,8 +2836,6 @@ async function renderMarkdownInto(view, text, meta, ref, base) {
   }
 }
 
-// Open one of the pack's own documents in place. The README it came from is kept so the way
-// back is the document itself rather than a reload of the page.
 async function openPackDoc(view, meta, ref, path) {
   const stack = view._docStack || (view._docStack = []);
   stack.push({ text: view._docText, path: view._docPath });
@@ -3065,8 +2851,6 @@ async function openPackDoc(view, meta, ref, path) {
     answer = { ok: false, reason: error.message };
   }
   if (!answer?.ok) {
-    // Nothing to show, so the reader goes back rather than being left on an empty page, and
-    // is told why the link did not open here.
     notify("Not found in the repository", `${path}: ${answer?.reason || "it could not be read"}.`);
     await backFromDoc(view, meta, ref);
     return;
@@ -3116,9 +2900,6 @@ async function paintPackBody(host, meta, source) {
   await renderMarkdownInto(view, source.readme, meta, source.ref || meta.default_branch, "");
 }
 
-// A branch or commit offered for install at the top of the version list. The registry has
-// no build for it, so it is fetched from GitHub, inspected like any other repository install
-// and marked as replacing whatever is already in place.
 function buildRefInstallRow(meta, ref, caption) {
   const isSha = /^[0-9a-f]{7,40}$/i.test(ref);
   const repoName = (meta.repository || "").replace(/\/+$/, "").split("/").pop() || ref;
@@ -3141,16 +2922,10 @@ function buildRefInstallRow(meta, ref, caption) {
   return row;
 }
 
-// Which branch or commit the page is read at. The list costs two GitHub API calls, so it is
-// fetched when the picker is first opened rather than on every pack page; reading at the
-// chosen ref afterwards only touches the raw content host and costs nothing against the
-// hourly limit.
 function buildRefPicker(meta, host) {
   const bar = el("div", "om-refbar");
   const repo = meta.repository || "";
   if (!repo.toLowerCase().includes("github.com")) return bar;
-  //: The versions the registry publishes, read from the list already on the page. Used only
-  //: to mark a tag that matches one, which is the tag a reader is most likely to want.
   const publishedVersions = () => new Set(
     [...(packRoot(host)?.querySelectorAll(".om-versions .om-ver") || [])]
       .map((n) => n.firstChild?.textContent?.trim() || n.textContent.trim()));
@@ -3162,8 +2937,6 @@ function buildRefPicker(meta, host) {
   select.appendChild(first);
   const status = el("span", "om-side-status", "");
 
-  // Sitting among the header chips, the control takes the width of what it is showing
-  // rather than of the longest branch name or commit message in the list.
   const probe = el("span", "om-ref-probe");
   const fitToSelection = () => {
     const chosen = select.options[select.selectedIndex];
@@ -3195,9 +2968,6 @@ function buildRefPicker(meta, host) {
       };
       group("Branches", (data.branches || []).filter((b) => !seen.has(b.name) && seen.add(b.name))
         .map((b) => { const o = el("option", null, b.name); o.value = b.name; return o; }));
-      // Tags before commits: a tag is where a release was cut, so it is the ref a reader
-      // actually wants when they are asking to see the pack "at" a version. A tag whose name
-      // matches a published version says so, since that is the whole reason to pick it.
       const known = publishedVersions();
       group("Tags", (data.tags || []).filter((t) => !seen.has(t.name) && seen.add(t.name))
         .map((t) => {
@@ -3234,9 +3004,6 @@ function buildRefPicker(meta, host) {
       status.textContent = "";
       fitToSelection();
       await paintPackBody(host, meta, data);
-      // Switching ref repaints the README, themes, gallery and workflows in place, which
-      // looks like the page simply changing its mind. This says what is being shown and
-      // offers the way back, so the state is visible rather than inferred from the dropdown.
       markRef(ref, select.options[select.selectedIndex]?.textContent || ref);
       offerRef(ref, select.options[select.selectedIndex]?.textContent || "");
     } catch (error) {
@@ -3244,25 +3011,19 @@ function buildRefPicker(meta, host) {
     }
   });
 
-  //: A ref short enough for a title bar. A commit sha is unreadable at full length and a
-//: branch or tag name is already what the reader chose.
 function shortRef(ref) {
   const text = String(ref || "");
   return /^[0-9a-f]{40}$/i.test(text) ? text.slice(0, 7) : text;
 }
 
-// A banner above the repository content naming the ref it was read at. Removed again when
-  // the default branch is chosen, because that is the state that needs no explaining.
   const markRef = (ref, caption) => {
     const page = packRoot(host) || host;
     page.querySelector(".om-ref-note")?.remove();
-    // In a window, the title bar is the one part always on screen, so the ref goes there too.
     const holder = page.classList?.contains("om-float") ? page : null;
     if (holder) {
       const handle = [...floatPanels.values()].find((one) => one.el === holder);
       const base = handle?._baseTitle
-        || (handle ? (handle._baseTitle = holder.querySelector(".om-float-title")?.textContent
-          || "") : "");
+        || (handle ? (handle._baseTitle = handle.title?.() || "") : "");
       handle?.setTitle?.(ref && ref !== current ? `${base} @ ${shortRef(ref)}` : base);
     }
     if (!ref || ref === current) return;
@@ -3282,16 +3043,12 @@ function shortRef(ref) {
     else page.appendChild(note);
   };
 
-  // The registry publishes no build for a branch or a commit, so when one is chosen it is
-  // put at the top of the version list and installed from GitHub instead. Choosing the
-  // default branch again takes the row away.
   const offerRef = (ref, caption) => {
     const versions = packRoot(host)?.querySelector(".om-versions");
     if (!versions) return;
     versions.querySelector(".om-ref-row")?.remove();
     if (!ref || ref === current) return;
     versions.prepend(buildRefInstallRow(meta, ref, caption));
-    // No use offering it inside a section that is closed.
     versions.closest("details")?.setAttribute("open", "");
   };
 
@@ -3303,10 +3060,6 @@ function shortRef(ref) {
   return bar;
 }
 
-// Why the registry gave each version its status. Asked for separately because the registry
-// only returns reasons on request and answers in megabytes; the backend summarises, and the
-// badges pick the sentence up on hover once it lands. Only fetched when something is not
-// plainly active, since that is the only time the answer is worth the round trip.
 async function attachStatusReasons(packId, versionsBox, versions) {
   if (!packId || !(versions || []).some((v) => (v.status || "").toLowerCase() !== "active")) return;
   let reasons;
@@ -3324,8 +3077,6 @@ async function attachStatusReasons(packId, versionsBox, versions) {
   }
 }
 
-// A pack placed but not yet wired in: its requirements are still waiting, and ComfyUI has
-// not been asked to restart. The scan decides which way that goes.
 async function scanThenFinish(packId) {
   await new Promise((resolve) => {
     openScanDialog(packId, {
@@ -3362,8 +3113,6 @@ async function scanThenFinish(packId) {
   });
 }
 
-// A reputation scan of an installed pack. Only hashes are sent; the files stay put. The
-// public allowance is four lookups a minute, so this takes a while and reports as it goes.
 function openScanDialog(packId, { onDone } = {}) {
   const backdrop = el("div", "om-backdrop");
   const dialog = el("div", "om-dialog");
@@ -3446,10 +3195,6 @@ function openScanDialog(packId, { onDone } = {}) {
   return backdrop;
 }
 
-// The pack's [tool.open_manager] declarations: matched incompatibilities, a source
-// preference, links, and example workflows that load into the graph on click.
-//: What each declared capability means, in the reader's terms. The accepted set lives in
-//: developer.py; anything it lets through that is missing here is shown under its own name.
 const CAPABILITY_LABELS = {
   filesystem: ["Filesystem read and write", "Reads or writes files outside its own folder"],
   network: ["Network access", "Contacts hosts over the network at runtime"],
@@ -3465,8 +3210,6 @@ const CAPABILITY_LABELS = {
   hardware: ["Direct hardware access", "Talks to devices directly"],
 };
 
-//: A glyph per capability, as shape lists rather than icon-font classes so nothing new has to
-//: load and the stroke follows the surrounding text colour. Drawn on a 24 unit grid.
 const CAPABILITY_ICONS = {
   filesystem: [["path", "M3 7h6l2 3h10v9H3z"]],
   network: [["circle", 12, 12, 8], ["path", "M4 12h16"],
@@ -3490,7 +3233,6 @@ const CAPABILITY_ICONS = {
              ["path", "M3 14h4"], ["path", "M17 10h4"], ["path", "M17 14h4"]],
 };
 
-//: Shown for a capability the backend accepts but this file has no glyph for.
 const CAPABILITY_FALLBACK = [["path", "M12 3l9 9-9 9-9-9z"], ["path", "M12 9v4"],
                              ["path", "M12 16.2v.4"]];
 
@@ -3539,10 +3281,6 @@ function capabilityTitle(key) {
   return String(key).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-// The pack's own account of what it does, as a grid that reflows with the window.
-//
-// Declared by the author and not verified, which the panel says plainly. What is actually in
-// the archive is a separate reading, and the two are worth comparing.
 function buildCapabilities(keys, refused = []) {
   const box = panel("Access and capabilities", countNote(keys.length, "declaration"),
     { open: false, remember: "om-caps-open" });
@@ -3564,9 +3302,6 @@ function buildCapabilities(keys, refused = []) {
     }
     content.appendChild(grid);
   }
-  // Named rather than dropped quietly, so the author of the pack can see which word was not
-  // recognised. The vocabulary is fixed on purpose: two packs are only comparable if they are
-  // describing themselves in the same terms.
   if (refused.length) {
     const bad = el("div", "om-caps-bad");
     bad.appendChild(el("b", null,
@@ -3588,7 +3323,6 @@ function appendDeveloperBlock(slot, meta) {
   const capabilities = dev.capabilities || [];
   const badCapabilities = dev.capabilities_unknown || [];
 
-  // The author's note on the current release, placed above the version list.
   const releaseSlot = packRoot(slot)?.querySelector(".om-release-slot");
   if (dev.release_note && releaseSlot) {
     releaseSlot.replaceChildren();
@@ -3603,9 +3337,6 @@ function appendDeveloperBlock(slot, meta) {
     && !badCapabilities.length) return;
 
   const block = el("div", "om-dev");
-  // The page's own container, which is built before a pack's metadata arrives. Where it is
-  // there these sections become tabs in it; where it is not, each falls back to a dropdown of
-  // its own, because this same function draws the sections for a repository with no pack page.
   const tabs = packRoot(slot)?.querySelector(".om-tabs")?.__omTabs || null;
 
   for (const entry of matched) {
@@ -3687,8 +3418,6 @@ function appendDeveloperBlock(slot, meta) {
     const previews = dev.example_workflow_previews || {};
     const built = collapsible("Example workflows", workflows, (path) => {
       const item = el("button", "om-wf-item");
-      // A preview beside the workflow, where the pack ships one. Shows what it produces
-      // before it is loaded.
       if (previews[path]) {
         const shot = el("img", "om-wf-shot");
         shot.loading = "lazy";
@@ -3714,17 +3443,7 @@ function appendDeveloperBlock(slot, meta) {
   slot.appendChild(block);
 }
 
-// One container holding every section of a page, switched by a strip of tabs.
-//
-// The pack page had grown seven separate dropdowns, each with its own remembered open state,
-// so reading it meant opening and closing boxes to find anything. This is the same content in
-// one frame: the strip says what is available and how much of it there is, and the body is a
-// single scrolling area of a fixed height rather than seven that each move the rest of the
-// page when they open.
-//
-// Sections may be added after the container is on screen, because the ones that come from a
-// pack's metadata arrive later. A section added late never steals the view.
-function tabbedPanel({ remember = "" } = {}) {
+function tabbedPanel({ remember = "", collapsible = true } = {}) {
   const root = el("div", "om-tabs");
   const strip = el("div", "om-tabstrip");
   strip.setAttribute("role", "tablist");
@@ -3736,17 +3455,17 @@ function tabbedPanel({ remember = "" } = {}) {
 
   const fold = el("button", "om-tabfold");
   fold.type = "button";
-  const foldKey = remember ? `${remember}-shut` : "";
+  const foldKey = remember && collapsible ? `${remember}-shut` : "";
   let shut = false;
   if (foldKey) {
-    try { shut = localStorage.getItem(foldKey) === "1"; } catch { /* private browsing */ }
+    try { shut = localStorage.getItem(foldKey) === "1"; } catch {}
   }
-  strip.appendChild(fold);
+  if (collapsible) strip.appendChild(fold);
 
   const loadActive = () => {
     const found = sections.find((one) => one.id === active);
     if (!found?.onShow) return;
-    try { found.onShow(); } catch { /* the section's own loader */ }
+    try { found.onShow(); } catch {}
   };
 
   const paintFold = () => {
@@ -3761,7 +3480,7 @@ function tabbedPanel({ remember = "" } = {}) {
     shut = next;
     paintFold();
     if (foldKey) {
-      try { localStorage.setItem(foldKey, shut ? "1" : "0"); } catch { /* private browsing */ }
+      try { localStorage.setItem(foldKey, shut ? "1" : "0"); } catch {}
     }
     if (!shut && load) loadActive();
   };
@@ -3780,7 +3499,7 @@ function tabbedPanel({ remember = "" } = {}) {
     }
     body.replaceChildren(found.pane);
     if (remember) {
-      try { localStorage.setItem(remember, id); } catch { /* private browsing */ }
+      try { localStorage.setItem(remember, id); } catch {}
     }
     if (!shut) loadActive();
   };
@@ -3799,7 +3518,8 @@ function tabbedPanel({ remember = "" } = {}) {
     const entry = { id, title, order, tab, pane, onShow, count };
     sections.push(entry);
     sections.sort((a, b) => a.order - b.order);
-    strip.replaceChildren(fold, ...sections.map((one) => one.tab));
+    strip.replaceChildren(...(collapsible ? [fold] : []),
+                          ...sections.map((one) => one.tab));
     if (active) show(active);
     return {
       pane,
@@ -3807,8 +3527,6 @@ function tabbedPanel({ remember = "" } = {}) {
     };
   };
 
-  // Called once the sections that exist up front are registered, so the opening tab is the
-  // first of those rather than whichever happened to be built first.
   const start = () => {
     if (!sections.length) return;
     let chosen = sections[0].id;
@@ -3816,7 +3534,7 @@ function tabbedPanel({ remember = "" } = {}) {
       try {
         const saved = localStorage.getItem(remember);
         if (saved && sections.some((one) => one.id === saved)) chosen = saved;
-      } catch { /* private browsing */ }
+      } catch {}
     }
     show(chosen);
   };
@@ -3826,8 +3544,6 @@ function tabbedPanel({ remember = "" } = {}) {
   return api;
 }
 
-// A section that collapses to its header bar. `note` is all that stays visible when
-// closed; `remember` keys the open state so a choice survives reopening the page.
 function panel(title, note, { open = true, remember = "" } = {}) {
   const box = el("details", "om-panel");
   const head = el("summary", "om-panel-head");
@@ -3838,8 +3554,6 @@ function panel(title, note, { open = true, remember = "" } = {}) {
   const body = el("div", "om-panel-body");
   box.appendChild(body);
   box.body = body;
-  // The header note is written before the contents are known in the sections that load on
-  // demand, so it has to be rewritable once they arrive.
   box.note = (text) => { head.querySelector(".om-panel-note").textContent = text; };
 
   let start = open;
@@ -3856,11 +3570,6 @@ function panel(title, note, { open = true, remember = "" } = {}) {
   return box;
 }
 
-// A section holding a list of paths, in the same container the version list uses so every
-// section of a pack page reads as one stack rather than as a box and some loose headings.
-// `note` is what the header says while it is closed, so it has to be worth reading on its
-// own. `listClass` swaps the single column for another layout, which the gallery uses for
-// its grid.
 function collapsible(title, paths, build, {
   listClass = "om-wf-list", open = false, remember = "", note = "",
 } = {}) {
@@ -3868,20 +3577,14 @@ function collapsible(title, paths, build, {
   const list = el("div", listClass);
   for (const path of paths) list.appendChild(build(path));
   box.body.appendChild(list);
-  // The list on its own, for a caller putting it in a tab rather than a dropdown.
   box.pane = list;
   return box;
 }
 
-// How many of a thing, said in words rather than as a bare number, because "1" beside a
-// heading leaves the reader to guess what was counted.
 function countNote(count, noun) {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-//: Which keys are held. Filled at start-up and kept in step as they are set. Values never
-//: appear here, because they never leave the server: a key is read from its store by the
-//: request that needs it, so nothing has to carry one about.
 const keysHeld = { huggingface: false, github: false, virustotal: false };
 
 async function loadKeys() {
@@ -3896,10 +3599,6 @@ async function loadKeys() {
   }
 }
 
-// A key typed into ComfyUI's settings is written to comfy.settings.json, handed back in full
-// by GET /settings, and shown in the box that set it. Anything found there is moved into the
-// store and the setting emptied, once, and the reader is told it happened rather than left to
-// notice. Nothing is moved silently.
 async function migrateKeys() {
   const moving = [
     ["openManager.virusTotalKey", "virustotal", "VirusTotal key"],
@@ -3912,7 +3611,7 @@ async function migrateKeys() {
     if (!value) continue;
     const answer = await dlPost("/keys", { name, value });
     if (!answer?.ok) continue;
-    try { await app.extensionManager.setting.set(id, ""); } catch { /* left as it was */ }
+    try { await app.extensionManager.setting.set(id, ""); } catch {}
     keysHeld[name] = true;
     moved.push(label);
     if (answer.warning) {
@@ -3920,15 +3619,11 @@ async function migrateKeys() {
     }
   }
   if (moved.length) {
-    toast(`${moved.join(" and ")} moved out of ComfyUI's settings into Open Manager's own `
-          + `store. Set them from Access keys in Open Manager from now on.`,
+    toast(`${moved.join(" and ")} moved from ComfyUI's settings to Open Manager > Access keys.`,
           { kind: "ok", sticky: true });
   }
 }
 
-// The switch this replaced was a boolean that defaulted to the classic menu, which meant a
-// modern install opened the old menu unless someone turned it off. Anyone who did express a
-// preference keeps it; anyone who did not gets the flag followed instead.
 function migrateEntryMode() {
   let old;
   try { old = app.extensionManager.setting.get("openManager.classicMenu"); } catch { return; }
@@ -3939,14 +3634,9 @@ function migrateEntryMode() {
     app.extensionManager.setting.set("openManager.managerEntry", old === false ? "panel" : "classic");
     app.extensionManager.setting.set("openManager.classicMenu", null);
   } catch {
-    // Left as it was; the flag decides in the meantime.
   }
 }
 
-// Which Open Manager this is, and what updating it takes. The two install shapes update
-// differently and the difference is not something a reader can see, so the server is asked
-// rather than guessed at: a custom node has the ordinary pack update, a package needs a
-// command in a terminal naming the interpreter that is actually running the server.
 let selfInfo = null;
 
 async function loadSelfInfo(check = false) {
@@ -3955,7 +3645,6 @@ async function loadSelfInfo(check = false) {
     const answer = await api.fetchApi(`${API}/self${check ? "?check=1" : ""}`);
     if (answer.ok) selfInfo = await answer.json();
   } catch {
-    // Left as it was; a row simply does not offer the update.
   }
   return selfInfo;
 }
@@ -3972,7 +3661,6 @@ async function openAboutDialog() {
     const answer = await api.fetchApi(`${API}/self?check=1`);
     if (answer.ok) { info = await answer.json(); selfInfo = info; }
   } catch {
-    // Left null; the dialog says so rather than showing nothing.
   }
 
   const backdrop = el("div", "om-backdrop");
@@ -3981,9 +3669,7 @@ async function openAboutDialog() {
 
   if (!info) {
     box.appendChild(el("div", "om-dl-note",
-      "The server did not answer, so how this copy is installed is unknown. It is running, "
-      + "so this is most likely a route that predates this panel: restart ComfyUI and try "
-      + "again."));
+      "The server did not answer, so how this copy is installed is unknown."));
   } else {
     const packaged = info.mode === "package";
     const facts = el("div", "om-keys-row");
@@ -4002,16 +3688,12 @@ async function openAboutDialog() {
 
     if (packaged) {
       box.appendChild(el("div", "om-dl-note",
-        "Open Manager is standing in for ComfyUI Manager, from site-packages. A running "
-        + "server cannot rewrite the package it is importing, so it cannot update itself "
-        + "from here. Run this instead:"));
+        "Open Manager is installed in site-packages in place of ComfyUI Manager and cannot "
+        + "update itself from here."));
       for (const step of info.steps || []) {
         const row = el("div", "om-keys-row");
         row.appendChild(el("div", "om-dl-note", step.label));
         const line = el("div", "om-keys-line");
-        // A single-line input showed the interpreter path and hid the rest, which on a
-        // portable build is the half that says what is being installed. This wraps, and a
-        // click selects the whole command for anyone who would rather not use the button.
         const field = el("div", "om-cmd", step.command);
         line.appendChild(field);
         const copy = el("button", "om-btn", "Copy");
@@ -4027,8 +3709,7 @@ async function openAboutDialog() {
       if (info.note) box.appendChild(el("div", "om-dl-note", info.note));
     } else {
       box.appendChild(el("div", "om-dl-note",
-        "Open Manager is a pack in custom_nodes, so it updates the way every other pack "
-        + "does: open its page and install the version you want."));
+        "Open Manager is a pack in custom_nodes and updates from its page."));
       const line = el("div", "om-keys-line");
       const go = el("button", "om-btn om-go", "Open its page");
       go.onclick = () => { backdrop.remove(); openPack(info.node_id); };
@@ -4052,30 +3733,19 @@ async function openAboutDialog() {
   closeOn(backdrop);
 }
 
-// Where a key is set, and the only place one is typed. The box is a password field, it is
-// never filled with what is already held, and what is held is described by its last four
-// characters because that is enough to tell two apart.
 async function openKeysDialog() {
   const found = await loadKeys();
   const backdrop = el("div", "om-backdrop");
   const box = el("div", "om-note om-note-wide");
   box.appendChild(el("div", "om-note-title", "Access keys"));
   box.appendChild(el("div", "om-dl-note",
-    "Kept in Open Manager's own file, restricted to this account, and used only by this "
-    + "server. They are not written to ComfyUI's settings, not sent in a URL, and there is "
-    + "no route that returns one. They are not encrypted: a key this server has to use "
-    + "unattended cannot be hidden from the account it runs as, and a file that decrypts "
-    + "itself is not encryption."));
+    "Kept unencrypted in Open Manager's own file, restricted to this account and used only "
+    + "by this server. Never written to ComfyUI's settings, sent in a URL or shown back."));
   box.appendChild(el("div", "om-dl-note",
-    "An environment variable is used instead where one is set, for a deployment that would "
-    + "rather inject its secrets. Nothing here writes a key into the environment: this "
-    + "process loads third-party packs that can read it, and the installer inherits it when "
-    + "a pack's requirements are installed."));
+    "Where an environment variable is set, it is used instead."));
   if (found?.warning) box.appendChild(el("div", "om-dl-note om-dl-bad", found.warning));
 
   const rows = el("div", "om-keys");
-  // Every key the server knows about, described by the server. Keeping a second list here is
-  // how a key ends up settable in one place and invisible in the other.
   for (const [name, entry] of Object.entries(found?.keys || {})) {
     const label = entry.label || name;
     const placeholder = entry.placeholder || "";
@@ -4091,8 +3761,6 @@ async function openKeysDialog() {
     row.appendChild(head);
     row.appendChild(el("div", "om-dl-note", why));
     if (fromEnv) {
-      // Saving here would write a key that is never read, which is the kind of setting that
-      // looks like it worked and did not.
       row.appendChild(el("div", "om-dl-note om-dl-bad",
         `${entry.env} is set, so that is the key in use. `
         + `${entry.shadowed ? "What is stored here is" : "Anything saved here is"} ignored `
@@ -4113,8 +3781,6 @@ async function openKeysDialog() {
       if (!value) return;
       save.disabled = true;
       const answer = await dlPost("/keys", { name, value });
-      // Cleared whatever the answer, so a key never sits in a field waiting to be read
-      // over someone's shoulder or picked up by a password manager.
       input.value = "";
       save.disabled = false;
       if (!answer?.ok) { notify("Not saved", answer?.reason || "It could not be written."); return; }
@@ -4160,19 +3826,14 @@ async function openKeysDialog() {
   closeOn(backdrop);
 }
 
-// Whether a VirusTotal key is held. Nothing in the panel offers a scan until one is set, and
-// the key itself is read by the server rather than carried here.
 function vtKey() {
   return keysHeld.virustotal ? "set" : "";
 }
 
-// Whether scanning is available at all. Every entry point checks this, so the feature is
-// invisible rather than present-and-broken for anyone who has not set a key up.
 function vtReady() {
   return vtKey().length > 0;
 }
 
-// Today's remaining allowance, or null where it could not be read.
 async function vtRemaining() {
   try {
     const s = await (await api.fetchApi(`${API}/scan/state`)).json();
@@ -4182,11 +3843,7 @@ async function vtRemaining() {
   }
 }
 
-// The configured GitHub token, empty when none is set. Sent with the calls that read the
-// API so they draw on the 5,000 an hour a token allows rather than the 60 it does not.
 
-
-// A panel setting, with a fallback for when the settings store is not reachable.
 function panelSetting(key, fallback) {
   try {
     const value = app.extensionManager.setting.get(key);
@@ -4196,9 +3853,6 @@ function panelSetting(key, fallback) {
   }
 }
 
-// Where one gallery entry's image lives. An absolute URL is used as the pack gave it; a
-// repository path goes through the backend, which reads it from the installed copy or from
-// GitHub and refuses anything whose bytes are not an image.
 function galleryUrl(entry, meta) {
   const lower = entry.toLowerCase();
   if (lower.startsWith("http://") || lower.startsWith("https://")) return entry;
@@ -4210,9 +3864,6 @@ function galleryUrl(entry, meta) {
   return `${API}/gallery-image?${query}`;
 }
 
-// The pack's gallery: a grid of thumbnails that open a full view. The thumbnail edge is a
-// setting and the grid fills to whatever width it is given, so the same markup suits a
-// narrow dialog and a wide one.
 function buildGallery(meta, entries) {
   const thumb = Math.max(80, Math.min(320, Math.round(Number(panelSetting("openManager.galleryThumb", 120)) || 120)));
   const box = collapsible("Gallery", entries, (entry) => {
@@ -4221,7 +3872,6 @@ function buildGallery(meta, entries) {
     cell.title = entry;
     cell._url = galleryUrl(entry, meta);
     cell._label = entry.split("/").pop() || entry;
-    // A gallery entry may be a clip. Authors list them, and a still cannot show motion.
     const moving = isMovingMedia(entry);
     const img = moving ? el("video", "om-gal-img") : el("img", "om-gal-img");
     if (moving) {
@@ -4229,8 +3879,6 @@ function buildGallery(meta, entries) {
       img.loop = true;
       img.playsInline = true;
       img.preload = "metadata";
-      // Motion on hover only: a grid of autoplaying clips is noise, and a still frame is
-      // enough to pick one out.
       cell.onmouseenter = () => { img.play?.().catch(() => {}); };
       cell.onmouseleave = () => { try { img.pause(); img.currentTime = 0; } catch {} };
     } else {
@@ -4239,9 +3887,6 @@ function buildGallery(meta, entries) {
       img.alt = cell._label;
     }
     img.src = cell._url;
-    // A tile that cannot load is taken out rather than left broken, and the count follows
-    // it down so the heading never promises more than is on screen. The full view is built
-    // from what is left, so its paging never lands on a missing image.
     img.onerror = () => {
       cell.classList.add("om-gal-dead");
       const fold = cell.closest("details");
@@ -4262,10 +3907,6 @@ function buildGallery(meta, entries) {
   return box;
 }
 
-// The full view over a gallery: one image at a time, with the keyboard, the arrows, or the
-// backdrop to leave. It sits above the pack dialog and restores focus on the way out.
-//: Whether a gallery entry is a clip rather than a still. One test, used by the grid and by
-//: the full view, so the two cannot disagree about what they are showing.
 function isMovingMedia(url) {
   return /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(url || ""));
 }
@@ -4276,9 +3917,6 @@ function openLightbox(items, index) {
   const back = el("div", "om-lb");
   const figure = el("figure", "om-lb-fig");
   const caption = el("figcaption", "om-lb-cap");
-  // The grid already knows a gallery entry may be a clip and draws a <video> for one. The
-  // full view did not, so opening a clip put its URL into an <img> and showed nothing. The
-  // element is chosen per item rather than once, because a gallery mixes the two.
   let media = el("img", "om-lb-img");
   figure.appendChild(media);
   figure.appendChild(caption);
@@ -4290,8 +3928,6 @@ function openLightbox(items, index) {
     const moving = isMovingMedia(url);
     if (moving !== (media.tagName === "VIDEO")) {
       const next = moving ? el("video", "om-lb-img") : el("img", "om-lb-img");
-      // Paused and detached first: a <video> left playing after being replaced keeps its
-      // audio going with nothing on screen to stop it.
       if (media.tagName === "VIDEO") { try { media.pause(); } catch {} }
       media.replaceWith(next);
       media = next;
@@ -4323,7 +3959,6 @@ function openLightbox(items, index) {
     else if (event.key === "ArrowRight" && items.length > 1) show(at + 1);
     else if (event.key === "ArrowLeft" && items.length > 1) show(at - 1);
     else return;
-    // The pack dialog listens for these too, so the full view keeps them.
     event.preventDefault();
     event.stopPropagation();
   };
@@ -4343,18 +3978,12 @@ function openLightbox(items, index) {
   const closer = button("om-lb-close", "×", close);
   closer.title = "Close (Esc)";
 
-  // Only the backdrop closes, so a click on the image itself does not.
   back.onclick = (event) => { if (event.target === back || event.target === figure) close(); };
   document.body.appendChild(back);
   show(index);
   closer.focus();
 }
 
-// Downloads a theme a pack ships and merges it into the palette store, leaving every other
-// palette untouched. It appears in the theme picker after a reload.
-//: How a theme names an image the pack ships beside it. Rewritten once, when the theme is
-//: added, because the palette store is all the theme system sees afterwards and it has no way
-//: to know which pack a palette came from.
 const PACK_REF = /^pack:([A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+){0,5})$/;
 const PACK_REF_DEPTH = 6;
 
@@ -4379,7 +4008,6 @@ function resolvePackAssets(value, repository, depth = 0) {
   return value;
 }
 
-//: Most stored themes refreshed from installed packs in one pass.
 const THEME_REFRESH_CAP = 40;
 
 function themeIsNewer(candidate, current) {
@@ -4389,13 +4017,6 @@ function themeIsNewer(candidate, current) {
   return String(candidate ?? "") !== String(current ?? "");
 }
 
-// Brings stored copies of pack themes up to what the installed pack now ships.
-//
-// A theme added from a pack is copied into the palette store, and the store is all the theme
-// system reads afterwards. A pack shipping a newer theme therefore changed nothing until the
-// reader happened to press Add again, which is invisible unless you already know. Only themes
-// already in the store are touched, and only where the pack declares a higher version, so
-// this never adds a theme the reader did not choose.
 async function refreshPackThemes() {
   let data;
   try {
@@ -4429,7 +4050,7 @@ async function refreshPackThemes() {
     await setting.set("Comfy.CustomColorPalettes", next);
     const active = service?.getActiveColorPalette?.()?.id;
     if (active && next[active]) {
-      try { await service.loadColorPalette(active); } catch { /* redrawn on the next switch */ }
+      try { await service.loadColorPalette(active); } catch {}
     }
   } catch {
     return [];
@@ -4491,9 +4112,6 @@ async function addPackTheme(repository, branch, path, button) {
     await setting.set("Comfy.CustomColorPalettes", { ...store, [theme.id]: theme });
     button.classList.add("om-wf-added");
 
-    // Writing the store is not enough when this is the palette already in use: what is on the
-    // canvas was drawn from the old copy, so a pack shipping an updated theme would appear to
-    // install and change nothing. Loading it again re-reads the store and re-applies extras.
     const active = service?.getActiveColorPalette?.()?.id === theme.id;
     if (active) {
       try {
@@ -4511,8 +4129,6 @@ async function addPackTheme(repository, branch, path, button) {
   }
 }
 
-// Downloads a declared example workflow, and loads it into the graph once it is confirmed and
-// the server has verified it parses as a workflow.
 async function loadExampleWorkflow(repository, branch, path) {
   const name = path.split("/").pop();
   const progress = toast(`Fetching ${name}...`, { sticky: true });
@@ -4534,45 +4150,35 @@ async function loadExampleWorkflow(repository, branch, path) {
                           repository);
 }
 
-// Ask how a workflow should land, then land it that way. loadGraphData opens a new tab when
-// given no workflow to load into, and replaces that workflow's graph when given one, so
-// replacing is only offered where an active workflow can actually be reached.
 async function loadWorkflowGraph(workflow, label, origin, repository) {
-  // Loading a stranger's graph is the same question as installing their pack, so it is
-  // asked the same way and one answer in author mode covers both.
   const parts = repoOwnerName(repository || "");
   if (parts && !(await confirmAuthorTrust(parts.owner, repository, "load a workflow"))) return;
   const active = activeWorkflow();
   const choices = [{ key: "tab", label: "Open in new tab", primary: true }];
   if (active) choices.push({ key: "replace", label: "Replace current graph",
                              hint: "Discards unsaved changes to the open workflow" });
-  // Said plainly rather than alarmingly: drawing someone else's graph is safe, and it is
-  // running it that reaches the network and the disk. A reader deciding whether to load it
-  // is better served by which of those is which.
   const where = origin ? `From ${origin}. ` : "";
   const how = await chooseAction(
     "Load workflow",
-    `${where}Opening only draws the graph; running it can download models and write files.
+    `${where}Running this workflow can download models and write files.
 
 `
     + (active
       ? `"${label}" can open alongside your work or take the place of the graph you have open.`
-      : `"${label}" opens in a new tab, leaving the graph you have open untouched.`),
+      : `"${label}" opens in a new tab.`),
     choices);
   if (!how) return;
   const name = String(label).split("/").pop();
   try {
     if (how === "replace") await app.loadGraphData(workflow, true, true, active);
     else await app.loadGraphData(workflow);
-    toast(how === "replace" ? `Loaded ${name} into the open workflow.` : `Opened ${name} in a new tab.`,
+    toast(how === "replace" ? `Loaded ${name}.` : `Opened ${name}.`,
           { kind: "ok" });
   } catch (error) {
     notify("Could not load workflow", error.message);
   }
 }
 
-// The workflow the reader has open, or null where this build of ComfyUI does not say.
-// Probed rather than assumed: there is no documented accessor, and the shape has moved.
 function activeWorkflow() {
   const candidates = [
     () => app.workflowManager?.activeWorkflow,
@@ -4584,43 +4190,28 @@ function activeWorkflow() {
       const found = read();
       if (found && typeof found === "object") return found;
     } catch {
-      // Not this one; try the next.
     }
   }
   return null;
 }
 
-// GitHub's heading slug: lowercased, punctuation dropped, spaces hyphenated. Matched here
-// so a README's own "#section" links have something to point at, since the markdown
-// renderer emits headings without ids.
 function slugify(text) {
   return String(text || "").trim().toLowerCase()
     .replace(/[^\p{L}\p{N}\s-]/gu, "")
     .replace(/\s+/g, "-");
 }
 
-// Give every heading an id and point the README's own anchors at them. Without this a
-// "#section" link is rewritten to the repository and leaves the panel for GitHub.
 function linkHeadings(view) {
   const seen = new Map();
   for (const heading of view.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
     const base = slugify(heading.textContent);
     if (!base) continue;
-    // GitHub appends -1, -2 to repeated headings; the same rule keeps links unambiguous.
     const count = seen.get(base) || 0;
     seen.set(base, count + 1);
     heading.id = count ? `${base}-${count}` : base;
   }
 }
 
-// Turn a bare media link into the thing it points at. GitHub embeds its own attachment
-// URLs and the markdown renderer here does not, so the README shows a link where GitHub
-// shows a player. Runs after the scheme scrub, so only http(s) links reach it.
-//
-// An attachment URL carries no extension and may be either a video or an image, so the
-// element is chosen by trying: video first, an image if the video will not decode, and the
-// original link back if neither works. Guessing wrong and leaving a dead player would be
-// worse than the link it replaced.
 const ATTACHMENT_ID = /\/user-attachments\/assets\/([0-9a-f-]{36})/i;
 
 async function attachmentMedia(view, repository) {
@@ -4643,8 +4234,6 @@ function embedMediaLinks(view, media = {}) {
   const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|bmp|svg)(\?|#|$)/i;
 
   for (const anchor of [...view.querySelectorAll("a[href]")]) {
-    // The scrub in absolutiseLinks has already removed any other scheme, so this is belt
-    // and braces: an extension says nothing about what a URL will do.
     const href = safeUrl(anchor.getAttribute("href") || "");
     if (!href) continue;
     const bare = ATTACHMENT.test(href);
@@ -4652,14 +4241,9 @@ function embedMediaLinks(view, media = {}) {
     const assetId = (ATTACHMENT_ID.exec(href) || [])[1];
     const signed = assetId ? media[assetId.toLowerCase()] : "";
     const source = signed || href;
-    // A link with its own words reads as a link, not an embed.
     const text = (anchor.textContent || "").trim();
     if (text && text !== href) continue;
 
-    // Neither a video nor an image. An attachment that decodes as neither is usually one
-    // GitHub no longer has -- they expire, and the URL then answers a nine-byte "Not Found"
-    // -- so the link comes back with a word about why, rather than as a bare URL sitting
-    // where a video should be, which reads as this failing to render something that is there.
     const asDeadLink = () => {
       const holder = el("div", "om-readme-gone");
       holder.appendChild(anchor.cloneNode(true));
@@ -4670,8 +4254,6 @@ function embedMediaLinks(view, media = {}) {
     const asImage = () => {
       const image = el("img", "om-readme-media");
       image.src = source;
-      // Not lazy: a deleted attachment must fail now so the link can come back. Deferred,
-      // an offscreen one never errors and leaves an empty box where a link used to be.
       image.alt = "";
       image.onerror = () => image.replaceWith(asDeadLink());
       return image;
@@ -4683,22 +4265,17 @@ function embedMediaLinks(view, media = {}) {
     video.controls = true;
     video.preload = "metadata";
     video.playsInline = true;
-    // An attachment that will not decode as video is almost always an image.
     if (bare) video.onerror = () => video.replaceWith(asImage());
     else video.onerror = () => video.replaceWith(asDeadLink());
     anchor.replaceWith(video);
   }
 }
 
-// A README often points at another pack's repository. Where the registry carries that
-// repository, the link opens the pack here instead of sending the reader to GitHub. The
-// lookup happens on the click, not on render: a page can hold a hundred links.
 function offerPackLink(anchor, href) {
   const match = /^https?:\/\/(?:www\.)?github\.com\/([^/#?]+)\/([^/#?]+)\/?$/i.exec(href || "");
   if (!match) return;
   anchor.onclick = async (event) => {
     if (panelSetting("openManager.packLinks", true) !== true) return;
-    // A modifier or the middle button means the reader asked for a tab; leave them to it.
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
     let found = null;
@@ -4706,22 +4283,14 @@ function offerPackLink(anchor, href) {
       const answer = await api.fetchApi(`${API}/pack-for-repo?repo=${encodeURIComponent(href)}`);
       found = (await answer.json()).id || null;
     } catch {
-      // Fall through to the repository itself.
     }
     if (found) await openPack(found);
     else openUrl(href);
   };
 }
 
-//: Most a compressed text chunk may expand to. Comfortably above a real workflow -- the
-//: largest seen in the wild is about 110 KB -- and far below what a deflate bomb wants.
 const TEXT_CHUNK_CAP = 8 * 1024 * 1024;
 
-// A PNG's text chunks, which is where ComfyUI leaves the workflow that produced an image.
-// Read from the bytes rather than the decoded image: the chunks sit before the pixel data,
-// so this stops as soon as it reaches it.
-//
-// Returns the named chunk's text, or an empty string.
 async function pngText(bytes, wanted) {
   if (bytes.length < 8 || bytes[0] !== 0x89 || bytes[1] !== 0x50) return "";
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -4730,8 +4299,6 @@ async function pngText(bytes, wanted) {
   while (at + 12 <= bytes.length) {
     const length = view.getUint32(at);
     const type = String.fromCharCode(bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]);
-    // Only IEND ends the file. A tEXt chunk after IDAT is legal and some writers emit one,
-    // so stopping at the image data was reporting "no workflow" for images that have one.
     if (type === "IEND") break;
     if (type === "tEXt" || type === "iTXt") {
       const body = bytes.subarray(at + 8, at + 8 + length);
@@ -4739,7 +4306,6 @@ async function pngText(bytes, wanted) {
       while (split < body.length && body[split] !== 0) split += 1;
       if (decoder.decode(body.subarray(0, split)) === wanted) {
         if (type === "tEXt") return decoder.decode(body.subarray(split + 1));
-        // iTXt: a compression flag and method, then two more terminated fields.
         const compressed = body[split + 1] === 1;
         let cursor = split + 3;
         for (let field = 0; field < 2; field += 1) {
@@ -4749,8 +4315,6 @@ async function pngText(bytes, wanted) {
         const payload = body.subarray(cursor);
         if (!compressed) return decoder.decode(payload);
         try {
-          // Read the stream rather than buffering it whole: a small deflate chunk can
-          // expand without limit, and this runs on a file from a page being browsed.
           const reader = new Blob([payload]).stream()
             .pipeThrough(new DecompressionStream("deflate")).getReader();
           const parts = [];
@@ -4776,9 +4340,6 @@ async function pngText(bytes, wanted) {
   return "";
 }
 
-// The workflow an image was produced by, where it carries one. Only the head of the file is
-// asked for, because the chunks precede the pixels and these images run to megabytes; a
-// server that will not serve a range is read in full instead.
 async function workflowInImage(url) {
   const read = async (headers) => {
     const answer = await fetch(url, headers ? { headers } : undefined);
@@ -4791,25 +4352,17 @@ async function workflowInImage(url) {
       if (!text) continue;
       try {
         const parsed = JSON.parse(text);
-        // A prompt is the executed form and carries no nodes to lay out; only a workflow does.
         if (key === "workflow" || parsed.nodes) return parsed;
       } catch {
-        // Truncated by the range, or not JSON. Fall through.
       }
     }
     return null;
   };
 
-  // The first quarter of a megabyte covers the common case without pulling a 40MB screenshot
-  // across the wire. It is a guess about where the metadata sits, though, and a guess that
-  // misses must not be reported as an answer: an image whose workflow sits past the range, or
-  // whose workflow is larger than it, would be called empty. So a miss is retried in full
-  // before anything is said.
   let partial = null;
   let ranged = false;
   try {
     partial = await read({ Range: "bytes=0-262143" });
-    // A server ignoring the range hands back everything, which is equally fine.
     ranged = partial.length >= 262144;
   } catch {
     partial = null;
@@ -4822,17 +4375,9 @@ async function workflowInImage(url) {
   return scan(await read(null));
 }
 
-// Right-click a README image to load the workflow it was made with. Authors publish these
-// as "workflow included" screenshots, and ComfyUI writes the graph into the file.
-// Nothing is fetched until asked: the images on a page run to tens of megabytes.
 function offerImageWorkflows(view) {
-  //: Whether a read is already running. Pulling a workflow out of an image means fetching the
-  //: whole file and scanning its metadata, which for a large screenshot takes long enough to
-  //: right-click again -- and each of those started another read and stacked another dialog.
   let reading = false;
   view.addEventListener("contextmenu", async (event) => {
-    // Off leaves the browser's own menu alone, which is what someone who wants to copy or
-    // save the image is reaching for.
     if (panelSetting("openManager.imageWorkflows", true) !== true) return;
     const image = event.target instanceof HTMLImageElement ? event.target : null;
     if (!image || !safeUrl(image.src)) return;
@@ -4843,8 +4388,6 @@ function offerImageWorkflows(view) {
     }
     reading = true;
     const progress = toast("Reading the image...", { sticky: true });
-    // `finally` rather than a clear on each path out: there are four ways out of this and one
-    // of them forgetting would leave the feature switched off until the page is rebuilt.
     try {
       let workflow = null;
       try {
@@ -4867,7 +4410,6 @@ function offerImageWorkflows(view) {
   });
 }
 
-// Rewrites a README's relative paths to absolute URLs on the repository.
 function absolutiseLinks(view, repository, branch, doc) {
   const match = /github\.com[:/]+([^/]+)\/([^/#?]+)/i.exec(repository || "");
   if (!match) return;
@@ -4882,8 +4424,6 @@ function absolutiseLinks(view, repository, branch, doc) {
     if (!src || absolute(src) || src.startsWith("#")) continue;
     img.src = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${relative(src)}`;
   }
-  // Whether a link points back at this repository, and at which heading. Parsed rather
-  // than matched: a repository name can carry dots, and URLs vary in trailing slashes.
   const selfHash = (url) => {
     try {
       const parsed = new URL(url);
@@ -4902,8 +4442,6 @@ function absolutiseLinks(view, repository, branch, doc) {
     anchor.target = "_blank";
     anchor.rel = "noopener noreferrer";
     if (absolute(href || "")) {
-      // A link back to this repository's own heading means "further down this page", even
-      // written the long way, so it is answered here rather than sent to GitHub.
       const hash = selfHash(href || "");
       if (hash) {
         anchor.removeAttribute("target");
@@ -4920,7 +4458,6 @@ function absolutiseLinks(view, repository, branch, doc) {
     }
     if (!href) continue;
     if (href.startsWith("#")) {
-      // The reader means "further down this page", so it is answered here.
       anchor.removeAttribute("target");
       anchor.onclick = (event) => {
         const target = view.querySelector(`[id="${CSS.escape(href.slice(1))}"]`);
@@ -4931,9 +4468,6 @@ function absolutiseLinks(view, repository, branch, doc) {
     } else {
       const path = doc ? docResolve(doc.base, relative(href)) : relative(href);
       anchor.href = `https://github.com/${owner}/${repo}/blob/${ref}/${path}`;
-      // A link to the pack's own markdown is a page of this documentation, not a trip to
-      // GitHub. The href stays, so a middle click still opens it there and a failure here
-      // has somewhere to fall back to.
       if (doc && /\.(md|markdown)(\?|#|$)/i.test(path)) {
         anchor.removeAttribute("target");
         anchor.classList.add("om-doc-link");
@@ -4946,8 +4480,6 @@ function absolutiseLinks(view, repository, branch, doc) {
     }
   }
 
-  // ComfyUI's markdown sanitiser handles this, but its version is not pinned here, so any
-  // unexpected scheme left on a link is stripped as well.
   for (const img of view.querySelectorAll("img[src]")) {
     const src = img.getAttribute("src") || "";
     if (!/^https?:\/\//i.test(src) && !/^data:image\//i.test(src)) img.removeAttribute("src");
@@ -4960,8 +4492,6 @@ function absolutiseLinks(view, repository, branch, doc) {
   }
 }
 
-// Resolves a pack's newest version, then routes it through the same confirm and queue as
-// the version list. Drives the row's control while it resolves.
 async function quickInstall(packId, control) {
   control.setInstalling();
   rememberInstall(packId, "installing");
@@ -4989,23 +4519,13 @@ async function quickInstall(packId, control) {
   await install({ packId, entry: { ...entry, name: data.pack.name || packId }, control, rowsRoot: null });
 }
 
-// Licence resolution for rows the registry left unnamed. A row's repository is read for its
-// licence file, batched across a render and cached on the server.
 const licJobs = new Map();
 
-// Set by the registry list while it is on screen, so a licence resolved after the list was
-// filtered can put the list right. Null when no list is listening.
 let onLicencesResolved = null;
 let licTimer = 0;
 
-// Repositories one licence request may ask about. This mirrors LICENSE_BATCH on the server,
-// which trims anything longer: sending more would drop the overflow silently, and those rows
-// would be marked resolved without ever having been looked at.
 const LICENSE_BATCH = 200;
 
-// What each tier means for the reader's own project. The colour grades how freely a pack
-// can be used, so it is worth saying what the grade is about: these are obligations, not a
-// judgement about the pack.
 const LICENCE_MEANING = {
   "permissive": "Use, modify and ship closed-source, with attribution.",
   "weak-copyleft": "Changes to the pack's own files must stay open; your code need not.",
@@ -5022,7 +4542,6 @@ function paintLicense(pill, entry) {
   pill.style.borderColor = entry.license_color || "var(--om-muted)";
   const tier = entry.license_tier || "unknown";
   const meaning = LICENCE_MEANING[tier];
-  // Without a name the meaning stands alone, rather than repeating "no licence stated".
   if (!meaning) pill.title = `licence: ${tier}`;
   else pill.title = entry.license ? `${entry.license}: ${meaning}` : meaning;
 }
@@ -5045,7 +4564,6 @@ async function flushLicenses() {
   }
 }
 
-// One request's worth. A batch that fails is left unresolved so it can be asked again.
 async function resolveLicenceBatch(jobs) {
   if (!jobs.length) return;
   let res;
@@ -5058,7 +4576,6 @@ async function resolveLicenceBatch(jobs) {
         ...licenseOptions(),
       }),
     });
-    // An error response leaves the rows unresolved.
     if (!answer.ok) return;
     res = (await answer.json()).licenses || {};
   } catch {
@@ -5079,7 +4596,6 @@ async function resolveLicenceBatch(jobs) {
   if (changed && onLicencesResolved) onLicencesResolved();
 }
 
-// A list row's artwork, falling back to a tile carrying the pack's initial.
 function packIcon(url, name, extra) {
   const initial = (String(name || "?").replace(/^[^a-z0-9]+/i, "") || "?")[0].toUpperCase();
   const letter = el("div", "om-side-icon om-side-initial", initial);
@@ -5088,14 +4604,10 @@ function packIcon(url, name, extra) {
   const icon = el("img", "om-side-icon");
   if (extra) icon.classList.add(extra);
   icon.src = url;
-  // The fallback keeps the caller's extra class, so a broken image still sizes correctly.
   icon.onerror = () => icon.replaceWith(letter);
   return icon;
 }
 
-// Large counts read better abbreviated; smaller ones are left exact. The unit is chosen
-// from the value after rounding, so 999,999 reads "1.0M" rather than "1000k", and the
-// decimal is dropped past 100 of a unit to keep the text about four characters wide.
 function countText(value) {
   const n = Number(value) || 0;
   if (n < 1e4) return n.toLocaleString();
@@ -5106,18 +4618,8 @@ function countText(value) {
   return n >= 999500 ? scale(1e6, "M") : scale(1e3, "k");
 }
 
-// A link to the pack's repository, as an anchor rather than a click handler: readers open
-// many at once with the middle button or a modifier, which a handler cannot offer.
-// Null where the registry names no usable repository.
-//: GitHub's own mark, taken from Octicons (`mark-github-16`), which GitHub publishes under
-//: the MIT licence: Copyright (c) GitHub Inc. Kept as path data rather than a file so it
-//: inherits the colour of whatever it sits in and costs no extra request.
-//:
-//: Used only for links that really do go to github.com. It is a trademark, and putting it on
-//: a GitLab or Codeberg link would be saying something untrue about where the link goes.
 const GITHUB_MARK = "M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656";
 
-//: Whether a URL is a GitHub one, and so may carry the mark.
 function isGithubUrl(url) {
   try {
     return new URL(url, window.location.href).hostname.toLowerCase()
@@ -5127,13 +4629,6 @@ function isGithubUrl(url) {
   }
 }
 
-// The mark as an inline SVG.
-//
-// Args:
-//   size: Edge length in pixels.
-// Returns:
-//   An `<svg>`, hidden from assistive technology: every caller gives the control itself a
-//   name, and a second reading of "github" after "Open the repository" is noise.
 function githubMark(size = 15) {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
@@ -5150,20 +4645,29 @@ function githubMark(size = 15) {
   return svg;
 }
 
-// A button that opens a repository, wearing the mark when the repository is on GitHub.
-//
-// Args:
-//   url: The repository URL.
-//   label: What the control is called, for the tooltip and for screen readers.
-// Returns:
-//   A button, or null where the URL is not one worth offering.
+function plusMark(size = 14) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.classList.add("om-plus-mark");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M8 3.25v9.5M3.25 8h9.5");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.9");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("fill", "none");
+  svg.appendChild(path);
+  return svg;
+}
+
 function repoButton(url, label) {
   const safe = safeUrl(url);
   if (!safe) return null;
   const github = isGithubUrl(safe);
-  // An anchor rather than a button: middle-click, ctrl-click and the browser's own "open in
-  // new tab" all work on a link and none of them work on a button. Someone researching packs
-  // opens a dozen in tabs, and a button makes them click through one at a time.
   const button = el("a", `om-btn om-icon-btn${github ? " om-gh-btn" : ""}`);
   if (github) {
     button.appendChild(githubMark(16));
@@ -5178,27 +4682,12 @@ function repoButton(url, label) {
   return button;
 }
 
-//: Comfy's logomark, shipped beside this file. Kept as a file rather than inlined like the
-//: GitHub one because it is a fixed brand colour: it should look the same on every theme,
-//: which is exactly what inheriting the text colour would stop it doing.
 const COMFY_MARK = "comfy-logomark-yellow.svg";
 
-//: A pack's page on the Comfy Registry.
 function registryUrl(packId) {
   return `https://registry.comfy.org/nodes/${encodeURIComponent(packId)}`;
 }
 
-// A link to a pack's registry page, wearing Comfy's mark.
-//
-// Only for packs the registry actually lists. Open Manager also finds packs by matching a
-// GitHub repository, and for those there is no registry page to open: a link to one would be
-// a guess, and the guess would be wrong often enough to matter.
-//
-// Args:
-//   entry: The catalogue entry, or anything carrying the registry `id`.
-//   extra: An extra class for the view it sits in.
-// Returns:
-//   An anchor, or null where the pack is not a registry one.
 function registryLink(entry, extra) {
   const packId = entry?.registry_id || entry?.id || "";
   if (!packId || entry?.borrowed) return null;
@@ -5213,15 +4702,12 @@ function registryLink(entry, extra) {
   link.rel = "noopener noreferrer";
   link.title = `Open ${packId} on the Comfy Registry`;
   link.setAttribute("aria-label", link.title);
-  // The row opens the pack page; this opens the registry and nothing else.
   link.onclick = (event) => event.stopPropagation();
   return link;
 }
 
-// A button opening a pack's registry page, for the pack page's header.
 function registryButton(packId) {
   if (!packId) return null;
-  // An anchor, for the same reason the repository control is one.
   const button = el("a", "om-btn om-icon-btn om-registry-btn");
   const mark = el("img", "om-comfy-mark");
   mark.src = new URL(COMFY_MARK, import.meta.url).href;
@@ -5246,13 +4732,10 @@ function repoLink(entry, extra) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   link.title = `Open ${entry.repository} in a new tab`;
-  // The row opens the pack page; this opens the repository and nothing else.
   link.onclick = (event) => event.stopPropagation();
   return link;
 }
 
-// A pack's GitHub stars. Null where the registry records none, so callers can leave the
-// metadata line uncluttered rather than printing a zero.
 function starCount(stars) {
   const n = Number(stars) || 0;
   if (!n) return null;
@@ -5267,16 +4750,12 @@ function buildResultRow(entry) {
   const text = el("div", "om-side-text");
   text.appendChild(packName(entry.name || entry.id, "om-side-name"));
   const meta = el("div", "om-side-meta");
-  // In its own element so it is the part that gives way when the panel is narrow: the
-  // version and count truncate, and the star and licence badges beside them do not.
   meta.appendChild(el("span", "om-meta-text",
     `${entry.advertised || "no version"} · ${countText(entry.downloads)} ↓`));
   const stars = starCount(entry.stars);
   if (stars) meta.appendChild(stars);
   const lic = el("span", "om-lic");
   paintLicense(lic, entry);
-  // The row is queued for a licence lookup by the list once scrolling settles, rather than
-  // the moment it is built: a fast scroll builds thousands of rows the reader never saw.
   row._entry = entry;
   row._licPill = lic;
   meta.appendChild(lic);
@@ -5294,14 +4773,11 @@ function buildResultRow(entry) {
   return row;
 }
 
-// The day part of the registry's ISO timestamp.
 function dayText(stamp) {
   const day = String(stamp || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "-";
 }
 
-// The catalogue entry as a table row. Cells never wrap, for the reason rows and cards do
-// not. The registry has no per-pack node count, so downloads takes that column.
 function buildResultTableRow(entry, index) {
   const row = el("div", "om-table-row");
 
@@ -5352,17 +4828,12 @@ function buildResultTableRow(entry, index) {
   return row;
 }
 
-// The same catalogue entry drawn as a card: a larger icon, the publisher, and the
-// description, for the grid view. The metadata line carries whatever fits on one row.
 function buildResultCard(entry) {
   const card = el("div", "om-card");
   const head = el("div", "om-card-head");
   head.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-card-icon"));
   const title = el("div", "om-card-title");
   title.appendChild(packName(entry.name || entry.id, "om-side-name"));
-  // Always present, empty or not: the windowed grid scrolls on one row pitch, so a card
-  // that dropped a line would be shorter than its neighbours and put the scrollbar out of
-  // step with the cards it scrolls.
   title.appendChild(el("div", "om-card-pub", entry.publisher || ""));
   head.appendChild(title);
   head.onclick = () => openPack(entry.id);
@@ -5395,18 +4866,14 @@ function buildResultCard(entry) {
   return card;
 }
 
-// The node types in the open graph that ComfyUI has no registered class for. ComfyUI reports
-// these to afterConfigureGraph on load; that list is preferred, with a live scan as fallback.
 let lastMissingTypes = null;
 
 function collectMissingNodeTypes() {
   const registered = window.LiteGraph?.registered_node_types || {};
   const types = new Set();
-  // What ComfyUI reported unregistered at the last load, still unregistered now.
   for (const type of lastMissingTypes || []) {
     if (type && !registered[type]) types.add(type);
   }
-  // Plus anything in the current graph without a registered class (catches later edits).
   for (const node of app.graph?._nodes || []) {
     const type = node.type;
     if (type && !registered[type]) types.add(type);
@@ -5414,8 +4881,6 @@ function collectMissingNodeTypes() {
   return [...types];
 }
 
-// A view render is async and the tab can change while one is in flight. Each render
-// captures the generation it began in and stops where the panel has moved on.
 let viewGeneration = 0;
 
 function beginView() {
@@ -5426,29 +4891,24 @@ function viewIsCurrent(generation) {
   return generation === viewGeneration;
 }
 
-// Re-render the Installed view where it is the one being looked at.
 function refreshInstalledIfActive() {
   const active = document.querySelector(".om-nav-btn.active");
   const content = document.querySelector(".om-content");
   if (active && content && active.textContent === "Installed") renderInstalled(content);
 }
 
-// Re-render the Missing view if it is the active tab. Called when a workflow loads.
 function refreshMissingIfActive() {
   const active = document.querySelector(".om-nav-btn.active");
   const content = document.querySelector(".om-content");
   if (active && content && active.textContent === "Missing") renderMissing(content);
 }
 
-// The same panel as the sidebar tab, as a window. The legacy menu has no sidebar to put a
-// tab in, so this is how it is reached there.
 function openPanelWindow(view) {
-  // The manager is a page like any other, so it follows the same setting. Its own window is
-  // keyed once rather than per view: the four tabs are one browser, not four windows.
   if (asWindow("manager")) {
     const panel = createFloatingPanel({
-      key: "manager", title: "Open Manager", ...windowSize("manager"), centred: true,
+      key: "manager", title: "Node Discovery", ...windowSize("manager"), centred: true,
     });
+    panel.setMaskIcon(ICON_TAB);
     const host = panel.body.querySelector(".om-side")
       || panel.body.appendChild(el("div"));
     renderSidebar(host, view);
@@ -5464,7 +4924,6 @@ function openPanelWindow(view) {
   close.title = "Close";
   close.onclick = () => backdrop.remove();
   dialog.appendChild(close);
-  // renderSidebar names the element it is given, so it gets its own host inside the dialog.
   const host = el("div");
   dialog.appendChild(host);
   backdrop.appendChild(dialog);
@@ -5474,9 +4933,10 @@ function openPanelWindow(view) {
   return dialog;
 }
 
-// Toggles, because the commands the interface dispatches are named ToggleVisibility.
 function togglePanelWindow(view) {
-  if (floatingPanel("manager")) { closeFloatingPanel("manager"); return null; }
+  const shown = floatingPanel("manager");
+  if (shown?.isMinimised?.()) { shown.present(); return shown.el; }
+  if (shown) { closeFloatingPanel("manager"); return null; }
   const existing = document.querySelector(".om-backdrop .om-panel-window");
   if (existing) {
     existing.closest(".om-backdrop").remove();
@@ -5485,8 +4945,6 @@ function togglePanelWindow(view) {
   return openPanelWindow(view);
 }
 
-// The hub the Extensions button opens: a menu of destinations, in the shape the manager
-// this replaces used.
 function openManagerMenu() {
   const existing = document.querySelector(".om-backdrop .om-hub");
   if (existing) { existing.closest(".om-backdrop").remove(); return null; }
@@ -5499,9 +4957,6 @@ function openManagerMenu() {
   const status = el("div", "om-hub-status", "Reading the registry cache...");
   body.appendChild(status);
 
-  // Every destination, from the same table the tab strip reads. The classic interface has no
-  // tab strip and no sidebar, so this menu is the only way in: anything reachable at all has
-  // to be reachable here.
   const grid = el("div", "om-hub-grid");
   for (const one of managerDestinations()) {
     const button = el("button", "om-hub-btn", one.label);
@@ -5537,8 +4992,6 @@ function openManagerMenu() {
   return dialog;
 }
 
-// A way in for the legacy menu, which has no sidebar to put a tab in. Absent on the new
-// interface, where the tab already exists.
 function addLegacyMenuButton() {
   try {
     const menu = app.ui?.menuContainer;
@@ -5553,22 +5006,11 @@ function addLegacyMenuButton() {
   }
 }
 
-//: Share of the window the drawer opens at, where the reader has not chosen a width. A
-//: registry row carries a name, a version, counts and two badges; ComfyUI's own default of
-//: about 18% crams them on a normal screen.
 const DRAWER_SHARE = 23;
 
-//: Where the reader's own drawer width is kept. ComfyUI's splitter stores one width for
-//: every sidebar tab under "unified-sidebar"; this is Open Manager's alone, so widening
-//: here does not resize the other tabs or overwrite what the reader set on them.
 const DRAWER_KEY = "om-drawer-share";
 
-// Open the drawer at the reader's width, or wider than ComfyUI's default if they have not
-// set one. No minimum is imposed: the splitter stays draggable in both directions, and
-// whatever it lands on becomes the remembered width.
 async function sizeDrawer(root) {
-  // ComfyUI renders the tab before putting it in the document, so the splitter is not
-  // reachable yet on the first frame. Wait for it rather than bailing silently.
   let panel = null;
   let splitter = null;
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -5585,12 +5027,8 @@ async function sizeDrawer(root) {
   const share = Number.isFinite(saved) && saved > 0
     ? Math.min(90, Math.max(5, saved))
     : DRAWER_SHARE;
-  // The same shape the splitter writes, so it reads back as its own.
   panel.style.flexBasis = `calc(${share}% - 4px)`;
 
-  // A drag rewrites the basis, so the basis is what gets kept -- not the rendered width.
-  // Flex shrink and grow mean the two differ, and feeding a measured width back in as a
-  // basis would move the drawer a little on every open.
   let timer = null;
   const remember = () => {
     clearTimeout(timer);
@@ -5602,7 +5040,6 @@ async function sizeDrawer(root) {
     }, 300);
   };
   const watch = new MutationObserver(() => {
-    // Let go once the tab has been replaced, rather than watching a detached panel.
     if (!root.isConnected) { watch.disconnect(); return; }
     remember();
   });
@@ -5617,7 +5054,6 @@ function renderSidebar(root, initial) {
   const content = el("div", "om-content");
   root.appendChild(nav);
   root.appendChild(content);
-  // Only the sidebar tab sits in a splitter; the panel window sizes itself.
   sizeDrawer(root);
 
   const views = {
@@ -5639,20 +5075,13 @@ function renderSidebar(root, initial) {
     nav.appendChild(button);
   }
 
-  // Access keys and About are dialogs, not views, so they have no tab. Without this they are
-  // reachable only from the classic menu, which the panel is the alternative to: the setting
-  // tooltips that say "under Open Manager" would be pointing at nothing.
   const more = el("button", "om-nav-btn om-nav-more", "\u22ef");
-  more.title = "Access keys, and what updating Open Manager takes";
+  more.title = "Open Manager Menu";
   more.onclick = () => openManagerMenu();
   nav.appendChild(more);
-  // Own keys only: "constructor" and friends are truthy on any object literal.
   select(Object.hasOwn(views, initial ?? "") ? initial : "registry");
 }
 
-// Repositories the user added by hand, held in ComfyUI's user directory. Each row installs,
-// manages and opens like a registry pack. Uninstalling leaves the row; Remove takes it off
-// the list and uninstalls in one step.
 async function renderGithub(container) {
   const generation = viewGeneration;
   container.replaceChildren();
@@ -5682,15 +5111,13 @@ async function renderGithub(container) {
 
   const repos = data.repos || [];
   if (!repos.length) {
-    status.textContent = "No repositories yet. Add one to install it from GitHub.";
+    status.textContent = "No repositories yet.";
     return;
   }
   status.textContent = `${repos.length} repositor${repos.length === 1 ? "y" : "ies"}`;
   for (const repo of repos) list.appendChild(buildGithubRow(repo, container));
 }
 
-// One added-repository row: owner, installed version, and a control whose menu carries
-// Remove alongside the usual reinstall and uninstall.
 function buildGithubRow(repo, container) {
   const row = el("div", "om-side-row");
   row.appendChild(packIcon("", repo.name));
@@ -5740,7 +5167,6 @@ function buildGithubRow(repo, container) {
   return row;
 }
 
-// Asks for a repository URL and puts it on the list.
 async function addGithubSource(container) {
   const url = await askText("Add a GitHub repository", "", "Add");
   if (!url) return;
@@ -5760,14 +5186,13 @@ async function addGithubSource(container) {
   renderGithub(container);
 }
 
-// Takes a repository off the list and uninstalls it in the same step.
 async function removeGithubSource(repo, container) {
   const installed = !!repo.installed_version;
   const ok = await confirmAction(
     `Remove ${repo.name}`,
     installed
       ? `This takes ${repo.owner}/${repo.name} off your list and uninstalls it from custom_nodes.`
-      : `This takes ${repo.owner}/${repo.name} off your list. Nothing is installed to remove.`,
+      : `This takes ${repo.owner}/${repo.name} off your list.`,
     "Remove", true);
   if (!ok) return;
   const progress = toast(`Removing ${repo.name}...`, { sticky: true });
@@ -5790,13 +5215,10 @@ async function removeGithubSource(repo, container) {
   renderGithub(container);
 }
 
-// Whether a version string is an orderable release rather than "present" or a git ref.
 function isRelease(v) {
   return /^\d+(\.\d+)*$/.test((v || "").trim());
 }
 
-// Installs a pack's newest published version over the installed one, through the confirm and
-// queue the version list uses.
 function updateInstalled(pack, row, control) {
   install({
     packId: pack.registry_id,
@@ -5807,12 +5229,9 @@ function updateInstalled(pack, row, control) {
   });
 }
 
-// Packs already in custom_nodes, each with a management control and an update flag where the
-// registry advertises a newer version. A row opens the pack page.
 async function renderInstalled(container) {
   const generation = viewGeneration;
   container.replaceChildren();
-  // Left empty and given the indicator; whatever sets a count later replaces it.
   const status = el("div", "om-side-status");
   status.appendChild(loadingBlock("Reading installed packs"));
   const list = el("div", "om-side-list");
@@ -5839,7 +5258,6 @@ async function renderInstalled(container) {
     line.textContent = (timings.stale ? "Last run: " : "")
       + `${timings.total.toFixed(1)}s importing ${timings.packs.length} packs`
       + (worst ? ` · slowest ${worst.name} at ${worst.seconds.toFixed(2)}s` : "");
-    // Presented as this run's figures only when they are this run's.
     line.classList.toggle("om-cost-stale", !!timings.stale);
     line.title = timings.stale
       ? timings.reason
@@ -5848,8 +5266,6 @@ async function renderInstalled(container) {
   }
 
   const controls = el("div", "om-side-controls");
-  // The same search the registry has. With dozens of packs installed, a list with no way to
-  // find one in it is a list you scroll.
   const search = el("input", "om-search");
   search.type = "search";
   search.placeholder = "Search installed packs";
@@ -5891,8 +5307,7 @@ async function renderInstalled(container) {
   if (updatableCount) {
     const all = el("button", "om-btn om-go om-side-updateall",
                    `Update all (${updatableCount})`);
-    all.title = "Updates every pack the registry advertises a newer version of, one after "
-      + "another. Packs you are holding are left alone.";
+    all.title = "Updates every pack with a newer registry version, except held packs.";
     all.onclick = () => updateEveryPack(packs.filter(isInstalledUpdatable));
     controls.appendChild(all);
   }
@@ -5922,8 +5337,6 @@ async function renderInstalled(container) {
       updatable: (a, b) => (isInstalledUpdatable(b) - isInstalledUpdatable(a)) || a.id.localeCompare(b.id),
       stars: (a, b) => (b.stars || 0) - (a.stars || 0) || a.id.localeCompare(b.id),
       slowest: (a, b) => cost(b) - cost(a) || a.id.localeCompare(b.id),
-      // A pack the server could date nothing for sorts last either way rather than claiming
-      // to be the oldest thing on disk, which is what a zero would do.
       newest: (a, b) => (age(b) || -Infinity) - (age(a) || -Infinity) || a.id.localeCompare(b.id),
       oldest: (a, b) => (age(a) || Infinity) - (age(b) || Infinity) || a.id.localeCompare(b.id),
       trusted: (a, b) => (byTrustedAuthor(b) - byTrustedAuthor(a)) || a.id.localeCompare(b.id),
@@ -5945,8 +5358,6 @@ async function renderInstalled(container) {
   search.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(apply, 150); });
   apply();
 
-  // A dismissible alert where an installed version is flagged or banned. Dismissal is
-  // remembered until the set of flagged or banned packs changes.
   const alerts = packs.filter((p) => !p.disabled && ["flagged", "banned"].includes((p.status || "").toLowerCase()));
   if (alerts.length) {
     const signature = alerts.map((p) => `${p.id}:${(p.status || "").toLowerCase()}`).sort().join("|");
@@ -5965,14 +5376,9 @@ async function renderInstalled(container) {
     ? `${packs.length} installed · ${updatableCount} update(s) available`
     : `${packs.length} installed`;
 
-  // Fetched rather than waited for: a collision is worth knowing but not worth holding the
-  // list for. It goes in above the list when the answer arrives, and only if this view is
-  // still the one on screen.
   renderCollisions(container, generation).catch(() => {});
 }
 
-//: Packs the reader has asked to leave alone, keyed by directory name. Filled when the
-//: installed view is drawn. A hold changes nothing on disk; it decides what is offered.
 const heldVersions = new Map();
 
 async function loadHolds() {
@@ -5983,14 +5389,9 @@ async function loadHolds() {
       heldVersions.set(foldId(name), held);
     }
   } catch {
-    // Nothing held is the safe reading: an update is offered that need not have been, which
-    // the reader can decline, rather than one being hidden without their knowing.
   }
 }
 
-// Switching a pack off renames its directory, so a hold keyed on the name as it stands
-// would stop applying the moment it was disabled and silently not come back. The name
-// without the suffix is the one that survives both states.
 function holdKey(pack) {
   return String(pack.dir || pack.id || "").replace(/\.disabled$/, "");
 }
@@ -5999,7 +5400,6 @@ function isHeld(pack) {
   return heldVersions.has(foldId(holdKey(pack))) || heldVersions.has(foldId(pack.id));
 }
 
-// Hold a pack where it is, or let it move again. Takes effect in the list at once.
 async function toggleHold(pack, refresh) {
   const off = isHeld(pack);
   const answer = await dlPost("/hold", {
@@ -6014,17 +5414,10 @@ async function toggleHold(pack, refresh) {
   refresh?.();
 }
 
-// Whether the registry advertises a newer version than the one installed. A pack being held
-// is not updatable in any sense the rest of the view cares about: it is left out of the
-// count, the filter, the sort and a batch update alike, which is the whole point of a hold.
 function isInstalledUpdatable(pack) {
   return !!pack.registry_id && !!updateTarget(pack, pack.latest);
 }
 
-// One installed-pack row: version, an update badge, a status-coloured management control, and
-// a menu of Update, Reinstall and Uninstall scoped to what the pack is.
-//: Directory name -> seconds it took to import, from ComfyUI's own log. Filled when the
-//: installed view is drawn and left empty where the setting is off or the log says nothing.
 const startupCost = new Map();
 let startupTotal = 0;
 
@@ -6043,7 +5436,6 @@ async function loadStartupTimes() {
   }
 }
 
-// Switch a pack off, or back on, by renaming its directory the way ComfyUI reads it.
 async function togglePack(pack, refresh) {
   const off = !pack.disabled;
   const shown = pack.dir.replace(/\.disabled$/, "");
@@ -6063,8 +5455,6 @@ async function togglePack(pack, refresh) {
   refresh?.();
 }
 
-// How long a pack has been here, in the coarsest unit that still says something. An exact
-// date is in the tooltip; the list is for spotting the one that has been sat there for years.
 function installedText(when) {
   const days = Math.floor((Date.now() - when.getTime()) / 86400000);
   if (!Number.isFinite(days) || days < 0) return "installed";
@@ -6073,6 +5463,15 @@ function installedText(when) {
   if (days < 365) return `installed ${Math.floor(days / 30)}mo ago`;
   const years = Math.floor(days / 365);
   return `installed ${years}y ago`;
+}
+
+function whenText(when) {
+  const days = Math.floor((Date.now() - when.getTime()) / 86400000);
+  if (!Number.isFinite(days) || days < 0) return "";
+  if (days < 1) return "today";
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
 }
 
 function buildInstalledRow(pack) {
@@ -6103,15 +5502,13 @@ function buildInstalledRow(pack) {
   if (pack.installed_at) {
     const when = new Date(pack.installed_at * 1000);
     const since = el("span", "om-side-when", installedText(when));
-    since.title = `Installed ${when.toLocaleString()}. Taken from this pack's install record `
-      + "where it has one, otherwise from the directory on disk.";
+    since.title = `Installed ${when.toLocaleString()}.`;
     meta.appendChild(since);
   }
   if (pack.disabled) meta.appendChild(el("span", "om-disabled", "disabled"));
   if (isHeld(pack)) {
     const badge = el("span", "om-held", `held at ${pack.version}`);
-    badge.title = "No update is offered for this pack until the hold is lifted. Nothing on "
-      + "disk has been changed.";
+    badge.title = "No update is offered for this pack until the hold is lifted.";
     meta.appendChild(badge);
   }
   const cost = pack.disabled ? null : startupCost.get(foldId(pack.dir));
@@ -6163,10 +5560,6 @@ function buildInstalledRow(pack) {
   return row;
 }
 
-// Update every pack that has one. The queue that already runs installs one after another
-// does the work, so a batch behaves exactly like a row asked twelve times: one progress
-// toast, one list of issues at the end, and each pack's own requirements installed as its
-// own step. What is confirmed here is the set, once, instead of a dialog per pack.
 async function updateEveryPack(packs) {
   if (!packs.length) return;
   const facts = packs.slice(0, 24).map((pack) => [pack.id, `${pack.version} -> ${pack.latest}`]);
@@ -6174,16 +5567,13 @@ async function updateEveryPack(packs) {
     facts.push(["And more", `${packs.length - facts.length} others`]);
   }
   facts.push(["One at a time", "Each finishes before the next starts."]);
-  facts.push(["Dependencies", "Each pack installs its own requirements, as it would on its "
-                              + "own. Anything that did not install cleanly is named at the end."]);
-  facts.push(["Held packs", "Left alone. Holding a pack is what keeps it out of this."]);
+  facts.push(["Dependencies", "Each pack installs its own requirements."]);
+  facts.push(["Held packs", "Left alone"]);
   facts.push(["Takes effect", "After ComfyUI restarts"]);
   const go = await chooseAction(`Update ${packs.length} pack${packs.length === 1 ? "" : "s"}?`,
     "", [{ key: "go", label: "Update them", primary: true }], { wide: true, facts });
   if (!go) return;
 
-  // The same setting the single-pack path reads. A batch does not get to skip the scan
-  // someone asked for, and it does not get to impose one either.
   const scanFirst = vtReady() && panelSetting("openManager.scanOnInstall", false) === true
                     && (await vtRemaining()) > 0;
   for (const pack of packs) {
@@ -6200,10 +5590,6 @@ async function updateEveryPack(packs) {
 const ALERTS_KEY = "openManager.installedAlertsDismissed";
 const COLLIDE_KEY = "openManager.collisionsDismissed";
 
-// Node names claimed by more than one installed pack. ComfyUI keeps one mapping for the whole
-// install, so the last pack to register a name takes it and nothing is said; a graph then
-// loads a node that is not the one it was saved with. Shown only when there is something to
-// report, and dismissed until that set changes.
 async function renderCollisions(container, generation) {
   let found;
   try {
@@ -6240,7 +5626,6 @@ async function renderCollisions(container, generation) {
   container.insertBefore(banner, container.firstChild);
 }
 
-// Each contested name, who claims it, and whose class is actually in use.
 function showCollisions(groups) {
   const facts = groups.slice(0, 40).map((one) => [
     one.node,
@@ -6251,15 +5636,10 @@ function showCollisions(groups) {
   if (groups.length > facts.length) {
     facts.push(["And more", `${groups.length - facts.length} others`]);
   }
-  facts.push(["Why it matters", "Only one class can hold a name. A graph saved against the "
-                                + "other one loads this one instead."]);
-  facts.push(["What to do", "Switch one of the packs off from its row here, or keep only the "
-                            + "one you use. Nothing is changed for you."]);
+  facts.push(["Effect", "A graph saved with another pack's node loads the one in use."]);
   chooseAction("Node names claimed twice", "", [], { wide: true, facts });
 }
 
-// A banner naming the installed packs whose version the registry flagged or banned, with a
-// dismiss control.
 function buildInstalledAlert(list, onDismiss) {
   const banned = list.filter((p) => (p.status || "").toLowerCase() === "banned").length;
   const flagged = list.length - banned;
@@ -6282,7 +5662,6 @@ function buildInstalledAlert(list, onDismiss) {
   return banner;
 }
 
-// Packs that provide the node types missing from the open graph, each installable in place.
 async function renderMissing(container) {
   container.replaceChildren();
   const status = el("div", "om-side-status");
@@ -6333,7 +5712,6 @@ async function renderMissing(container) {
       else control.setInstall();
       row.appendChild(control.el);
     } else if (pack.repo) {
-      // Not on the registry. Installable from GitHub after inspection and a clear warning.
       const control = makeInstallControl({
         packId: pack.repo,
         withMenu: false,
@@ -6351,7 +5729,6 @@ async function renderMissing(container) {
   }
 }
 
-// The registry browser: search, the published-only filter, and the windowed result list.
 function sinceText(ts) {
   if (!ts) return "never";
   const s = Date.now() / 1000 - ts;
@@ -6361,7 +5738,6 @@ function sinceText(ts) {
   return `${Math.round(s / 86400)} d ago`;
 }
 
-// A styled select whose choice is remembered under a storage key. Options are [value, label].
 function dropdown(storageKey, fallback, options) {
   const select = el("select", "om-side-select");
   for (const [value, label] of options) {
@@ -6375,19 +5751,10 @@ function dropdown(storageKey, fallback, options) {
   return select;
 }
 
-// How a licence lookup should run, from the panel's settings. Every speed-up is off by
-// default, so the behaviour only changes for someone who asks for it.
-// Whether the reader has taken the block off versions the registry banned.
-//
-// Off by default, and it lifts a block rather than silencing a warning: a banned version
-// still carries its critical finding and still has to be confirmed. The answer travels with
-// each request, so the server never holds a standing permission the reader cannot see.
 function allowBanned() {
   return panelSetting("openManager.allowBanned", false) === true;
 }
 
-// The query a pack page is fetched with: how far its licence lookup may go, and whether a
-// banned version should come back installable.
 function packQuery() {
   return new URLSearchParams({ ...licenseOptions(), allow_banned: allowBanned() });
 }
@@ -6400,13 +5767,10 @@ function licenseOptions() {
     concurrency: Number(get("openManager.licenseConcurrency", 8)) || 8,
     race: get("openManager.licenseRace", false) === true,
     use_api: get("openManager.licenseUseApi", false) === true,
-    // Reuses the token already configured for starring; it only raises the API's rate limit.
 
   };
 }
 
-// How a sync should read the catalogue, from the panel's settings. The backend clamps the
-// count, so a mistyped preference cannot turn the sync into a flood.
 function syncOptions() {
   const get = (key, fallback) => {
     try { return app.extensionManager.setting.get(key) ?? fallback; } catch { return fallback; }
@@ -6417,21 +5781,10 @@ function syncOptions() {
   };
 }
 
-// The registry browser over the cached catalogue: search, a chosen sort, and a licence
-// filter. Only a sync, an update or an install reaches the network.
-//: Topics already looked up, so retyping or reopening does not ask GitHub again. The server
-//: caches too; this saves the round trip.
 const topicPacks = new Map();
 
-//: What a search has to start with to be read as a topic rather than as words.
 const TOPIC_PREFIX = "topic:";
 
-// The pack ids carrying a GitHub topic, or null where it could not be answered.
-//
-// Args:
-//   topic: The topic, as GitHub spells it.
-// Returns:
-//   `{ids, found, partial}` with `ids` a Set, or `{error}` with a sentence to show.
 async function packsForTopic(topic) {
   if (topicPacks.has(topic)) return topicPacks.get(topic);
   let answer;
@@ -6448,20 +5801,13 @@ async function packsForTopic(topic) {
   return result;
 }
 
-//: The topic a search box is asking for, or empty where it is asking for words.
 function topicInQuery(value) {
   const text = String(value || "").trim().toLowerCase();
   return text.startsWith(TOPIC_PREFIX) ? text.slice(TOPIC_PREFIX.length).trim() : "";
 }
 
-// Open the pack manager and search it for a GitHub topic.
-//
-// Follows the same setting every other way in does, so a reader who has chosen modals gets a
-// modal. Nothing new is introduced: the search box ends up holding `topic:<name>`, which is a
-// query they could have typed, so what happened is visible and undoable.
 function browseTopic(topic) {
   const root = openPanelWindow("registry");
-  // The list is built asynchronously, so the search box is waited for rather than assumed.
   let tries = 0;
   const fill = () => {
     const box = (root?.querySelector?.(".om-search"))
@@ -6488,8 +5834,6 @@ function renderRegistry(container) {
     container.replaceChildren();
     const box = el("div", "om-empty");
     box.appendChild(el("div", "om-empty-title", "The registry is not synced"));
-    box.appendChild(el("div", "om-side-status",
-      "Sync once to browse offline. Only a sync, an update or an install uses the network."));
     const go = el("button", "om-btn om-go", "Sync registry");
     go.onclick = startSync;
     box.appendChild(go);
@@ -6552,15 +5896,12 @@ function renderRegistry(container) {
     const search = el("input", "om-search");
     search.type = "search";
     search.placeholder = "Search the registry, or topic:name";
-    search.title = "Words match a pack's name, id, description and publisher. `topic:animation`"
-      + " asks GitHub which repositories carry that tag and shows the packs among them, which"
-      + " is what clicking a tag on a pack's page does.";
+    search.title = "Matches a pack's name, id, description and publisher. topic:animation shows"
+      + " the packs whose GitHub repository carries that topic.";
     search.spellcheck = false;
     container.appendChild(search);
 
     const controls = el("div", "om-side-controls");
-    // The sidebar and the window are different widths, so they remember the view apart.
-    // Sort and licence stay shared. The old shared key belongs to neither.
     try { localStorage.removeItem("om-registry-view"); } catch {}
     const viewKey = container.closest(".om-panel-window, .om-float")
       ? "om-registry-view-window" : "om-registry-view-side";
@@ -6608,15 +5949,12 @@ function renderRegistry(container) {
 
     const count = el("div", "om-side-status", "");
     const list = el("div", "om-side-list om-virt-host");
-    // The sizer carries the height of every result at once so the scrollbar is true from
-    // the first paint; the window holds only the rows near the viewport.
     const sizer = el("div", "om-virt");
     const win = el("div", "om-virt-win");
     sizer.appendChild(win);
     list.appendChild(sizer);
     container.appendChild(count);
 
-    // Outside the scrolling area, on the same grid as the rows.
     const head = el("div", "om-table-head");
     for (const [cls, label] of [
       ["num", "#"], ["title", "Title"], ["ver", "Version"], ["action", "Action"],
@@ -6634,28 +5972,21 @@ function renderRegistry(container) {
       license: (a, b) => (a.license_rank - b.license_rank) || (b.downloads - a.downloads),
       trusted: (a, b) => (byTrustedAuthor(b) - byTrustedAuthor(a)) || (b.downloads - a.downloads),
     };
-    // The whole catalogue is already in memory, so nothing here waits on the network: the
-    // list is windowed rather than paged, and scrolling only decides which rows to build.
     const OVERSCAN = 4;
-    // Table rows carry their own separator.
     const GAP = { list: 4, cards: 8, table: 0 };
 
     let filtered = [];
-    let pitch = 56;   // one row's height plus its gap, read back from what was drawn
-    let perRow = 1;   // entries per row: one in the list, the column count in the grid
+    let pitch = 56;
+    let perRow = 1;
     let from = -1;
     let to = -1;
 
     const cardsOn = () => viewSel.value === "cards";
     const tableOn = () => viewSel.value === "table";
     const gapNow = () => GAP[viewSel.value] ?? GAP.list;
-    // Table column tiers. Each sits above that tier's minimum width, because the list clips
-    // horizontal overflow rather than scrolling it.
-    const WIDE = 1000;   // ten columns, minimum 968
-    const MID = 470;     // six columns, minimum 430
+    const WIDE = 1000;
+    const MID = 470;
 
-    // Geometry is measured from the DOM rather than assumed, so a theme, a thumbnail size
-    // or a wider panel is accounted for without being told.
     const measure = () => {
       const probe = win.firstElementChild;
       if (!probe) return false;
@@ -6682,7 +6013,6 @@ function renderRegistry(container) {
       to = end;
       win.style.transform = `translateY(${firstRow * pitch}px)`;
       const build = cardsOn() ? buildResultCard : tableOn() ? buildResultTableRow : buildResultRow;
-      // The absolute position, so the table numbers the result set and not the window.
       win.replaceChildren(...filtered.slice(start, end).map((entry, i) => build(entry, start + i)));
     };
 
@@ -6694,21 +6024,15 @@ function renderRegistry(container) {
         node.classList.remove("om-t-wide", "om-t-mid", "om-t-tight");
         node.classList.add(want);
       }
-      // The headings sit outside the scrolling list, so they are wider than the rows by
-      // whatever it keeps for its scrollbar. Measured, since that width is the platform's.
       if (tableOn() && head.clientWidth > 0 && list.clientWidth > 0) {
         const gutter = Math.max(0, head.clientWidth - list.clientWidth);
         head.style.paddingRight = `${8 + gutter}px`;
       }
     };
 
-    // The first paint after a change uses the previous geometry; whatever actually landed
-    // is measured on the next frame and drawn again where it differs.
     const repaint = (force = true) => {
       fitColumns();
       paint(force);
-      // The width read above can precede the layout it causes, leaving the tier a step
-      // behind, so both it and the row height are read again on the settled frame.
       requestAnimationFrame(() => {
         const tier = head.className;
         fitColumns();
@@ -6716,9 +6040,6 @@ function renderRegistry(container) {
       });
     };
 
-    // Licences are read from the repository, so they are asked for only once the reader has
-    // stopped on something. Sweeping the whole catalogue would otherwise queue every pack
-    // it passed, which is thousands of reads for rows nobody looked at.
     let settle = null;
     const queueVisibleLicences = () => {
       clearTimeout(settle);
@@ -6729,10 +6050,6 @@ function renderRegistry(container) {
       }, 250);
     };
 
-    // One predicate, used by the full apply below and by the re-filter a resolved licence
-    // triggers, so the two can never disagree about what belongs on screen.
-    //: The topic being shown, and the ids it resolved to. Held here rather than looked up
-    //: inside the predicate, which runs once per pack per keystroke.
     let topicNow = "";
     let topicIds = null;
 
@@ -6742,8 +6059,6 @@ function renderRegistry(container) {
       if (filterBox.checked && !node.advertised) return false;
       if (trustBox.checked && !byTrustedAuthor(node)) return false;
       if (tier !== "all" && node.license_tier !== tier) return false;
-      // A topic search is a different question: it asks GitHub which repositories carry a
-      // tag, so the words in a pack's name and description have no bearing on it.
       if (topicInQuery(query)) return topicIds ? topicIds.has(node.id) : false;
       if (!query) return true;
       return (node.name || "").toLowerCase().includes(query)
@@ -6752,20 +6067,13 @@ function renderRegistry(container) {
         || (node.publisher || "").toLowerCase().includes(query);
     };
 
-    // Asynchronous because a topic search has to be resolved first. The listeners call the
-    // wrapper below rather than this, so a failure cannot surface as an unhandled rejection
-    // in the console of a reader who only changed a dropdown.
     const applyNow = async () => {
-      // A topic has to be resolved before anything can be filtered by it. The count says so
-      // meanwhile, because a GitHub search takes a moment and an empty list would otherwise
-      // read as "no packs carry this".
       const wantedTopic = topicInQuery(search.value);
       if (wantedTopic && wantedTopic !== topicNow) {
         topicNow = wantedTopic;
         topicIds = null;
         count.textContent = `Asking GitHub which packs are tagged ${wantedTopic}...`;
         const answer = await packsForTopic(wantedTopic);
-        // Abandoned: the reader typed on, and a later apply owns the list now.
         if (topicInQuery(search.value) !== wantedTopic) return;
         if (answer.error) {
           topicIds = new Set();
@@ -6801,10 +6109,6 @@ function renderRegistry(container) {
       });
     };
 
-    // A licence read from a repository can move a pack out of the tier it was filtered by:
-    // "unknown" is exactly the set being resolved, so rows leave it as answers arrive.
-    // The reader's place in the list is kept rather than reset, since this happens while
-    // they are reading it.
     onLicencesResolved = () => {
       if (!viewIsCurrent(generation)) { onLicencesResolved = null; return; }
       if (licSel.value === "all") return;
@@ -6820,9 +6124,6 @@ function renderRegistry(container) {
     };
 
     list.addEventListener("scroll", () => { paint(); queueVisibleLicences(); }, { passive: true });
-    // A resized panel changes the column count and the card height, so the window is
-    // remeasured rather than left describing the old layout. The observer lets go once the
-    // view it belongs to has been replaced, rather than repainting a detached list.
     const shape = new ResizeObserver(() => {
       if (!viewIsCurrent(generation)) { shape.disconnect(); return; }
       repaint();
@@ -6856,11 +6157,7 @@ function renderRegistry(container) {
 }
 const sidebarStyle = document.createElement("style");
 sidebarStyle.textContent = `
-/* The panel as a window, for the legacy menu. The host fills the dialog so the panel keeps
-   the height it relies on. */
 .om-panel-window > div { flex: 1; min-height: 0; }
-/* The close button floats over the dialog's top-right corner, which is where the panel's
-   last tab would otherwise sit. The tab row stops short of it rather than running under. */
 .om-panel-window .om-nav { padding-right: 30px; }
 .om-legacy-btn { width: 100%; }
 
@@ -6882,63 +6179,39 @@ sidebarStyle.textContent = `
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); }
 .om-side-status { color: var(--om-muted); font-size: 11px; }
 .om-side-when { color: var(--om-muted); }
-/* Where a pack came from, which decides how it updates. Quiet: it is a fact about the row,
-   not a warning about it. */
 .om-src { font-size: 11px; padding: 0 7px; border-radius: 999px; line-height: 17px;
   color: var(--om-text-2); background: var(--om-input); }
 .om-src-disk { color: #d29922; }
 .om-side-list { flex: 1; overflow-y: auto; overflow-x: hidden; display: flex;
   flex-direction: column; gap: 4px; padding-right: 8px; }
-/* Windowed list. The host is a plain block because the sizer inside it, not the host,
-   carries the full height of the results; the layout the rows sit in moves to the window.
-   Other tabs keep the flex column above, so only the registry list is windowed. */
 .om-side-list.om-virt-host { display: block; }
 .om-virt { position: relative; width: 100%; }
 .om-virt-win { position: absolute; top: 0; left: 0; right: 0; }
 .om-virt-win.om-list-win { display: flex; flex-direction: column; gap: 4px; }
-/* The window scrolls on one row pitch, so a row inside it may not change height with its
-   content: a row that wrapped would put the scrollbar out of step with the rows it scrolls,
-   and the error would accumulate over thousands of them. The metadata line therefore clips
-   instead of wrapping. Rows in the other tabs are not windowed and keep their own sizing. */
 .om-virt-win .om-side-row { height: 52px; box-sizing: border-box; }
-/* flex-wrap keeps the pills on one line, but the text inside them wraps on its own and
-   would add a second line for a long version and download count. Both are needed. */
 .om-virt-win .om-side-meta { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
-/* The version and count are the only part allowed to give way; the badges hold their size,
-   so a narrow panel truncates the text rather than dropping the licence off the end. */
 .om-virt-win .om-meta-text {
   flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .om-virt-win .om-side-meta > .om-lic,
 .om-virt-win .om-side-meta > .om-stars { flex: none; }
-/* Cards in the window are the same height for the same reason rows are: the description
-   occupies its three lines whether or not it fills them, and the metadata line clips rather
-   than wrapping. Cards outside the window keep their natural height. */
 .om-virt-win .om-card-desc { height: calc(1.45em * 3); }
 .om-virt-win .om-card .om-side-meta {
   flex-wrap: nowrap; white-space: nowrap; overflow: hidden; min-width: 0; }
 .om-virt-win .om-card-title { min-width: 0; }
-/* Table view. One grid template, declared once and used by both the headings and the rows,
-   so the two cannot drift apart. The description is the only flexible column; everything
-   else is sized to its content, which is what keeps the columns steady while scrolling
-   replaces the rows under them. */
 .om-table-head, .om-virt-win.om-table-win .om-table-row {
   display: grid; align-items: center; column-gap: 10px;
   grid-template-columns:
-    34px               /* #          */
-    minmax(150px, 1.1fr) /* Title    */
-    68px               /* Version    */
-    92px               /* Action     */
-    92px               /* Downloads  */
-    minmax(120px, 2fr) /* Description*/
-    minmax(80px, .7fr) /* Author     */
-    104px              /* Licence    */
-    56px               /* Stars      */
-    82px;              /* Updated    */
+    34px
+    minmax(150px, 1.1fr)
+    68px
+    92px
+    92px
+    minmax(120px, 2fr)
+    minmax(80px, .7fr)
+    104px
+    56px
+    82px;
 }
-/* Narrower panels drop columns rather than crush them. Per tier the template must have
-   exactly as many columns as the tier leaves visible: a cell without one wraps and breaks
-   the pitch the window scrolls on. Minimums, which set the breakpoints in fitColumns:
-   wide 878px + 90px of gaps, mid 400px + 30px, tight 196px + 12px. */
 .om-table-head.om-t-mid, .om-virt-win.om-table-win.om-t-mid .om-table-row {
   grid-template-columns: 26px minmax(88px, 1.3fr) 54px 84px minmax(72px, 1fr) 76px;
   column-gap: 6px;
@@ -6951,8 +6224,6 @@ sidebarStyle.textContent = `
 .om-virt-win.om-table-win.om-t-mid .om-tcell-auth,
 .om-virt-win.om-table-win.om-t-mid .om-tcell-star,
 .om-virt-win.om-table-win.om-t-mid .om-tcell-date { display: none; }
-/* The sidebar tier. The row number goes too: at this width it costs the title a third of
-   its room. */
 .om-table-head.om-t-tight, .om-virt-win.om-table-win.om-t-tight .om-table-row {
   grid-template-columns: minmax(70px, 1fr) 50px 76px;
   column-gap: 6px;
@@ -6977,8 +6248,6 @@ sidebarStyle.textContent = `
   background: var(--om-surface); border: 1px solid var(--om-border);
   border-bottom: none; border-radius: 6px 6px 0 0;
 }
-/* The headings sit outside the scrolling area, which the rows do not, so the gap the list
-   leaves for its scrollbar is matched here or the columns sit off by that much. */
 .om-side-list.om-table-list { padding-right: 0; scrollbar-gutter: stable; }
 .om-side-list.om-table-list { border: 1px solid var(--om-border); border-top: none;
   border-radius: 0 0 6px 6px; }
@@ -6988,8 +6257,6 @@ sidebarStyle.textContent = `
   border-bottom: 1px solid var(--om-border); font-size: 12px; color: var(--om-text-2);
 }
 .om-virt-win.om-table-win .om-table-row:hover { background: var(--om-hover); }
-/* Every cell is one line. A wrapped cell would make its row taller than the pitch the
-   window scrolls on, and the error would accumulate over thousands of rows. */
 .om-tcell { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .om-tcell-num { color: var(--om-muted); font-variant-numeric: tabular-nums; }
 .om-tcell-title { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -6997,18 +6264,13 @@ sidebarStyle.textContent = `
 .om-table-icon { width: 18px; height: 18px; flex: none; font-size: 10px; }
 .om-tcell-ver, .om-tcell-dl, .om-tcell-star { font-variant-numeric: tabular-nums; }
 .om-tcell-desc { color: var(--om-muted); cursor: pointer; }
-/* Licence names arrive in several shapes, so the pill is clipped to its column rather than
-   allowed to push the columns after it out of line. */
 .om-tcell-lic { display: flex; align-items: center; }
 .om-tcell-lic > .om-lic { min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .om-tcell-date { color: var(--om-muted); font-variant-numeric: tabular-nums; }
 .om-tcell-action { overflow: visible; }
 .om-table-ictl { transform: scale(.85); transform-origin: left center; }
-/* The heading row carries no icon, so its title cell is plain text like the rest. */
 .om-table-head .om-tcell-title { display: block; cursor: default; }
-/* The hub. Sized to its contents rather than the viewport: it is a short menu, and the
-   panel behind it is the thing that wants the room. */
 .om-dialog.om-hub {
   width: min(92vw, 430px); height: auto; max-height: 86vh;
   display: flex; flex-direction: column; padding: 0; overflow: hidden;
@@ -7028,7 +6290,6 @@ sidebarStyle.textContent = `
   border: 1px solid var(--om-border); border-radius: 6px;
 }
 .om-hub-btn:hover { background: var(--om-hover); }
-/* Restarting is the one entry that throws work away, so it is the one that looks different. */
 .om-hub-danger { border-color: #7f1d1d; color: #fca5a5; }
 .om-hub-danger:hover { background: #7f1d1d; color: #fff; }
 .om-hub-close {
@@ -7036,17 +6297,6 @@ sidebarStyle.textContent = `
   background: var(--om-surface); border: none; border-top: 1px solid var(--om-border);
 }
 .om-hub-close:hover { background: var(--om-hover); }
-/* Scrollbars for the scrolling areas.
-
-   From Chrome 121, Firefox, and Safari 18.2 the standard 'scrollbar-width' and
-   'scrollbar-color' are honoured and '::-webkit-scrollbar' is ignored outright, so the
-   standard pair has to carry the design. 'thin' there is a hairline the thumb colour barely
-   shows through, which is why this reads well in older engines and disappears in current
-   ones. 'auto' gives the platform's full width, and the thumb follows the theme's muted
-   text so it is legible rather than a shade off the background.
-
-   The webkit block below is a fallback for engines that predate the standard properties.
-   Where both are understood the standard pair wins, and these are simply not consulted. */
 .om-side-list, .om-body, .om-readme-body, .om-versions {
   scrollbar-width: auto;
   scrollbar-color: var(--om-scroll) transparent;
@@ -7055,7 +6305,6 @@ sidebarStyle.textContent = `
 .om-readme-body::-webkit-scrollbar, .om-versions::-webkit-scrollbar { width: 14px; height: 14px; }
 .om-side-list::-webkit-scrollbar-track, .om-body::-webkit-scrollbar-track,
 .om-readme-body::-webkit-scrollbar-track, .om-versions::-webkit-scrollbar-track { background: transparent; }
-/* The border keeps the thumb clear of the content it sits beside without a track. */
 .om-side-list::-webkit-scrollbar-thumb, .om-body::-webkit-scrollbar-thumb,
 .om-readme-body::-webkit-scrollbar-thumb, .om-versions::-webkit-scrollbar-thumb {
   background: var(--om-scroll); border-radius: 7px;
@@ -7083,8 +6332,6 @@ sidebarStyle.textContent = `
   border: 1px solid var(--om-border); color: var(--om-muted); border-radius: 999px; line-height: 15px; }
 .om-side-ictl { flex: none; }
 .om-stars { color: var(--om-muted); font-size: 11px; white-space: nowrap; }
-/* Card view. The column count follows the sidebar's width rather than a fixed breakpoint,
-   so widening the panel packs more cards per row instead of stretching them. */
 .om-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 8px; align-content: start; }
 .om-card { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 10px;
@@ -7095,10 +6342,8 @@ sidebarStyle.textContent = `
 .om-card-title { flex: 1; min-width: 0; }
 .om-card-pub { color: var(--om-muted); font-size: 11px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
-/* Three lines of description, clipped rather than wrapped, so cards stay the same height. */
 .om-card-desc { color: var(--om-text-2); font-size: 11px; line-height: 1.45; cursor: pointer;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-/* Pushed to the bottom so the button lines up across cards of unequal text length. */
 .om-card-ictl { margin-top: auto; }
 .om-card-ictl .om-btn { width: 100%; padding: 6px 12px; font-size: 12px; }
 .om-alert { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px;
@@ -7115,11 +6360,7 @@ sidebarStyle.textContent = `
   color: var(--om-muted); font-size: 11px; }
 .om-side-updateall { flex: none; }
 .om-dev { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-/* The column already spaces its children, so a panel inside it drops its own margin rather
-   than adding a second gap to the first. */
 .om-dev > .om-panel { margin: 0; }
-/* One frame for every section of a pack page. The body is the only scrolling area, and it is
-   as tall as the tallest thing it replaced, so nothing got shorter in the move. */
 .om-tabs { margin: 10px 0; border: 1px solid var(--om-border, #2c332b); border-radius: 8px;
   overflow: hidden; }
 .om-tabstrip { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px;
@@ -7139,12 +6380,7 @@ sidebarStyle.textContent = `
 .om-tabs-shut > .om-tabstrip { border-bottom: 0; }
 .om-tabs-shut > .om-tabbody { display: none; }
 .om-tabbody { max-height: 46vh; overflow: auto; }
-/* One inset for whatever a tab holds, so a list, a grid and a single line of text all sit the
-   same distance from the frame. Two classes deep so it outranks the padding a section
-   declares for itself when it is standing alone in a dropdown. */
 .om-tabs > .om-tabbody > * { padding: 10px; }
-/* The sections used to scroll inside their own dropdowns. In one frame that would nest a
-   scroller in a scroller, so the frame owns the scrolling and they simply lay out. */
 .om-tabbody .om-wf-list, .om-tabbody .om-nodelist, .om-tabbody .om-chg,
 .om-tabbody .om-chg-text, .om-tabbody .om-gal, .om-tabbody .om-caps,
 .om-tabbody .om-versions { max-height: none; overflow: visible; }
@@ -7152,12 +6388,6 @@ sidebarStyle.textContent = `
 .om-tabbody > .om-caps-pane > .om-caps-note { padding: 0 0 6px; }
 .om-wf-list { display: flex; flex-direction: column; gap: 6px;
   max-height: 40vh; overflow-y: auto; padding: 2px 2px 2px 0; }
-/* Capabilities reflow with the window: as many columns as fit at a readable width, so the
-   same list reads as one column in a narrow side panel and four in a wide window. */
-/* Two columns at most. Each track is at least half the row less the gap, so a third can
-   never fit however wide the window gets, and the 290px floor is what the longest
-   explanation needs to sit on one line, so a narrow panel drops to one column rather than
-   wrapping every cell. */
 .om-caps { display: grid; gap: 6px; padding: 0 12px 10px;
   grid-template-columns: repeat(auto-fill, minmax(max(290px, calc(50% - 3px)), 1fr)); }
 .om-cap { display: flex; flex-direction: column; gap: 2px; padding: 7px 9px;
@@ -7167,17 +6397,13 @@ sidebarStyle.textContent = `
 .om-cap-icon { flex: none; opacity: 0.85; }
 .om-cap-name { font-weight: 600; font-size: 12px; min-width: 0; }
 
-/* Indented under the glyph rather than beside it, so the glyph is what the eye lands on. */
 .om-cap-what { font-size: 11px; opacity: 0.72; line-height: 1.35; padding-left: 20px; }
 .om-caps-note { padding: 10px 12px 6px; font-size: 11px; opacity: 0.72; }
 .om-caps-bad { margin: 0 12px 10px; padding: 8px 10px; border-radius: 6px;
   border: 1px solid var(--om-warn-border, rgba(217,112,95,0.45));
   background: var(--om-warn-bg, rgba(217,112,95,0.10)); font-size: 11px; }
 .om-caps-list { font-family: ui-monospace, monospace; margin: 3px 0 4px; word-break: break-all; }
-/* Inside a panel the border is drawn for it, so the list sits in from that edge. */
 .om-panel-body > .om-wf-list, .om-panel-body > .om-gal { padding: 10px 12px; }
-/* A section that has nothing to show still has something to say, and was saying it hard
-   against both edges. The same room the contents would have had. */
 .om-panel-body > .om-side-status, .om-panel-body > .om-body,
 .om-panel-body > .om-dl-note { padding: 12px; line-height: 1.5; }
 .om-panel-body > * > .om-side-status:only-child { padding: 12px; line-height: 1.5; }
@@ -7188,20 +6414,37 @@ sidebarStyle.textContent = `
 .om-chg-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .om-chg-here { font-size: 11px; font-weight: 600; color: var(--om-text-2);
   border: 1px solid var(--om-border); border-radius: 999px; padding: 1px 8px; }
-/* Publisher text, so it keeps the line breaks they wrote and wraps rather than overflowing. */
 .om-chg-text { color: var(--om-text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-/* pip's own words, set apart and set in the font pip wrote them for. */
 .om-pip-errors { font-family: ui-monospace, monospace; font-size: 12px; color: #f0883e;
   background: var(--om-input); border-radius: 6px; padding: 8px 10px; margin-top: 4px;
   max-height: 30vh; overflow: auto; }
 .om-panel-body > .om-chg-text { padding: 10px 12px; font-family: ui-monospace, monospace;
   font-size: 12px; max-height: 34vh; overflow: auto; }
 .om-nodes-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-  border-bottom: 1px solid var(--om-surface); }
+  flex-wrap: wrap; border-bottom: 1px solid var(--om-surface); }
 .om-nodes-at { flex: none; min-width: 110px; }
-.om-nodelist { display: flex; flex-direction: column; max-height: 46vh; overflow-y: auto; }
-.om-nodelist-item { padding: 8px 12px; border-bottom: 1px solid var(--om-surface); }
-.om-nodelist-item:last-child { border-bottom: none; }
+.om-nodelist { display: flex; flex-direction: column; gap: 6px; padding: 6px 0;
+  max-height: 46vh; overflow-y: auto; }
+.om-nodes-find { flex: 1 1 200px; min-width: 140px; }
+.om-nodes-group { max-width: 200px; flex: 0 1 auto; }
+.om-nodelist-item.om-node-here { cursor: grab; }
+.om-nodelist-item.om-node-here:active { cursor: grabbing; }
+.om-nodelist-item.om-node-here a { cursor: pointer; }
+.om-nodelist-item.om-node-here:hover {
+  background: color-mix(in srgb, var(--om-bg) 74%, #000); }
+.om-nodelist-item.om-node-absent { opacity: .72; }
+.om-nodelist-from { padding: 0 0 8px; line-height: 1.5; }
+.om-nodelist-item { padding: 8px 12px; border-radius: 8px;
+  background: color-mix(in srgb, var(--om-bg) 84%, #000); }
+.om-node-ghost { position: fixed; left: -9999px; top: 0; width: 190px; border-radius: 8px;
+  overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,.5); pointer-events: none;
+  font: 11px/1 system-ui, sans-serif; }
+.om-node-ghost-bar { padding: 7px 9px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; background: var(--om-ghost-title, #333);
+  color: var(--om-ghost-text, #e6edf3); }
+.om-node-ghost-body { position: relative; background: var(--om-ghost-body, #353535); }
+.om-node-ghost-slot { position: absolute; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--om-ghost-slot, #9a9a9a); }
 .om-node-name { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
 .om-wf-item { display: flex; align-items: baseline; gap: 10px; text-align: left;
   background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px; padding: 8px 12px;
@@ -7209,8 +6452,6 @@ sidebarStyle.textContent = `
 .om-wf-item:hover { border-color: #388bfd; background: #1c2230; }
 .om-wf-name { font-weight: 600; }
 .om-wf-path { color: var(--om-muted); font-size: 11px; }
-/* Gallery. Columns are laid to the width available rather than to a fixed count, so the
-   grid reflows with the dialog; the thumbnail edge is a setting. */
 .om-gal { display: grid; gap: 8px; padding: 2px 0;
   grid-template-columns: repeat(auto-fill, minmax(var(--om-gal-thumb, 120px), 1fr)); }
 .om-gal-cell { padding: 0; overflow: hidden; cursor: zoom-in; aspect-ratio: 1 / 1;
@@ -7219,12 +6460,10 @@ sidebarStyle.textContent = `
 .om-gal-cell:focus-visible { outline: 2px solid #388bfd; outline-offset: 2px; }
 .om-gal-cell.om-gal-dead { display: none; }
 .om-gal-img { display: block; width: 100%; height: 100%; object-fit: cover; }
-/* Full view, above the pack dialog's own backdrop. */
 .om-lb { position: fixed; inset: 0; z-index: 10010; background: rgba(0,0,0,.88);
   display: flex; align-items: center; justify-content: center; }
 .om-lb-fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .om-lb-img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 6px; }
-/* A clip letterboxes against black rather than showing the backdrop through it. */
 video.om-lb-img { background: #000; }
 .om-lb-cap { color: var(--om-text-2); font-size: 12px; text-align: center;
   max-width: 92vw; overflow-wrap: anywhere; }
@@ -7236,36 +6475,26 @@ video.om-lb-img { background: #000; }
 .om-lb-prev { left: 16px; }
 .om-lb-next { right: 16px; }
 .om-lb-close { top: 14px; right: 16px; font-size: 22px; padding: 8px 14px; }
-/* On a short or narrow viewport the arrows would sit over the picture, so they shrink and
-   the image is given the room back. */
 @media (max-width: 720px), (max-height: 560px) {
   .om-lb-img { max-width: 96vw; max-height: 74vh; }
   .om-lb-nav { font-size: 20px; padding: 8px 11px; }
   .om-lb-prev { left: 6px; }
   .om-lb-next { right: 6px; }
 }
-/* The ref picker sits inline among the header's buttons and chips. */
 .om-refbar { display: inline-flex; gap: 6px; align-items: center; position: relative; }
 .om-ref-note { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .om-ref-note b { flex: none; }
 .om-ref-back { flex: none; margin-left: auto; padding: 4px 12px; font-size: 12px; }
 .om-ref-label { color: var(--om-muted); font-size: 12px; }
-/* Scoped so it beats the generic .om-side-select sizing defined further down, which would
-   otherwise stretch the picker across the dialog. The width is set from the selected text. */
 .om-refbar .om-ref-select { flex: none; min-width: 88px; max-width: 280px; }
-/* Off-screen twin used only to measure the selected label. */
 .om-ref-probe { position: absolute; left: -9999px; top: 0; white-space: pre; visibility: hidden; }
 .om-side-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .om-side-select { flex: 1 1 130px; min-width: 120px; padding: 5px 8px; border-radius: 6px;
   background: var(--om-input); color: var(--om-text); border: 1px solid var(--om-border); font-size: 12px; }
 .om-side-filter { display: flex; gap: 5px; align-items: center; color: var(--om-muted); font-size: 12px; }
 
-/* Download manager. Sized to its content rather than the panel's full height, so a short
-   list is a short window. */
 .om-dl-pick { width: min(90vw, 820px); height: auto; max-height: 80vh; }
 .om-dl-pick .om-head { padding-right: 44px; }
-/* The summary gives way to the controls beside it rather than being cut mid-word: a count
-   that ends in "14 unreachab" reads as a rendering fault rather than as a shortened line. */
 .om-dl-summary { color: var(--om-muted); font-size: 13px; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-dl-tools { display: flex; gap: 8px; flex: none; }
@@ -7282,8 +6511,6 @@ video.om-lb-img { background: #000; }
 .om-dl-failed .om-dl-state { color: #f85149; }
 .om-dl-paused .om-dl-state, .om-dl-cancelled .om-dl-state { color: #d29922; }
 .om-dl-where { display: flex; gap: 8px; flex-wrap: wrap; color: var(--om-muted); font-size: 12px; }
-/* A path can be longer than the panel is wide, and a pill that cannot shrink drags the whole
-   row past the edge. The full path is on the title, so shortening the chip loses nothing. */
 .om-dl-owner, .om-dl-src { border: 1px solid var(--om-border); border-radius: 999px;
   padding: 0 7px; max-width: 100%; min-width: 0; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
@@ -7295,7 +6522,6 @@ video.om-lb-img { background: #000; }
 .om-dl-size { color: var(--om-muted); font-size: 12px; flex: 1; }
 .om-dl-acts { display: flex; gap: 6px; flex: none; }
 .om-dl-btn { padding: 4px 10px; font-size: 12px; }
-/* Add by URL: a stacked form rather than a row, so a long URL is readable as it is pasted. */
 .om-dl-add { width: min(92vw, 560px); }
 .om-dl-field { display: flex; flex-direction: column; gap: 4px; }
 .om-dl-field > span { color: var(--om-muted); font-size: 11px; text-transform: uppercase;
@@ -7303,13 +6529,10 @@ video.om-lb-img { background: #000; }
 .om-dl-note { color: var(--om-muted); font-size: 13px; }
 .om-dl-ok { color: #3fb950; }
 .om-dl-bad { color: #f85149; }
-/* A model already on disk is dimmed but still selectable, because a file that is there can
-   still be the wrong one. Refused ones cannot be picked at all. */
 .om-dl-model { display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
   border: 1px solid var(--om-border); border-radius: 8px; padding: 10px 12px;
   background: var(--om-surface); }
 .om-dl-model:hover { border-color: var(--om-muted); }
-/* The toolbar over a selectable list: what is selected on the left, what to do on the right. */
 .om-lib-actions { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
 .om-dl-have { opacity: .55; }
 .om-dl-have:hover { opacity: .85; }
@@ -7319,31 +6542,22 @@ video.om-lb-img { background: #000; }
 .om-dl-pickfoot { display: flex; gap: 12px; align-items: center; padding: 12px 20px;
   border-top: 1px solid var(--om-border); }
 .om-dl-wf { flex: none; max-width: 320px; }
-/* The way in, at the right-hand end of the workflow tab strip. Sized to sit in that row
-   rather than to stand out from it. */
 .om-dl-open { display: inline-flex; align-items: center; gap: 5px; margin: 0 6px;
   padding: 3px 9px; border-radius: 6px; border: 1px solid var(--om-border);
   background: transparent; color: var(--om-text-2); cursor: pointer; white-space: nowrap;
   font: 12px/1.4 system-ui, sans-serif; }
 .om-dl-open:hover { background: var(--om-hover); color: var(--om-text); }
 .om-dl-open-icon { font-size: 13px; line-height: 1; }
-/* The label goes before the button does, so a crowded tab strip keeps the icon. */
 @media (max-width: 1100px) { .om-dl-open-text { display: none; } }
-/* In the control bar there is no room for words, so the icon carries it and the name is on
-   the hover. Square rather than oblong, so the three read as a set of controls. */
 .om-dl-open-icons { margin: 2px; padding: 3px; width: 28px; min-height: 24px;
   align-self: stretch; justify-content: center; }
 .om-dl-open-icons .om-dl-open-text { display: none; }
 .om-dl-open-icons .om-dl-open-icon { font-size: 14px; }
-/* .om-side-select carries flex:1 for the sidebar's rows; in a stacked field that
-   would stretch it down the column instead of across. */
 .om-dl-field > select, .om-dl-field > input { flex: none; }
 .om-dl-place { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .om-dl-place > span { color: var(--om-muted); font-size: 11px; flex: none; }
 .om-dl-root { font-size: 11px; padding: 3px 6px; max-width: 340px; }
 .om-dl-root option:disabled { color: var(--om-muted); }
-/* A button label that carries an account name is never broken across lines; where they do
-   not fit side by side the row wraps and each button stays whole. */
 .om-note-wide { width: min(94vw, 640px); }
 .om-cmd { flex: 1; min-width: 0; background: var(--om-input); color: var(--om-text);
   border: 1px solid var(--om-border); border-radius: 6px; padding: 7px 10px;
@@ -7351,20 +6565,20 @@ video.om-lb-img { background: #000; }
   user-select: all; }
 .om-note-foot { flex-wrap: wrap; }
 .om-note-foot .om-btn { white-space: nowrap; }
-/* Labelled values, label column sized to its longest label. */
 .om-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr);
   gap: 5px 16px; margin: 0; font-size: 12px; }
 .om-facts dt { color: var(--om-muted); }
 .om-facts dd { margin: 0; color: var(--om-text); overflow-wrap: anywhere; }
-/* Two bars: what is being asked of the downloads, then which answer is showing. */
-.om-dl-views { display: flex; gap: 4px; padding: 10px 20px 0; }
+.om-dl-views { display: flex; align-items: center; gap: 4px; padding: 10px 20px 0; }
+.om-dl-bar-end { margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  flex: none; padding-bottom: 6px; }
+.om-dl-plus { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 30px; height: 26px; padding: 0 8px; line-height: 0; }
+.om-plus-mark { display: block; }
 .om-dl-view { background: none; border: none; cursor: pointer; padding: 6px 12px;
   border-radius: 6px 6px 0 0; color: var(--om-muted); font: 600 13px/1.4 system-ui, sans-serif; }
 .om-dl-view:hover { color: var(--om-text); background: var(--om-hover); }
 .om-dl-view.om-dl-on { color: var(--om-text); background: var(--om-surface); }
-/* Six tabs do not fit a narrow panel, and a tab cannot be shortened without losing what it
-   says. So the strip scrolls on its own rather than widening the panel's contents and
-   putting a horizontal scrollbar under everything else. */
 .om-dl-tabs { display: flex; gap: 4px; padding: 0 20px; background: var(--om-surface);
   border-bottom: 1px solid var(--om-border);
   overflow-x: auto; scrollbar-width: thin; flex: none; }
@@ -7376,7 +6590,6 @@ video.om-lb-img { background: #000; }
 .om-dl-tab.om-dl-on { color: var(--om-text); border-bottom-color: #58a6ff; }
 .om-dl-tab-count { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 7px;
   font-size: 12px; }
-/* An archived entry is a record rather than a file, so it reads quieter than a present one. */
 .om-dl-row.om-dl-gone { opacity: .62; }
 .om-dl-row.om-dl-gone:hover { opacity: 1; }
 .om-dl-hash { display: flex; gap: 8px; align-items: baseline; }
@@ -7384,21 +6597,42 @@ video.om-lb-img { background: #000; }
 .om-dl-hash-value { color: var(--om-muted); font: 12px/1.4 ui-monospace, monospace;
   cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-dl-hash-value:hover { color: var(--om-text); }
-/* A window rather than a dialog: it does not cover the canvas and does not take the pointer
-   away from it. Sized by the caller, moved and folded by the reader. */
-/* A remembered size belongs to the window it was chosen in. Opened on a narrower screen --
-   a laptop after a desktop, a tablet, a browser window dragged small -- it is capped to what
-   is actually there, so the right-hand controls never sit off the edge. */
-/* A window that is not in front recedes: its chrome lightens towards the background and its
-   contents lose a little contrast. Only ever a difference in degree, because an inactive
-   window is still there to be read. */
-.om-float:not(.om-float-active) .om-float-bar { background: var(--om-hover);
+.om-float:not(.om-float-active) .om-float-bar { background-color: var(--om-hover);
+  background-image: var(--om-bar-paint, none);
   color: var(--om-muted); }
-.om-float:not(.om-float-active) .om-float-body { opacity: .82; }
+.om-float:not(.om-float-active) .om-float-body,
+.om-float:not(.om-float-active) .om-float-tools { opacity: .82; }
 .om-float:not(.om-float-active) { border-color: color-mix(in srgb, var(--om-border) 60%, transparent); }
-/* Off by default: blurring text costs a repaint on every stacking change, and on a weak GPU
-   with several windows open that is felt. */
-.om-blur-inactive .om-float:not(.om-float-active) .om-float-body { filter: blur(1.5px); }
+.om-blur-inactive .om-float:not(.om-float-active) .om-float-body,
+.om-blur-inactive .om-float:not(.om-float-active) .om-float-tools {
+  filter: blur(var(--om-blur-back, 3px)); }
+body.om-aero .om-float { background: transparent; }
+body.om-aero .om-float-body { background: var(--om-bg); }
+body.om-aero .om-float-bar,
+body.om-aero .om-float-tools {
+  background-color: color-mix(in srgb, var(--om-surface) var(--om-aero-alpha, 55%), transparent);
+  -webkit-backdrop-filter: blur(var(--om-aero-blur, 12px)) saturate(140%);
+  backdrop-filter: blur(var(--om-aero-blur, 12px)) saturate(140%); }
+body.om-aero .om-float-bar { position: relative; }
+body.om-aero .om-float-tools { position: relative; }
+body.om-aero .om-float-bar::after,
+body.om-aero .om-float-tools::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: rgba(0, 0, 0, var(--om-aero-dark, .18)); }
+body.om-aero .om-float-bar > *,
+body.om-aero .om-float-tools > * { position: relative; z-index: 1; }
+body.om-aero .om-float:not(.om-float-active) .om-float-bar,
+body.om-aero .om-float:not(.om-float-active) .om-float-tools {
+  background-color: color-mix(in srgb, var(--om-surface)
+    calc(var(--om-aero-alpha, 55%) * 0.7), transparent); }
+body.om-aero .om-float-tools {
+  background-color: color-mix(in srgb, var(--om-surface)
+    calc(var(--om-aero-alpha, 55%) + 26%), transparent); }
+body.om-aero .om-float:not(.om-float-active) .om-float-tools {
+  background-color: color-mix(in srgb, var(--om-surface)
+    calc(var(--om-aero-alpha, 55%) * 0.7 + 22%), transparent); }
+body.om-aero .om-float-tools::after {
+  background: rgba(0, 0, 0, calc(var(--om-aero-dark, .18) + .10)); }
 .om-float { position: fixed; display: flex; flex-direction: column;
   max-width: calc(100vw - 16px);
   background: var(--om-bg); color: var(--om-text); border: 1px solid var(--om-border);
@@ -7408,54 +6642,65 @@ video.om-lb-img { background: #000; }
 .om-float-bar { display: flex; align-items: center; gap: 8px; padding: 0 10px;
   min-height: var(--om-hdr, 44px);
   border-bottom: 1px solid var(--om-border); background: var(--om-surface);
+  background-image: var(--om-bar-paint, none);
   cursor: move; user-select: none; flex: none;
-  /* Pointer events only reach a drag on touch if the browser is told not to treat the
-     gesture as a scroll first. Without this a panel cannot be moved on a tablet. */
   touch-action: none; }
 .om-float-folded .om-float-bar { border-bottom: none; }
-/* Folded to its bar, a panel is a label rather than a control. Its own tools go: Rescan,
-   Verify fully and the filter act on a list nobody can see, and a button that acts on
-   something out of sight is a button pressed by accident. What stays is what can be read at
-   a glance -- the title, the summary, the activity light -- and the two controls that act on
-   the window itself rather than on its contents. */
 .om-float-folded .om-float-tools { display: none; }
-/* Still shortens before the close button does, because a summary can be long. */
-.om-float-icon { width: calc(var(--om-title-size, 15px) * 1.35); flex: none;
-  height: calc(var(--om-title-size, 15px) * 1.35); border-radius: 4px;
+.om-float-icon { width: calc(var(--om-title-size, 15px) * 1.5); flex: none;
+  height: calc(var(--om-title-size, 15px) * 1.5); border-radius: 4px;
   object-fit: cover; background: var(--om-input); }
+.om-float-glyph { width: calc(var(--om-title-size, 15px) * 1.5); flex: none;
+  height: calc(var(--om-title-size, 15px) * 1.5); background-color: currentColor;
+  opacity: .85; }
 .om-float-title { font-size: var(--om-title-size, 15px); font-weight: 600;
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .om-float-badge { color: var(--om-muted); font-size: 13px; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* On a narrow window the tools are the one part that cannot shrink -- a button is as wide
-   as its word. So the strip scrolls rather than shouldering the close button off the end,
-   and every control stays reachable at any width. */
-/* A row of its own under the title. Fixed height whatever the header is set to, because a
-   button does not get easier to press by being taller, and scrolls sideways on a narrow
-   panel rather than pushing anything off the end. */
 .om-float-tools { display: flex; align-items: center; gap: 8px; flex: none;
   min-height: 38px; height: 38px; padding: 0 10px;
   border-bottom: 1px solid var(--om-border); background: var(--om-surface);
   overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .om-float-tools:empty { display: none; }
+.om-float-tools .om-tools-menu { order: -1; }
+.om-float-tools .om-tools-menu + .om-tools-menu { margin-left: -4px; }
+.om-float-tools .om-btn, .om-deskset .om-btn { padding: 4px 11px; border-radius: 4px; font-size: 12px;
+  line-height: 18px; background: var(--om-input); border-color: var(--om-border);
+  color: var(--om-text); font-weight: 400; }
+.om-float-tools .om-btn:hover:not(:disabled), .om-deskset .om-btn:hover:not(:disabled) { background: var(--om-hover);
+  border-color: color-mix(in srgb, var(--om-text) 26%, var(--om-border)); }
+.om-float-tools .om-btn:active:not(:disabled), .om-deskset .om-btn:active:not(:disabled) { background: var(--om-border); }
+.om-float-tools .om-btn:disabled, .om-deskset .om-btn:disabled { opacity: .45; cursor: default; }
+.om-float-tools .om-btn.om-go, .om-deskset .om-btn.om-go { background: var(--om-input); color: var(--om-text);
+  border-color: color-mix(in srgb, var(--om-text) 30%, var(--om-border)); font-weight: 500; }
+.om-float-tools .om-btn.om-go:hover:not(:disabled), .om-deskset .om-btn.om-go:hover:not(:disabled) { background: var(--om-hover); }
+.om-float-tools .om-btn.om-danger, .om-deskset .om-btn.om-danger { background: var(--om-input); border-color: var(--om-border);
+  color: #f85149; }
+.om-float-tools .om-btn.om-danger:hover:not(:disabled),
+.om-deskset .om-btn.om-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #f85149 14%, transparent); border-color: #f85149; }
+.om-float-tools .om-side-select { flex: 0 0 auto; min-width: 0; width: auto; padding: 4px 6px;
+  border-radius: 4px; font-size: 12px; background: var(--om-input); }
 .om-float-tools > * { flex: none; }
-/* Both controls get the same hit area, so the fold is as easy to land on as the close. */
-.om-float-fold, .om-float-close { background: none; border: none; color: var(--om-muted);
+.om-float-away { display: none !important; }
+.om-float-travel { transition: transform .16s ease-in, opacity .16s ease-in;
+  pointer-events: none; will-change: transform, opacity; }
+@media (prefers-reduced-motion: reduce) { .om-float-travel { transition: none; } }
+.om-float-fold, .om-float-close, .om-float-min { background: none; border: none; color: var(--om-muted);
   cursor: pointer; line-height: 1; flex: none; display: inline-flex;
   align-items: center; justify-content: center; width: 24px; height: 24px;
   border-radius: 5px; padding: 0; }
 .om-float-fold { font-size: 16px; }
+.om-float-min { font-size: 13px; }
+.om-float-min:hover { background: var(--om-hover); color: var(--om-text); }
 .om-float-close { font-size: 20px; }
 .om-float-fold:hover, .om-float-close:hover { background: var(--om-hover); }
 .om-float-fold:hover, .om-float-close:hover { color: var(--om-text); }
-/* The height set here is the height that renders. Growing this instead would zero its
-   flex-basis, throwing that height away and sizing the window to whatever it happens to hold. */
 .om-float-body { display: flex; flex-direction: column; overflow: hidden;
   flex: 0 0 auto; min-height: 0;
-  max-height: calc(100vh - var(--om-hdr, 44px) - 24px); }
+  max-height: calc(100vh - var(--om-hdr, 44px) - 24px - var(--om-bar-h, 0px)); }
 .om-float-folded .om-float-body { display: none; }
-/* A panel that does not float: the bar is a title rather than a handle. */
 .om-float-fixed .om-float-bar { cursor: default; }
 .om-float-grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
   cursor: nwse-resize; touch-action: none; }
@@ -7463,6 +6708,375 @@ video.om-lb-img { background: #000; }
   width: 7px; height: 7px; border-right: 2px solid var(--om-muted);
   border-bottom: 2px solid var(--om-muted); opacity: .6; }
 .om-float-folded .om-float-grip { display: none; }
+.om-files { display: flex; height: 100%; min-height: 0; }
+.om-files-tree { flex: none; width: 212px; min-width: 0; overflow: auto; padding: 8px 6px; }
+.om-files-grip { flex: none; width: 7px; cursor: col-resize; align-self: stretch;
+  border-left: 1px solid var(--om-border); }
+.om-files-grip:hover { background: color-mix(in srgb, var(--om-text) 14%, transparent); }
+.om-files-group { display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 8px 8px 4px; border: 0; background: transparent; cursor: pointer;
+  color: var(--om-muted); font: inherit; font-size: 11px;
+  font-weight: 700; text-transform: uppercase; letter-spacing: .04em; text-align: left; }
+.om-files-group:hover { color: var(--om-text-2); }
+.om-files-group-mark { flex: none; font-size: 8px; line-height: 1; }
+.om-files-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-files-group-count { flex: none; font-weight: 600; letter-spacing: 0;
+  color: var(--om-muted); }
+.om-files-node { display: flex; align-items: center; gap: 2px; border-radius: 5px; }
+.om-files-node:hover { background: var(--om-hover); }
+.om-files-node-on { background: var(--om-hover); }
+.om-files-node-on .om-files-place { color: var(--om-text); font-weight: 600; }
+.om-files-where { flex: 0 1 auto; min-width: 0; padding-right: 4px; color: var(--om-muted);
+  font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-files-node .om-files-place { flex: 1 1 auto; }
+.om-files-twist { flex: none; width: 20px; height: 20px; padding: 0; border: 0;
+  display: flex; align-items: center; justify-content: center; border-radius: 4px;
+  background: transparent; color: var(--om-text-2); font: inherit; font-size: 11px;
+  line-height: 1; cursor: pointer; }
+.om-files-twist:hover { color: var(--om-text); background: var(--om-border); }
+.om-files-place { display: block; flex: 1; min-width: 0; text-align: left; padding: 5px 6px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--om-text-2);
+  font: inherit; font-size: 12px; cursor: pointer; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-files-place:hover { color: var(--om-text); }
+.om-files-right { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.om-files-trail { display: flex; align-items: center; gap: 2px; flex: none; flex-wrap: wrap;
+  padding: 6px 8px; border-bottom: 1px solid var(--om-border); font-size: 13px; }
+.om-files-readonly { margin-left: auto; padding: 1px 8px; border-radius: 999px;
+  background: var(--om-input); border: 1px solid var(--om-border);
+  color: var(--om-muted); font-size: 11px; }
+.om-files-list { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.om-files-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+  border-radius: 5px; cursor: default; }
+.om-files-row:hover { background: var(--om-hover); }
+.om-files-row-on,
+.om-files-row-on:hover {
+  background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 26%, transparent); }
+.om-files-list:focus-visible { outline: none; }
+.om-files-folder { cursor: pointer; }
+.om-files-kind { flex: none; width: 52px; color: var(--om-muted); font-size: 11px; }
+.om-mgr-keys { color: var(--om-muted); font-size: 11px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-props-head2 { color: var(--om-muted); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .06em; margin-top: 4px; }
+.om-props-keys { display: flex; flex-wrap: wrap; gap: 4px; }
+.om-props-key-chip { padding: 2px 8px; border: 1px solid var(--om-border);
+  border-radius: 999px; background: var(--om-input); color: var(--om-text-2);
+  font-size: 11px; }
+.om-props-sub { color: var(--om-text-2); font-size: 12px; }
+.om-props-note { color: var(--om-muted); font-size: 11px; }
+.om-mgr-list { flex: 1; min-height: 0; overflow: auto; padding: 6px; }
+.om-mgr-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 6px; }
+.om-mgr-row:hover { background: var(--om-hover); }
+.om-mgr-art { width: 26px; height: 26px; flex: none; background-color: currentColor; }
+.om-mgr-shot { width: 26px; height: 26px; flex: none; border-radius: 5px;
+  object-fit: cover; }
+.om-mgr-text { flex: 1; min-width: 0; }
+.om-mgr-name { font-size: 13px; font-weight: 600; display: flex; align-items: baseline;
+  gap: 8px; }
+.om-mgr-by { color: var(--om-muted); font-size: 11px; font-weight: 400; }
+.om-mgr-hint { color: var(--om-text-2); font-size: 12px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-mgr-switch { flex: none; }
+.om-task { display: flex; align-items: center; gap: 0; flex: none;
+  height: var(--workflow-tabs-height, 2.375rem); padding: 0 8px 0 0;
+  background: var(--comfy-menu-bg, var(--om-bg));
+  border-top: 1px solid var(--interface-stroke, var(--om-border));
+  color: var(--om-text); font: 500 12px/1.4 system-ui, sans-serif;
+  overflow: hidden; }
+.om-task-strip { display: flex; align-items: center; gap: 0; flex: 1; height: 100%;
+  min-width: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  scrollbar-width: thin; }
+.om-task-start { flex: none; }
+.om-task-start[aria-expanded="true"] { background: var(--om-input); }
+.om-start { position: fixed; z-index: ${MENU_Z}; width: 268px;
+  height: min(420px, 62vh);
+  display: flex; flex-direction: column; overflow: hidden; padding: 4px;
+  background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.55); font: 13px/1.5 system-ui, sans-serif; }
+.om-start-find { margin: 2px 2px 4px; }
+.om-start-list { flex: 1; min-height: 0; overflow-y: auto; align-content: start;
+  scrollbar-width: thin; }
+.om-start-row { display: flex; align-items: center; gap: 9px; padding: 6px 10px;
+  border-radius: 6px; cursor: pointer; color: var(--om-text); }
+.om-start-row:hover, .om-start-row:focus-visible { background: var(--om-hover); outline: none; }
+.om-start-art { width: 17px; height: 17px; flex: none; background-color: currentColor; }
+.om-start-img { width: 17px; height: 17px; flex: none; object-fit: contain; }
+.om-start-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-start-pin { flex: none; padding: 2px 7px; border: 1px solid var(--om-border);
+  border-radius: 5px; background: transparent; color: var(--om-muted); font: inherit;
+  font-size: 11px; cursor: pointer; visibility: hidden; }
+.om-start-row:hover .om-start-pin, .om-start-pin:focus-visible { visibility: visible; }
+.om-start-pin:hover { color: var(--om-text); background: var(--om-input); }
+.om-start-none { padding: 10px; color: var(--om-muted); }
+.om-start-pop { width: 248px; height: auto; max-height: min(420px, 62vh);
+  padding: 4px 2px; overflow-y: auto; scrollbar-width: thin; }
+.om-start-group .om-start-name { font-weight: 600; }
+.om-start-more { flex: none; padding-left: 6px; color: var(--om-muted); font-size: 13px; }
+.om-task-pinned { position: fixed; left: 0; right: 0; bottom: 0; z-index: ${TASKBAR_Z}; }
+.om-task-hidden { transform: translateY(calc(100% + 4px)); }
+.om-task { transition: transform .16s ease-out; }
+@media (prefers-reduced-motion: reduce) { .om-task { transition: none; } }
+.om-desk { position: fixed; z-index: ${DESK_Z}; overflow: hidden;
+  background: var(--bg-color, var(--om-bg)); background-size: cover;
+  background-position: center;
+  display: none; flex-direction: column; }
+.om-desk-on { display: flex; }
+.om-desk-chrome { transition: transform .18s ease, opacity .18s ease; }
+.om-desk-chrome.om-desk-away { transform: translateY(-150%); opacity: 0;
+  pointer-events: none !important; }
+.om-desk-chrome.om-desk-under.om-desk-away { transform: translateY(150%); }
+.om-tab-drop { outline: 2px dashed var(--om-accent, #4493f8); outline-offset: -2px;
+  border-radius: 6px; background: color-mix(in srgb, var(--om-accent, #4493f8) 12%, transparent); }
+body.om-desk-open .workflow-tabs .p-togglebutton-checked {
+  box-shadow: none !important; border-bottom-color: transparent !important;
+  color: var(--om-muted, #8b949e) !important; }
+body.om-desk-open .workflow-tabs .p-togglebutton-checked::before { opacity: .4; }
+body.om-desk-open .workflow-tabs [data-om-tint].p-togglebutton-checked {
+  background: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)) !important;
+  --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)); }
+body.om-desk-open .subgraph-breadcrumb,
+body.om-desk-open div:has(> div > .actionbar-container),
+body.om-desk-open div:has(> .actionbar-container) {
+  transform: translateY(-150%) !important; opacity: 0 !important;
+  pointer-events: none !important;
+  transition: transform .18s ease, opacity .18s ease; }
+.om-desk-grid { position: relative; height: 100%; overflow: hidden;
+  --om-desk-icon: 44px; --om-desk-label: 12px; }
+.om-desk-cell { position: absolute; touch-action: none; }
+.om-desk-dragging { opacity: .7; z-index: 2; cursor: grabbing; }
+.om-desk-ghost { position: absolute; border-radius: 8px; pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--om-text) 45%, transparent);
+  background: color-mix(in srgb, var(--om-text) 8%, transparent); }
+.om-deskset { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px;
+  flex: 1; min-height: 0; overflow-y: auto; }
+.om-deskset-head { display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  color: var(--om-text); font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; }
+.om-deskset-head:first-of-type { margin-top: 4px; }
+.om-deskset-head::after { content: ""; flex: 1; height: 1px;
+  background: var(--om-border); }
+.om-deskset-screen { border: 6px solid #0c0d10; border-radius: 10px; overflow: hidden;
+  aspect-ratio: 16 / 9; position: relative; background: var(--bg-color, var(--om-bg));
+  background-size: cover; background-position: center;
+  box-shadow: 0 6px 16px rgba(0,0,0,.45); flex: none; }
+.om-deskset-stand { width: 64px; height: 6px; margin: 0 auto; border-radius: 0 0 5px 5px;
+  background: #0c0d10; flex: none; }
+.om-deskset-cell { position: absolute; display: flex; flex-direction: column;
+  align-items: center; gap: 2px; }
+.om-deskset-cell span:last-child { color: var(--om-text); line-height: 1.2;
+  text-shadow: 0 1px 2px rgba(0,0,0,.8); white-space: nowrap; }
+.om-deskset-row { display: flex; align-items: center; gap: 10px; }
+.om-deskset-row > label { flex: none; min-width: 108px; color: var(--om-muted);
+  font-size: 13px; }
+.om-deskset-row > input[type="range"] { flex: 1; }
+.om-deskset-figure { flex: none; min-width: 42px; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--om-text-2); font-size: 12px; }
+.om-deskset-papers { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, 86px);
+  max-height: 150px; overflow-y: auto; flex: none; }
+.om-deskset-paper { width: 86px; height: 50px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--om-border); background: var(--om-input) center / cover no-repeat;
+  cursor: pointer; }
+.om-deskset-paper-on { outline: 2px solid var(--p-button-text-primary-color, #388bfd);
+  outline-offset: 1px; }
+.om-deskset-note { color: var(--om-muted); font-size: 12px; line-height: 1.5; }
+.om-deskset-palette { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.om-deskset-palette-row { display: inline-flex; align-items: center; gap: 4px; }
+.om-deskset-swatch { width: 22px; height: 18px; border-radius: 4px;
+  border: 1px solid var(--om-border); background-size: cover; }
+.om-deskset-custom { display: flex; align-items: center; gap: 6px; width: 100%;
+  padding-left: 118px; }
+.om-deskset-dip { width: 34px; height: 22px; padding: 0; border-radius: 4px;
+  border: 1px solid var(--om-border); background: none; cursor: pointer; }
+.om-deskset-dip-label { color: var(--om-muted); font-size: 12px; }
+.om-deskset-paint-name { flex: none; color: var(--om-muted); font-size: 13px;
+  min-width: 108px; }
+.om-deskset-switch { gap: 8px; cursor: pointer; color: var(--om-text-2); font-size: 12px; }
+.om-deskset-by { margin-left: auto; color: var(--om-muted); font-size: 11px; }
+.om-deskset-switch > input { flex: none; }
+.om-pad { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.om-pad-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.om-pad-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column;
+  margin: 0; border: 0; border-radius: 0; }
+.om-pad-tabs > .om-tabbody { flex: 1; min-height: 0; max-height: none; overflow: hidden;
+  display: flex; flex-direction: column; }
+.om-pad-tabs > .om-tabbody > .om-pad-pane { flex: 1; min-height: 0; padding: 0; }
+.om-pad-tabs > .om-tabbody > .om-pad-view { flex: 1; min-height: 0; padding: 14px 18px; }
+.om-pad-view img { max-width: 100%; height: auto; }
+.om-float-title-name { cursor: text; border-radius: 4px; padding: 0 3px; margin: 0 -3px; }
+.om-float-title-name:hover { background: var(--om-hover); }
+.om-rename { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+  outline-offset: 1px; border-radius: 4px; background: var(--om-input);
+  cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: none; }
+.om-pad-tools-quiet .om-pad-tool:not(.om-pad-file),
+.om-pad-tools-quiet .om-pad-split { opacity: .32; pointer-events: none; }
+.om-pad-tools { display: flex; align-items: center; gap: 4px; padding: 6px 8px; flex: none;
+  border-bottom: 1px solid var(--om-border); }
+.om-pad-tool { min-width: 28px; height: 26px; padding: 0 7px; border-radius: 5px;
+  border: 1px solid var(--om-border); background: transparent; color: var(--om-text-2);
+  font: 600 12px/1 system-ui, sans-serif; cursor: pointer; }
+.om-pad-tool:hover { background: var(--om-hover); color: var(--om-text); }
+.om-pad-file { font-weight: 500; letter-spacing: .01em; }
+.om-pad-split { width: 1px; height: 18px; flex: none; margin: 0 3px;
+  background: var(--om-border); }
+.om-pad-state { margin-left: auto; color: var(--om-muted); font-size: 11px; }
+.om-pad-edit { flex: 1; min-height: 0; width: 100%; resize: none; border: none;
+  padding: 14px 18px; background: var(--om-input); color: var(--om-text);
+  font: 13px/1.6 ui-monospace, monospace; }
+.om-pad-edit:focus { outline: none; }
+.om-pad-view { flex: 1; min-height: 0; overflow: auto; padding: 12px 16px; }
+.om-fold-list { display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  flex: 1; min-height: 0; overflow: auto; }
+.om-fold-row { display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: 6px; cursor: pointer; color: var(--om-text); }
+.om-fold-row:hover { background: var(--om-hover); }
+.om-fold-row-on { background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 24%, transparent); }
+.om-fold-art { width: 18px; height: 18px; flex: none; background-color: currentColor; }
+.om-fold-img { width: 18px; height: 18px; flex: none; object-fit: contain; }
+.om-fold-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-fold-meta { flex: none; color: var(--om-muted); font-size: 11px; }
+.om-fold-empty { padding: 14px; color: var(--om-muted); font-size: 13px; }
+.om-fold-list:focus-visible { outline: none; }
+.om-fold-lift { opacity: .45; }
+.om-fold-over { outline: 1px dashed var(--p-button-text-primary-color, #388bfd);
+  outline-offset: -2px; }
+.om-save { gap: 10px; }
+.om-save-trail { display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
+  font-size: 12px; }
+.om-save-step { padding: 2px 6px; border: 0; border-radius: 5px; background: transparent;
+  color: var(--om-text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.om-save-step:hover { background: var(--om-hover); color: var(--om-text); }
+.om-save-sep { color: var(--om-muted); }
+.om-save-list { flex: none; height: 220px; border: 1px solid var(--om-border);
+  border-radius: 8px; background: var(--om-input); }
+.om-save-dim { color: var(--om-muted); cursor: default; }
+.om-props { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px;
+  height: 100%; min-height: 0; overflow: auto; }
+.om-props-head { display: flex; align-items: center; gap: 12px; }
+.om-props-face { width: 48px; height: 48px; flex: none; display: flex;
+  align-items: center; justify-content: center; }
+.om-props-art { width: 44px; height: 44px; background-color: currentColor; }
+.om-props-img { width: 44px; height: 44px; object-fit: contain; }
+.om-props-name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere;
+  border-radius: 4px; padding: 1px 4px; margin: -1px -4px; cursor: text; }
+.om-props-name:hover { background: var(--om-hover); }
+.om-props-rows { display: flex; flex-direction: column; gap: 5px;
+  border-top: 1px solid var(--om-border); padding-top: 12px; }
+.om-props-row { display: flex; gap: 10px; align-items: baseline; font-size: 12px; }
+.om-props-key { flex: none; width: 74px; color: var(--om-muted); }
+.om-props-value { flex: 1; min-width: 0; color: var(--om-text); overflow-wrap: anywhere; }
+.om-props-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto;
+  padding-top: 10px; }
+.om-props-shades { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.om-props-plain { background: var(--om-text); }
+.om-props-muted { opacity: .45; }
+.om-props-gone .om-props-value { color: #d29922; }
+.om-trash-row { display: flex; align-items: center; gap: 9px; padding: 6px 8px;
+  border-radius: 6px; color: var(--om-text); }
+.om-trash-row:hover { background: var(--om-hover); }
+.om-trash-when { flex: none; color: var(--om-muted); font-size: 11px; }
+.om-desk-cell { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: calc(var(--om-desk-icon) + 26px); padding: 6px 3px 5px; border-radius: 8px;
+  position: absolute;
+  border: 1px solid transparent; background: transparent; color: var(--om-text);
+  font: inherit; cursor: pointer; text-align: center; }
+.om-desk-cell:hover { background: color-mix(in srgb, var(--om-text) 12%, transparent); }
+.om-desk-cell-on { background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 26%, transparent);
+  border-color: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 60%, transparent); }
+.om-desk-cell:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+  outline-offset: 1px; }
+.om-desk-art { width: var(--om-desk-icon); height: var(--om-desk-icon); flex: none;
+  background-color: currentColor;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); }
+.om-desk-img { width: var(--om-desk-icon); height: var(--om-desk-icon); flex: none;
+  object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); }
+.om-desk-name { font-size: var(--om-desk-label); line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  height: calc(var(--om-desk-label) * 2.7); width: 100%;
+  overflow: hidden; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
+.om-desk-live { position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--p-button-text-primary-color, #388bfd); visibility: hidden; }
+.om-desk-cell-live .om-desk-live { visibility: visible; }
+.om-desk-cell-lost .om-desk-art, .om-desk-cell-lost .om-desk-img { opacity: .38; }
+.om-desk-cell-lost .om-desk-name { opacity: .55; font-style: italic; }
+.om-desk-tab { display: flex; align-items: center; justify-content: center; flex: none;
+  width: 38px; height: 100%; padding: 0; border: none; background: transparent;
+  border-right: 1px solid var(--interface-stroke, var(--om-border));
+  color: var(--om-muted); cursor: pointer;
+  transition: background var(--default-transition-duration, .1s) linear,
+              color var(--default-transition-duration, .1s) linear; }
+.om-desk-tab:hover { color: var(--om-text);
+  background: var(--p-togglebutton-hover-background, var(--content-hover-bg, var(--om-hover))); }
+.om-desk-tab:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+  outline-offset: -2px; }
+.om-desk-tab-on { color: var(--om-text);
+  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, #388bfd); }
+.om-desk-mark { width: 17px; height: 17px; background-color: currentColor; }
+.om-task-item { display: flex; align-items: center; gap: 8px; flex: none;
+  min-width: 90px; max-width: 240px; height: 100%; padding: 0 12px;
+  border: 0; border-right: 1px solid var(--interface-stroke, var(--om-border));
+  border-radius: 0; background: transparent;
+  color: var(--om-text-2); font-family: inherit; font-size: .875rem; font-weight: 500;
+  line-height: 1.43; text-align: left; opacity: .75; cursor: pointer;
+  transition: background var(--default-transition-duration, .1s) linear,
+              opacity var(--default-transition-duration, .1s) linear,
+              color var(--default-transition-duration, .1s) linear; }
+.om-task-item:hover { opacity: 1; color: var(--om-text);
+  background: var(--p-togglebutton-hover-background, var(--content-hover-bg, var(--om-hover))); }
+.om-task-item:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+  outline-offset: 1px; }
+.om-task-on { background: color-mix(in srgb, var(--om-text) 6%, transparent); }
+.om-task-front { opacity: 1; color: var(--om-text);
+  background: var(--om-surface);
+  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, #388bfd); }
+.om-task-start { border-right: 1px solid var(--interface-stroke, var(--om-border)); }
+.om-task-start-bare { min-width: var(--om-start-wide, 38px);
+  width: var(--om-start-wide, 38px); padding: 0; justify-content: center; }
+.om-task-text { flex: 1; min-width: 0; max-width: 150px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-task-icon { width: 16px; height: 16px; flex: none; border-radius: 3px;
+  object-fit: cover; background: var(--om-input); }
+.om-task-glyph { width: 16px; height: 16px; flex: none; display: inline-flex;
+  align-items: center; justify-content: center; border-radius: 3px;
+  font-size: 11px; line-height: 1; }
+.om-task-count { flex: none; min-width: 18px; padding: 1px 6px; border-radius: 9px;
+  background: var(--om-border); color: var(--om-text-2); font-size: 11px;
+  line-height: 1.4; text-align: center; }
+.om-task-pop { position: fixed; z-index: ${MENU_Z}; min-width: 220px; max-width: 340px;
+  max-height: 50vh; overflow-y: auto; padding: 4px;
+  background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); font: 13px/1.5 system-ui, sans-serif;
+  opacity: 0; transition: opacity .09s linear; }
+.om-task-pop-on { opacity: 1; }
+.om-task-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border-radius: 6px; cursor: pointer; color: var(--om-text); }
+.om-task-row:hover, .om-task-row:focus-visible { background: var(--om-hover); outline: none; }
+.om-task-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-task-row-state { flex: none; color: var(--om-muted); font-size: 11px; }
+.om-task-shut { flex: none; width: 18px; height: 18px; padding: 0; border: none;
+  border-radius: 4px; background: none; color: var(--om-muted); font-size: 14px;
+  line-height: 1; cursor: pointer; visibility: hidden; }
+.om-task-row:hover .om-task-shut, .om-task-row:focus-within .om-task-shut { visibility: visible; }
+.om-task-shut:hover { background: var(--om-hover); color: var(--om-text); }
+@media (max-width: 700px) {
+  .om-task-item .om-task-text { display: none; }
+  .om-task-item { max-width: none; }
+}
+@media (pointer: coarse) {
+  .om-task { height: 48px; }
+  .om-task-item { height: calc(100% - 10px); }
+  .om-task-row { padding: 9px 8px; }
+  .om-task-shut { visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .om-task-pop { transition: none; }
+}
 .om-lib-row { border: 1px solid var(--om-border); border-radius: 8px; padding: 9px 12px;
   display: flex; flex-direction: column; gap: 5px; background: var(--om-surface); }
 .om-lib-size { color: var(--om-muted); font-size: 12px; flex: none; }
@@ -7475,25 +7089,18 @@ video.om-lb-img { background: #000; }
 .om-lib-filter { flex: none; width: 200px; padding: 4px 8px; font-size: 12px; }
 .om-cost { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 6px;
   color: var(--om-muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
-/* A pack taking a fifth of the whole start-up is worth noticing without reading the numbers. */
 .om-cost-high { color: #d29922; border-color: #d29922; }
 .om-cost-failed { background: #a5261d; }
 .om-cost-line { color: var(--om-muted); }
-/* Figures from a run that is not this one are marked rather than quietly presented. */
 .om-cost-stale { color: #d29922; }
-/* Sized to sit in the tab strip beside the buttons, not to draw the eye away from the canvas. */
 .om-mon { display: inline-flex; align-items: center; gap: 10px; margin: 0 8px;
   font: 10px/1.2 system-ui, sans-serif; color: var(--om-muted); white-space: nowrap; }
 .om-mon-cell { display: inline-flex; align-items: center; gap: 4px; }
 .om-mon-label { letter-spacing: .04em; }
-/* The track a figure fills, one shape per axis. */
 .om-mon-bar { display: inline-block; width: 34px; height: 4px; border-radius: 2px;
   background: var(--om-input); overflow: hidden; position: relative; }
 .om-mon-tube { display: inline-block; width: 5px; height: 14px; border-radius: 2px;
   background: var(--om-input); overflow: hidden; position: relative; }
-/* What fills it. The colour says what is being measured -- blue for a share of a total, and
-   a temperature paints its own from the scale -- while the axis says which way it grows. So
-   a meter drawn as a column is still blue, rather than inheriting a thermometer's green. */
 .om-mon-fill { display: block; background: #58a6ff;
   transition: width .4s linear, height .4s linear, background .4s linear; }
 .om-mon-h .om-mon-fill { height: 100%; width: 0; }
@@ -7502,32 +7109,22 @@ video.om-lb-img { background: #000; }
 .om-mon-value { min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .om-mon-dynamic { display: inline-flex; align-items: center; gap: 10px; }
 .om-mon-degrees { min-width: 24px; }
-/* The run bar. Where rgthree and Crystools put theirs, so it is a replacement rather than a
-   second one, and hidden entirely when nothing is running. */
-.om-prog { height: 14px; display: none; pointer-events: none; overflow: hidden;
-  box-shadow: inset 0 -1px 0 rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.06); }
-/* In the layout, above the header, sharing the strip the other packs use. */
+.om-prog { height: 0; pointer-events: none; overflow: hidden;
+  transition: height .2s ease; }
 .om-prog-flow { position: relative; width: 100%; }
-/* Pinned, for a layout with no such strip to join. */
 .om-prog-pinned { position: fixed; top: 0; left: 0; right: 0; z-index: 10001; }
-.om-prog-on { display: block; }
+.om-prog-on { height: 14px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,.35), 0 1px 0 rgba(255,255,255,.06); }
 .om-prog-track { position: absolute; inset: 0; background: #16161d; overflow: hidden; }
-/* Every colour here comes from the palette in use, set on the element as it paints. The
-   fallbacks are the pack's own, for a palette that has only grey to offer. */
 .om-prog { --om-prog-from: #4f688a; --om-prog-to: #84bbe7; --om-prog-cap: #d7ecff;
   --om-prog-glow: rgba(132,187,231,.85); --om-prog-halo: rgba(132,187,231,.45);
   --om-prog-sub: #6b5312; }
-/* The node's own progress, in the node's own colour: a quieter fill in the space that node
-   will occupy. No glow, so it never competes with the graph's progress for attention. */
 .om-prog-sub { position: absolute; top: 0; bottom: 0; width: 0;
   background: var(--om-prog-sub);
   transition: width .15s linear, left .3s ease, background .3s ease; }
-/* The graph's progress. Painted after the node's, so a finished node's block is taken over
-   rather than left beside it. */
 .om-prog-main { position: absolute; top: 0; bottom: 0; left: 0; width: 0;
   background: linear-gradient(90deg, var(--om-prog-from) 0%, var(--om-prog-to) 100%);
   transition: width .3s ease; }
-/* The leading edge, which is the part worth looking at. */
 .om-prog-main::after { content: ""; position: absolute; top: 0; bottom: 0; right: 0;
   width: 2px; background: var(--om-prog-cap);
   box-shadow: 0 0 6px 2px var(--om-prog-glow), 0 0 14px 4px var(--om-prog-halo); }
@@ -7539,23 +7136,27 @@ video.om-lb-img { background: #000; }
   text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9); white-space: nowrap;
   overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
-  .om-prog-sub, .om-prog-main { transition: none; }
+  .om-prog-sub, .om-prog-main, .om-prog { transition: none; }
 }
-/* The light in a panel header. A colour alone is something to worry about, so the reasoning
-   is on the hover; this is only the colour, and the glow that makes it readable at a glance
-   against a dark bar. */
 .om-orb { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-right: 2px;
   background: var(--om-muted); cursor: help; }
+.om-orb-mark { width: calc(var(--om-title-size, 15px) * .85); margin-right: 0;
+  height: calc(var(--om-title-size, 15px) * .85); cursor: pointer; }
 .om-orb-idle { background: #6e7681; box-shadow: 0 0 4px 1px rgba(110,118,129,.45); }
 .om-orb-working { background: #3fb950; box-shadow: 0 0 8px 2px rgba(63,185,80,.55);
   animation: om-orb-breathe 2.4s ease-in-out infinite; }
 .om-orb-stalling { background: #d29922; box-shadow: 0 0 8px 2px rgba(210,153,34,.55); }
-/* Confirmed rather than suspected, so it asks to be looked at rather than sitting there. */
 .om-orb-stalled { background: #d29922; box-shadow: 0 0 10px 3px rgba(210,153,34,.7);
   animation: om-orb-throb 1s ease-in-out infinite; }
 .om-orb-oom { background: #f85149; box-shadow: 0 0 10px 3px rgba(248,81,73,.65); }
 .om-orb-quiet { background: transparent; box-shadow: none;
   border: 2px solid #8b949e; box-sizing: border-box; }
+.om-orb-streaming { background: #39c5cf; box-shadow: 0 0 8px 2px rgba(57,197,207,.55);
+  animation: om-orb-breathe 2.4s ease-in-out infinite; }
+.om-orb-hang { background: #f0883e;
+  box-shadow: 0 0 0 2px rgba(240,136,62,.3), 0 0 12px 4px rgba(240,136,62,.7);
+  animation: om-orb-throb 1s ease-in-out infinite; }
+.om-facts dt .om-orb { display: inline-block; vertical-align: middle; }
 .om-orb-thrashing { background: #db61a2; box-shadow: 0 0 10px 3px rgba(219,97,162,.6);
   animation: om-orb-throb 1.4s ease-in-out infinite; }
 .om-mem-gone { opacity: .6; border-style: dashed; }
@@ -7563,9 +7164,9 @@ video.om-lb-img { background: #000; }
 .om-mem-gone-bar .om-mem-resident { background: var(--om-muted); }
 @keyframes om-orb-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @keyframes om-orb-throb { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
-/* Anyone who has asked for less movement gets the colour and none of the animation. */
 @media (prefers-reduced-motion: reduce) {
-  .om-orb-working, .om-orb-stalled, .om-orb-thrashing { animation: none; }
+  .om-orb-working, .om-orb-stalled, .om-orb-thrashing, .om-orb-streaming,
+  .om-orb-hang { animation: none; }
 }
 .om-mem-drop { padding: 2px 8px; font-size: 11px; flex: none; }
 .om-keys { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; }
@@ -7573,21 +7174,13 @@ video.om-lb-img { background: #000; }
   background: var(--om-surface); display: flex; flex-direction: column; gap: 6px; }
 .om-keys-line { display: flex; gap: 8px; align-items: center; }
 .om-keys-input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; }
-/* Six styles, two shapes: which one a cell gets is all that changes between them. */
 .om-mon-v { align-items: center; }
-/* Compact: the label and the figure sit together over a bar or under a column, so a cell is
-   two elements deep instead of three wide. */
 .om-mon-both { display: inline-flex; gap: 4px; align-items: baseline; }
 .om-mon-compact { position: relative; }
 .om-mon-compact .om-mon-value { min-width: 0; }
 .om-mon-compact.om-mon-h { display: inline-grid; }
 .om-mon-compact.om-mon-h > * { grid-area: 1 / 1; align-self: center; }
 .om-mon-compact.om-mon-h .om-mon-bar { width: 62px; height: 13px; border-radius: 3px; }
-/* The track is positioned, so it paints above anything that is not, however late the text
-   comes in the markup. Positioning the text too is what puts it back on top.
-   The text crosses both the empty track and the fill behind it, and the fill can be blue,
-   green or red, so it is set white and given a dark outline rather than tinted to suit any
-   one of them. */
 .om-mon-compact.om-mon-h .om-mon-both { justify-self: center; padding: 0 4px;
   position: relative; z-index: 1; color: #fff; font-weight: 600;
   text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 2px rgba(0,0,0,.9); }
@@ -7614,20 +7207,10 @@ video.om-lb-img { background: #000; }
 @media (max-width: 1200px) { .om-mon { display: none; } }
 .om-mon { cursor: pointer; border-radius: 6px; padding: 2px 4px; }
 .om-mon:hover { background: var(--om-hover); }
-/* No padding on the body: the graphs run the full width of the window and the bars are what
-   divide them, so nothing needs an inset or a frame. */
-/* The graphs share whatever height the window has, so making the panel taller makes them
-   taller rather than leaving them a fixed strip with space below. Only the model list scrolls. */
 .om-mem-body { display: flex; flex-direction: column; padding: 0; gap: 0;
   flex: 1; min-height: 0; overflow-y: auto; }
-/* No minimum height is set here on purpose. Naming one overrides the automatic minimum, which
-   is the block's own content, and a figure smaller than the bar and the caption together lets
-   the box shrink under them and clip the caption. Letting it be automatic means only the
-   graph gives way, and the panel scrolls once even that has nothing left to give. */
 .om-mem-graph { display: flex; flex-direction: column; flex: 1 1 auto;
   max-height: calc(var(--om-hdr, 44px) + 170px); }
-/* The section bars are the panel's structure, so they are sized to be read at a glance from
-   wherever the screen happens to be, and they follow the same setting the title bar does. */
 .om-mem-bar { display: flex; align-items: center; gap: 10px; padding: 0 14px;
   min-height: var(--om-hdr, 44px);
   background: var(--om-surface); border-top: 1px solid var(--om-border);
@@ -7638,22 +7221,22 @@ video.om-lb-img { background: #000; }
 .om-mem-bar-toggle:hover { background: var(--om-hover); }
 .om-mem-bar-fold { font-size: calc(var(--om-hdr, 44px) * 0.24); color: var(--om-muted);
   flex: none; width: calc(var(--om-hdr, 44px) * 0.3); }
-/* Folded, a graph is just its bar, and the height it was using goes to the others. */
 .om-mem-folded { flex: none; min-height: 0; }
 .om-mem-folded .om-mem-canvas, .om-mem-folded .om-mem-graph-detail { display: none; }
 .om-mem-bar-label { font-size: calc(var(--om-hdr, 44px) * 0.29); font-weight: 600;
   text-transform: uppercase; letter-spacing: .05em; color: var(--om-muted); flex: 1; }
 .om-mem-bar-value { font-size: calc(var(--om-hdr, 44px) * 0.36); font-weight: 600;
   font-variant-numeric: tabular-nums; color: var(--om-text); }
-/* The graph is the only part that gives way when the window is short.
-   The basis is nought rather than automatic: drawing sets the canvas height attribute, which
-   is also its intrinsic size, so an automatic basis would feed each drawing back into the
-   layout and the graph would grow without end. */
-/* Capped as well as floored. A graph is read by its shape, which a taller box does not
-   improve, so past this the room goes to the list of models instead of to more empty chart. */
 .om-mem-quiet .om-mem-canvas, .om-mem-quiet .om-mem-bar-value { opacity: .45; }
 .om-mem-quiet .om-mem-graph-detail { color: #d29922; }
 .om-mon-quiet { opacity: .45; }
+.om-mem-link { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+  background: var(--om-surface); flex: none; }
+.om-mem-link[hidden] { display: none; }
+.om-mem-link-text { flex: 1; min-width: 0; font-size: 13px; color: var(--om-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.om-mem-link-bad .om-mem-link-text { color: #d29922; }
+.om-mem-link .om-btn { flex: none; }
 .om-mem-canvas { width: 100%; flex: 1 1 0; min-height: 34px; max-height: 140px;
   display: block; background: var(--om-input); }
 .om-mem-graph-detail { color: var(--om-muted); font-size: 12px; padding: 0 14px;
@@ -7665,18 +7248,13 @@ video.om-lb-img { background: #000; }
 .om-mem-models { padding: 10px 14px; flex: 2 1 auto; min-height: 90px; overflow-y: auto; }
 .om-mem-model { border: 1px solid var(--om-border); border-radius: 8px; padding: 9px 11px;
   display: flex; flex-direction: column; gap: 6px; background: var(--om-surface); }
-/* Nothing held is an ordinary state, not a problem, so it is said quietly and centred. */
 .om-mem-empty { text-align: center; color: var(--om-muted); opacity: .55;
   padding: 26px 14px; font-size: 14px; }
-/* How much of a model is on the device, against how much of it there is. */
 .om-mem-split { height: 5px; border-radius: 3px; background: var(--om-input); overflow: hidden; }
 .om-mem-resident { height: 100%; background: #a371f7; }
 .om-mem-stream { border-color: #58a6ff; color: #58a6ff; }
 .om-mem-map-slot:empty { display: none; }
 .om-mem-map { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
-/* One square per stretch of the model, sized so the columns divide the width exactly. The
-   frame holds the border and padding; the canvas holds neither, so what it measures is what
-   it draws into. */
 .om-mem-grid-frame { background: var(--om-input); border: 1px solid var(--om-border);
   border-radius: 5px; padding: 4px; }
 .om-mem-grid { display: block; width: 100%; }
@@ -7685,31 +7263,81 @@ video.om-lb-img { background: #000; }
 .om-mem-key-item { display: inline-flex; align-items: center; gap: 5px; }
 .om-mem-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .om-mem-key-note { margin-left: auto; }
-/* In the control bar the strip is one of several groups on a crowded row, so it gives up its
-   outer margin and leans on the row's own spacing. */
 .actionbar-container .om-mon { margin: 0 2px; }
 .om-lib-sweep { border-color: #d29922; }
 .om-mem-bar-label + .om-lib-row { margin-top: 2px; }
 `;
 document.head.appendChild(sidebarStyle);
 
-// --- floating panels ------------------------------------------------------------------------
 
+const FLOAT_SLACK_X = 16;
+const FLOAT_SLACK_Y = 16;
 
-//: Room a panel needs around it before dragging it means anything. A window almost as wide
-//: as the screen has nowhere to go, and letting it be dragged there is only a way to lose
-//: the controls off an edge. With less than this to spare, a panel is presented centred and
-//: fixed however the setting is set -- and goes back to floating the moment there is room.
-const FLOAT_SLACK_X = 120;
-const FLOAT_SLACK_Y = 80;
+const DRAG_DWELL = 600;
 
-//: Open panels, by key. One panel per key, so a second call raises rather than duplicates.
+const DRAG_GAP = 300;
+
 const floatPanels = new Map();
 
 let floatTop = FLOAT_Z;
 
-//: Height of a panel's header bars. Read from the settings rather than fixed, because how
-//: large a bar has to be to read comfortably depends on the screen it is on.
+let taskRoom = 0;
+
+const floatHooks = new Set();
+
+let floatWanted = "";
+
+function workHeight() {
+  return window.innerHeight - taskRoom;
+}
+
+function setTaskRoom(height) {
+  const px = Math.max(0, Math.round(height));
+  if (px === taskRoom) return;
+  taskRoom = px;
+  document.documentElement.style.setProperty("--om-bar-h", `${px}px`);
+  for (const panel of floatPanels.values()) panel.reflow?.();
+  deskFit();
+}
+
+function floatChanged() {
+  for (const fn of floatHooks) {
+    try { fn(); } catch {}
+  }
+}
+
+function floatWantFocus(key) {
+  floatWanted = String(key || "");
+}
+
+function floatTakeFocus() {
+  const key = floatWanted;
+  floatWanted = "";
+  return key;
+}
+
+function deskReduced() {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+function floatGroup(key) {
+  const text = String(key || "");
+  const at = text.indexOf(":");
+  return at > 0 ? text.slice(0, at) : (text || "window");
+}
+
+function taskbarOn() {
+  return panelSetting("openManager.taskbar", false) === true;
+}
+
+function taskbarGrouped() {
+  return panelSetting("openManager.taskbarGroups", false) === true;
+}
+
 const HEADER_DEFAULT = 44;
 
 function headerHeight() {
@@ -7717,8 +7345,6 @@ function headerHeight() {
   return Number.isFinite(asked) ? Math.max(24, Math.min(80, Math.round(asked))) : HEADER_DEFAULT;
 }
 
-// Applied to every open panel, so changing the setting is visible at once rather than on the
-// next time a panel happens to be opened.
 function applyHeaderHeight() {
   const height = `${headerHeight()}px`;
   for (const panel of document.querySelectorAll(".om-float")) {
@@ -7736,22 +7362,59 @@ function floatRecall(key, fallback) {
 }
 
 function floatRemember(key, state) {
-  try { localStorage.setItem(`om-float-${key}`, JSON.stringify(state)); } catch { /* private */ }
+  try { localStorage.setItem(`om-float-${key}`, JSON.stringify(state)); } catch {}
 }
 
-// A window the reader can move, size and fold away, that does not block the canvas underneath.
-//
-// Returns a handle rather than an element: the caller fills `body` and leaves placement,
-// persistence and stacking to this.
-// Say which window is in front.
-//
-// With several open, the one being typed into is not otherwise distinguishable from the three
-// behind it: they are the same colour, at the same size, and only the stacking order says
-// anything. This is the only signal that the keyboard is going somewhere in particular.
 function markActive(panel) {
-  for (const other of document.querySelectorAll(".om-float")) {
-    other.classList.toggle("om-float-active", other === panel);
+  let changed = false;
+  for (const other of document.querySelectorAll(".om-float:not(.om-float-away)")) {
+    const want = other === panel;
+    if (other.classList.contains("om-float-active") !== want) changed = true;
+    other.classList.toggle("om-float-active", want);
   }
+  if (changed) floatChanged();
+}
+
+const BAR_INERT = "button, input, textarea, select, [contenteditable]";
+
+const BAR_PAINTS = {
+  plain: "",
+  accent: "var(--p-button-text-primary-color, #388bfd)",
+  green: "#3fb950",
+  amber: "#d29922",
+  red: "#f85149",
+  purple: "#a371f7",
+  teal: "#39c5cf",
+  grey: "var(--om-muted)",
+};
+
+function barTint(value) {
+  const wanted = String(value || "").trim().toLowerCase();
+  if (Object.hasOwn(BAR_PAINTS, wanted)) return BAR_PAINTS[wanted];
+  return TAB_HEX.test(wanted) ? wanted : "";
+}
+
+function barPaint(look, { over = "transparent" } = {}) {
+  const from = barTint(look?.from || look?.tint);
+  if (!from) return "";
+  const to = barTint(look?.to) || from;
+  const near = `color-mix(in srgb, ${from} 22%, ${over})`;
+  const far = `color-mix(in srgb, ${to} ${look?.to ? 22 : 6}%, ${over})`;
+  return `linear-gradient(100deg, ${near}, ${far})`;
+}
+
+function readColour(text) {
+  const parts = String(text || "").split(",").map((one) => one.trim().toLowerCase())
+    .filter(Boolean);
+  if (!parts.length) return null;
+  if (parts.length > 1 && barTint(parts[0]) && barTint(parts[1])) {
+    return { from: parts[0], to: parts[1] };
+  }
+  return barTint(parts[0]) ? { tint: parts[0] } : null;
+}
+
+function paintBar(bar, look) {
+  bar.style.setProperty("--om-bar-paint", barPaint(look) || "none");
 }
 
 function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
@@ -7759,42 +7422,44 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
   const open = floatingPanel(key);
   if (open) { open.present(); return open; }
 
-  const saved = floatRecall(key, {});
-  // What the screen can actually take. A size remembered from a larger window is brought
-  // back into range rather than restored as a panel that hangs off the edge.
+  let id = String(key);
+  const saved = floatRecall(id, {});
   const fits = (asked, floor, room) => Math.max(floor, Math.min(asked, room));
-  // Presentation only. A panel that does not float still opens, folds, resizes to the size
-  // it is given and closes the same way; it simply always appears in the middle and cannot
-  // be dragged off somewhere and lost.
-  // A modal never floats whatever the dragging setting says: it is centred over a backdrop,
-  // which is the whole of what makes it a modal rather than a window.
   const wantsFloat = !modal && panelSetting("openManager.floatingPanels", true) !== false;
   const panel = el("div", "om-float");
-  // Asked for every time rather than settled at open, so a window resized down to a laptop
-  // or a tablet stops being draggable there and then, and a window opened up again goes
-  // back to floating without being closed and reopened.
-  const floating = () => wantsFloat
-    && window.innerWidth - panel.offsetWidth >= FLOAT_SLACK_X
-    && window.innerHeight - panel.offsetHeight >= FLOAT_SLACK_Y;
-  //: Where the panel was floating before the window got too small for it. Centring
-  //: overwrites the position, so without this a shrink and a grow leaves the panel wherever
-  //: being centred put it rather than where the reader had it.
+  panel.tabIndex = -1;
+  panel.addEventListener("keydown", (event) => {
+    const on = event.target;
+    if (!(on instanceof Element)) return;
+    if (!on.closest("input, textarea, select, [contenteditable='true']")) return;
+    event.stopPropagation();
+  });
+  const floating = () => wantsFloat;
+  const roomy = () => window.innerWidth - panel.offsetWidth >= FLOAT_SLACK_X
+    && workHeight() - panel.offsetHeight >= FLOAT_SLACK_Y;
+  let placed = false;
+  const anchored = () => floating() && (roomy() || placed);
   let parked = null;
+  let minimised = false;
+  let awayAt = 0;
+  let snug = true;
   const applyMode = () => {
-    const now = floating();
-    if (!now && !panel.classList.contains("om-float-fixed") && panel.style.left) {
+    const now = anchored();
+    if (!now && snug && panel.style.left) {
       parked = { left: parseInt(panel.style.left, 10) || 0,
                  top: parseInt(panel.style.top, 10) || 0 };
     }
-    panel.classList.toggle("om-float-fixed", !now);
+    snug = now;
+    panel.classList.toggle("om-float-fixed", !floating());
   };
-  // A remembered size is the reader's decision and is used as it stands. The figure passed in
-  // has already been sized to the viewport and scaled by the setting, so nothing is applied to
-  // it a second time here.
   panel.style.width = `${fits(saved.width || width, 280, window.innerWidth - 16)}px`;
   panel.style.setProperty("--om-hdr", `${headerHeight()}px`);
 
   const bar = el("div", "om-float-bar");
+  const shrink = el("button", "om-float-min", "▁");
+  shrink.title = "Minimise";
+  shrink.setAttribute("aria-label", "Minimise");
+  shrink.hidden = modal || !taskbarOn();
   const fold = el("button", "om-float-fold", "▾");
   fold.title = "Collapse";
   bar.appendChild(fold);
@@ -7803,33 +7468,33 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
   mark.hidden = true;
   mark.onerror = () => { mark.hidden = true; };
   bar.appendChild(mark);
+  const glyph = el("span", "om-float-glyph");
+  glyph.hidden = true;
+  bar.appendChild(glyph);
   const heading = el("div", "om-float-title", title);
   bar.appendChild(heading);
   const badge = el("div", "om-float-badge");
   bar.appendChild(badge);
+  bar.appendChild(shrink);
   const close = el("button", "om-float-close", "×");
   close.title = "Close";
   bar.appendChild(close);
   panel.appendChild(bar);
 
-  // The controls sit under the title rather than in it. A title bar carrying a filter box,
-  // three buttons and a summary has no room left to be a title, and the row scales with the
-  // header height setting, which is a size chosen for reading a title rather than for
-  // pressing a button. This row is a fixed height for that reason.
   const tools = el("div", "om-float-tools");
   panel.appendChild(tools);
 
   const body = el("div", "om-float-body");
   body.style.height =
-    `${fits(saved.height || height, 80, window.innerHeight - headerHeight() - 24)}px`;
+    `${fits(saved.height || height, 80, workHeight() - headerHeight() - 24)}px`;
   panel.appendChild(body);
+
+  paintBar(bar, deskLook(id));
 
   const grip = el("div", "om-float-grip");
   grip.title = "Resize";
   panel.appendChild(grip);
 
-  // A modal is the same panel inside a backdrop, so everything below -- folding, resizing,
-  // the remembered size, the header -- works identically and only the framing differs.
   const backdrop = modal ? el("div", "om-backdrop om-backdrop-panel") : null;
   if (backdrop) {
     backdrop.appendChild(panel);
@@ -7838,59 +7503,40 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     document.body.appendChild(panel);
   }
 
-  // Placement, clamped into the viewport. A position saved on a monitor that is no longer
-  // attached would otherwise restore a panel nobody can reach.
-  //
-  // Mid-drag the rule is loose: a corner stays reachable and the rest may hang off, because
-  // parking a panel at the edge is a thing people do on purpose.
   const place = (left, top) => {
     const rect = panel.getBoundingClientRect();
     const x = Math.min(Math.max(left, 8 - rect.width + 120), window.innerWidth - 120);
-    const y = Math.min(Math.max(top, 0), window.innerHeight - 36);
+    const y = Math.min(Math.max(top, 0), workHeight() - 36);
     panel.style.left = `${Math.round(x)}px`;
     panel.style.top = `${Math.round(y)}px`;
   };
 
-  // Opening, and recovering from a window resize, are not a drag: nobody chose this
-  // position now. So where the panel fits, all of it goes on screen -- a position remembered
-  // from a wide monitor otherwise reopens on a laptop or a tablet with the close button past
-  // the right-hand edge. Where the panel is larger than the window, the loose rule is all
-  // that is available, and at least it can be dragged.
   const settle = (left, top) => {
     const rect = panel.getBoundingClientRect();
     if (rect.width + 16 <= window.innerWidth) {
       left = Math.min(Math.max(left, 8), window.innerWidth - rect.width - 8);
     }
-    if (rect.height + 16 <= window.innerHeight) {
-      top = Math.min(Math.max(top, 8), window.innerHeight - rect.height - 8);
+    if (rect.height + 16 <= workHeight()) {
+      top = Math.min(Math.max(top, 8), workHeight() - rect.height - 8);
     }
     place(left, top);
   };
-  // Truly centred, with only the margin the border needs as a floor. A larger floor wins
-  // over the centring on a window barely wider than the panel, which is exactly the case
-  // this is for, and leaves it sitting against one edge.
   const centre = () => place(
     Math.max(8, (window.innerWidth - panel.offsetWidth) / 2),
-    Math.max(8, (window.innerHeight - panel.offsetHeight) / 2),
+    Math.max(8, (workHeight() - panel.offsetHeight) / 2),
   );
   applyMode();
-  if (floating()) {
-    // A panel the reader has placed goes back where they put it. One they have not is placed
-    // by its own default: the utility windows sit high, where they overlap least of the
-    // graph, while a full page opens in the middle because it is the thing being read.
+  if (anchored()) {
     settle(
       saved.left ?? Math.max(16, (window.innerWidth - panel.offsetWidth) / 2),
       saved.top ?? (centred
-        ? Math.max(16, (window.innerHeight - panel.offsetHeight) / 2)
-        : Math.max(56, window.innerHeight * 0.18)),
+        ? Math.max(16, (workHeight() - panel.offsetHeight) / 2)
+        : Math.max(56, workHeight() * 0.18)),
     );
   } else {
     centre();
   }
 
-  // Size and position, and deliberately not whether it was folded. Collapsing is an
-  // arrangement of the desk rather than a preference, and restoring it meant clicking a pack
-  // and getting a window already collapsed, which reads as the click having failed.
   const state = () => ({
     left: parseInt(panel.style.left, 10) || 0,
     top: parseInt(panel.style.top, 10) || 0,
@@ -7898,26 +7544,31 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     height: parseInt(body.style.height, 10) || height,
   });
   const remember = () => {
+    if (minimised) return;
     const now = state();
-    // Written by an older build, read by nothing now.
-    const { folded: _gone, ...previous } = floatRecall(key, {});
-    // A centred panel has no position of its own to keep. Writing one away would move the
-    // panel the moment there was room to float again, or the setting was turned back on --
-    // to a place the reader never chose, on a screen they may not be using any more.
-    if (!floating()) { delete now.left; delete now.top; }
-    floatRemember(key, { ...previous, ...now });
+    const { folded: _gone, ...previous } = floatRecall(id, {});
+    if (!anchored()) { delete now.left; delete now.top; }
+    floatRemember(id, { ...previous, ...now });
   };
 
   const raise = () => {
-    // Marked before the early return: a panel can already be on top and still not be the one
-    // wearing the class, which is what happens when another window is destroyed.
     markActive(panel);
     if (Number(panel.style.zIndex) === floatTop && floatTop > FLOAT_Z) return;
     floatTop = floatTop >= FLOAT_Z_TOP ? FLOAT_Z : floatTop + 1;
     panel.style.zIndex = String(floatTop);
   };
-  // Clicking anywhere in a window brings it forward, which is what makes it the active one.
   panel.addEventListener("pointerdown", raise, true);
+  let dwellFrom = 0;
+  let dwellSeen = 0;
+  panel.addEventListener("dragover", () => {
+    if (panel.classList.contains("om-float-active")) return;
+    const now = Date.now();
+    if (!dwellFrom || now - dwellSeen > DRAG_GAP) dwellFrom = now;
+    dwellSeen = now;
+    if (now - dwellFrom < DRAG_DWELL) return;
+    dwellFrom = 0;
+    raise();
+  });
   markActive(panel);
   panel.style.zIndex = String(FLOAT_Z);
   raise();
@@ -7925,12 +7576,9 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
 
   const setFolded = (folded) => {
     panel.classList.toggle("om-float-folded", folded);
-    // Unfolding grows the panel downwards, which can push it past the bottom of a short
-    // window; folding shrinks it and may leave it floating oddly low. Either way it is not
-    // a drag, so the same settling applies.
     requestAnimationFrame(() => {
       applyMode();
-      if (floating()) {
+      if (anchored()) {
         settle(parseInt(panel.style.left, 10) || 0, parseInt(panel.style.top, 10) || 0);
       } else {
         centre();
@@ -7940,17 +7588,93 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     fold.title = folded ? "Expand" : "Collapse";
     remember();
   };
+  const taskSeat = () => {
+    const item = taskBar?.querySelector(`[data-om-task="${CSS.escape(id)}"]`)
+      || taskBar?.querySelector(`[data-om-group="${CSS.escape(floatGroup(id))}"]`)
+      || taskBar;
+    return item?.getBoundingClientRect() || null;
+  };
+
+  const travel = (toward, after) => {
+    const seat = taskSeat();
+    const from = panel.getBoundingClientRect();
+    if (!seat || !from.width || !from.height || deskReduced()) { after(); return; }
+    const scale = Math.max(0.08, Math.min(1, seat.width / from.width));
+    const dx = seat.left + seat.width / 2 - (from.left + from.width / 2);
+    const dy = seat.top + seat.height / 2 - (from.top + from.height / 2);
+    const shut = `translate(${Math.round(dx)}px, ${Math.round(dy)}px) scale(${scale})`;
+    panel.classList.add("om-float-travel");
+    if (toward === "bar") {
+      panel.style.transform = shut;
+      panel.style.opacity = "0";
+    } else {
+      panel.style.transform = shut;
+      panel.style.opacity = "0";
+      requestAnimationFrame(() => {
+        panel.style.transform = "";
+        panel.style.opacity = "";
+      });
+    }
+    const done = () => {
+      panel.removeEventListener("transitionend", done);
+      clearTimeout(fallback);
+      panel.classList.remove("om-float-travel");
+      panel.style.transform = "";
+      panel.style.opacity = "";
+      after();
+    };
+    const fallback = setTimeout(done, 260);
+    panel.addEventListener("transitionend", done);
+  };
+
+  const setMinimised = (want) => {
+    if (modal || want === minimised) return;
+    if (want && !taskbarOn()) return;
+    minimised = want;
+    if (want) {
+      travel("bar", () => panel.classList.add("om-float-away"));
+    } else {
+      panel.classList.remove("om-float-away");
+      travel("window", () => {});
+    }
+    if (want) {
+      awayAt = Date.now();
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && panel.contains(focused)) focused.blur();
+      panel.classList.remove("om-float-active");
+      const rest = [...document.querySelectorAll(".om-float:not(.om-float-away)")]
+        .sort((a, b) => (Number(a.style.zIndex) || 0) - (Number(b.style.zIndex) || 0));
+      markActive(rest[rest.length - 1] || null);
+      panel.dispatchEvent(new CustomEvent("om-win:minimise", { detail: { key: id } }));
+      floatWantFocus(id);
+      floatChanged();
+      return;
+    }
+    requestAnimationFrame(() => {
+      applyMode();
+      if (anchored()) {
+        settle(parseInt(panel.style.left, 10) || 0, parseInt(panel.style.top, 10) || 0);
+      } else {
+        centre();
+      }
+      remember();
+      panel.dispatchEvent(new CustomEvent("om-float-resize"));
+    });
+    panel.dispatchEvent(new CustomEvent("om-win:restore", { detail: { key: id } }));
+    raise();
+    panel.focus({ preventScroll: true });
+    floatChanged();
+  };
+  shrink.onclick = (event) => { event.stopPropagation(); setMinimised(true); };
   fold.onclick = (event) => { event.stopPropagation(); setFolded(!panel.classList.contains("om-float-folded")); };
   bar.addEventListener("dblclick", (event) => {
-    if (event.target.closest("button")) return;
+    if (event.target.closest(BAR_INERT)) return;
     setFolded(!panel.classList.contains("om-float-folded"));
   });
 
-  // Dragging and resizing move the element directly and only write the result away on release,
-  // so a drag is not a storm of layout and localStorage writes.
   const drag = (handle, onMove, allowed = () => true) => {
     handle.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || event.target.closest("button") || !allowed()) return;
+      if (event.button !== 0 || event.target.closest(BAR_INERT) || !allowed()) return;
       event.preventDefault();
       const start = { x: event.clientX, y: event.clientY,
                       left: parseInt(panel.style.left, 10) || 0,
@@ -7971,38 +7695,42 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     });
   };
 
-  drag(bar, (start, dx, dy) => place(start.left + dx, start.top + dy), floating);
+  drag(bar, (start, dx, dy) => {
+    placed = true;
+    snug = true;
+    place(start.left + dx, start.top + dy);
+  }, floating);
   drag(grip, (start, dx, dy) => {
     if (panel.classList.contains("om-float-folded")) return;
     panel.style.width = `${Math.max(280, start.width + dx)}px`;
     body.style.height = `${Math.max(80, start.height + dy)}px`;
     applyMode();
-    if (!floating()) centre();
-    // Anything drawn rather than laid out has to be told the size changed.
+    if (!anchored()) centre();
     panel.dispatchEvent(new CustomEvent("om-float-resize"));
   });
 
-  const destroy = () => {
+  const destroy = async () => {
+    const asked = handle.confirmClose?.();
+    if (asked === false) return;
+    if (asked && typeof asked.then === "function" && !await asked) return;
     remember();
     (backdrop || panel).remove();
-    floatPanels.delete(key);
+    floatPanels.delete(id);
     onClose?.();
-    // Whatever is highest now is the one in front; without this every window is left inactive.
-    const rest = [...document.querySelectorAll(".om-float")]
+    panel.dispatchEvent(new CustomEvent("om-prog-close"));
+    const rest = [...document.querySelectorAll(".om-float:not(.om-float-away)")]
       .sort((a, b) => (Number(a.style.zIndex) || 0) - (Number(b.style.zIndex) || 0));
     if (rest.length) markActive(rest[rest.length - 1]);
+    floatChanged();
   };
-  // Clicking away closes a modal, as it does everywhere else in the interface. closeOn is
-  // used rather than a plain click handler because it ignores a drag that began inside and
-  // ended outside, which is what selecting text or using a scrollbar looks like.
   if (backdrop) closeOn(backdrop, destroy);
   close.onclick = destroy;
 
-  // A window left half off-screen after the browser is resized is brought back.
   const onResize = () => {
     if (!panel.isConnected) { window.removeEventListener("resize", onResize); return; }
+    if (minimised) return;
     applyMode();
-    if (!floating()) { centre(); return; }
+    if (!anchored()) { centre(); return; }
     const back = parked;
     parked = null;
     settle(back?.left ?? (parseInt(panel.style.left, 10) || 0),
@@ -8010,36 +7738,83 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
   };
   window.addEventListener("resize", onResize);
 
+  let art = null;
+  const showIcon = () => {
+    const shown = art?.bar === false ? null : art;
+    const wanted = panelSetting("openManager.windowIcons", true) !== false ? shown : null;
+    if (wanted?.kind === "src") {
+      mark.src = wanted.url;
+      mark.hidden = false;
+    } else {
+      mark.hidden = true;
+      mark.removeAttribute("src");
+    }
+    if (wanted?.kind === "mask") {
+      glyph.style.setProperty("-webkit-mask", `center / contain no-repeat url("${wanted.url}")`);
+      glyph.style.setProperty("mask", `center / contain no-repeat url("${wanted.url}")`);
+      glyph.style.backgroundColor = wanted.tint || "currentColor";
+      glyph.hidden = false;
+    } else {
+      glyph.hidden = true;
+    }
+  };
+
   const handle = {
-    el: panel, body, bar, tools, key,
-    // The title is set again when what the window is showing changes, so a page read at a
-    // branch or a tag says so where the reader is already looking.
+    el: panel, body, bar, tools, key: id,
+    group: floatGroup(id),
+    modal,
     setTitle: (text) => {
       const label = bar.querySelector(".om-float-title");
       if (label) { label.textContent = text; label.title = text; }
+      floatChanged();
     },
+    title: () => heading.textContent || "",
+    icon: () => (art ? { ...art } : null),
+    refreshIcon: showIcon,
     raise, destroy,
-    // Opening something already open. Raising alone leaves a collapsed window collapsed, so
-    // the reader clicks and nothing they can see happens.
-    present: () => { setFolded(false); raise(); },
-    setIcon: (url) => {
-      const wanted = panelSetting("openManager.windowIcons", true) === true && safeUrl(url || "");
-      if (!wanted) { mark.hidden = true; mark.removeAttribute("src"); return; }
-      mark.src = wanted;
-      mark.hidden = false;
+    rekey: (next) => {
+      const want = String(next || "");
+      if (!want || want === id) return id;
+      floatingPanel(want)?.destroy();
+      const carried = floatRecall(id, null);
+      floatPanels.delete(id);
+      try { localStorage.removeItem(`om-float-${id}`); } catch {}
+      id = want;
+      handle.key = id;
+      handle.group = floatGroup(id);
+      if (carried) floatRemember(id, carried);
+      floatPanels.set(id, handle);
+      floatChanged();
+      return id;
+    },
+    minimise: () => setMinimised(true),
+    restore: () => setMinimised(false),
+    isMinimised: () => minimised,
+    minimisedAt: () => awayAt,
+    reflow: onResize,
+    showMinimise: () => { shrink.hidden = modal || !taskbarOn(); },
+    present: () => { setMinimised(false); setFolded(false); raise(); },
+    setMaskIcon: (url, { bar = true, tint = "" } = {}) => {
+      const text = safeArt(url);
+      art = text ? { kind: "mask", url: text, bar, tint: TAB_HEX.test(tint) ? tint : "" } : null;
+      showIcon();
+      floatChanged();
+    },
+    setIcon: (url, { bar = true } = {}) => {
+      const text = safeArt(url);
+      art = text ? { kind: "src", url: text, bar } : null;
+      showIcon();
+      floatChanged();
     },
     setBadge: (text) => { badge.textContent = text || ""; },
+    setLook: (look) => paintBar(bar, look),
     isFolded: () => panel.classList.contains("om-float-folded"),
   };
-  floatPanels.set(key, handle);
+  floatPanels.set(id, handle);
+  floatChanged();
   return handle;
 }
 
-// The open panel for a key, or nothing.
-//
-// A handle whose element has left the document is not an open panel. Anything can remove a
-// node -- another extension tidying up, a defensive sweep of our own -- and a handle left
-// behind in the map would answer "already open" forever, with no way to get the window back.
 function floatingPanel(key) {
   const found = floatPanels.get(key);
   if (found && found.el.isConnected) return found;
@@ -8051,9 +7826,7 @@ function closeFloatingPanel(key) {
   floatingPanel(key)?.destroy();
 }
 
-// --- download manager ---------------------------------------------------------------
 
-//: Polled while the panel is open: often while something is moving, rarely when nothing is.
 const DL_POLL_BUSY = 900;
 const DL_POLL_IDLE = 4000;
 
@@ -8074,8 +7847,6 @@ async function dlPost(path, body) {
   return answer.json();
 }
 
-// The model folders this ComfyUI has, read once. The picker needs them because a URL says
-// what a file is called, never where it belongs.
 async function modelFolders() {
   if (dlFolders) return dlFolders;
   try {
@@ -8086,7 +7857,6 @@ async function modelFolders() {
   return dlFolders;
 }
 
-//: Registered paths per model folder, read once each. ComfyUI's own list, never a typed one.
 const dlRoots = new Map();
 
 async function modelRoots(directory) {
@@ -8103,15 +7873,10 @@ async function modelRoots(directory) {
   return dlRoots.get(directory);
 }
 
-// Whether a model can actually be written here. A path on a drive that is not mounted is
-// still registered, and still listed, but it cannot be chosen.
 function rootUsable(root) {
   return !!root && root.writable && root.total > 0;
 }
 
-// Which location a new download starts on. ComfyUI's own default leads unless the reader
-// has asked for whichever drive has the most room, which is the point of the setting on a
-// machine whose default drive is the small one.
 function preferredRoot(roots) {
   const usable = (roots || []).filter(rootUsable);
   if (!usable.length) return "";
@@ -8119,7 +7884,6 @@ function preferredRoot(roots) {
   return usable.reduce((best, one) => (one.free > best.free ? one : best)).path;
 }
 
-// A long path with its middle dropped, so the drive and the folder both stay readable.
 function shortPath(text, cap = 48) {
   const value = String(text || "");
   if (value.length <= cap) return value;
@@ -8132,9 +7896,6 @@ function rootLabel(root, isDefault) {
   return `${shortPath(root.path)} - ${space}${isDefault ? " (default)" : ""}`;
 }
 
-// The location picker. Every registered path is listed so the reader can see what ComfyUI
-// knows; the ones that cannot be written are shown greyed rather than hidden, because their
-// absence would otherwise look like a missing drive had been forgotten.
 function rootSelect(roots, chosen) {
   const select = el("select", "om-side-select om-dl-root");
   roots.forEach((root, index) => {
@@ -8164,7 +7925,6 @@ function bytesText(value) {
   return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
 }
 
-// The distinct extensions among some files, in the order they first appear.
 function formatsOf(names) {
   const seen = [];
   for (const name of names) {
@@ -8176,10 +7936,6 @@ function formatsOf(names) {
   return seen;
 }
 
-// Ask before fetching from an account the reader has not trusted. The same two modes as
-// packs, kept on a list of their own: trusting someone to ship code that runs with ComfyUI's
-// privileges is a different question from trusting a file they host, so neither answers the
-// other.
 async function confirmDownloadTrust(owner, what, plural = false, formats = []) {
   if (!owner) return true;
   const byAuthor = panelSetting("openManager.trustMode", "author") !== "action";
@@ -8189,7 +7945,6 @@ async function confirmDownloadTrust(owner, what, plural = false, formats = []) {
         `${API}/trust?kind=downloads&owner=${encodeURIComponent(owner)}`);
       if ((await answer.json()).trusted === true) return true;
     } catch {
-      // Treated as untrusted, which asks rather than assumes.
     }
   }
   const host = owner.split("/")[0];
@@ -8205,8 +7960,6 @@ async function confirmDownloadTrust(owner, what, plural = false, formats = []) {
     facts: [
       ["Host", host],
       ["Account", account],
-      // Reaching this prompt in author mode means the list was consulted and did not have
-      // them; in action mode the list is never consulted, which is a different answer.
       ["Trusted", byAuthor ? "No" : "Not tracked, asked every time"],
       [plural ? "Files" : "File", what],
       [formats.length === 1 ? "Format" : "Formats", formats.join(", ")],
@@ -8218,19 +7971,12 @@ async function confirmDownloadTrust(owner, what, plural = false, formats = []) {
     try {
       await dlPost("/trust", { owner, kind: "downloads", trusted: true });
     } catch {
-      toast(`Could not remember ${owner}; continuing anyway.`, { kind: "warn" });
+      toast(`Could not remember ${owner}.`, { kind: "warn" });
     }
   }
   return true;
 }
 
-// What a batch would ask of each drive, asked before any of it is queued. The server
-// measures each file at its host and adds what is already promised to that drive, because
-// three downloads that each fit on their own can still not fit together.
-//
-// The answer is a question, not a refusal. Someone about to clear space, or who knows the
-// figure is an over-count because two of the files replace what is already there, is better
-// served by the numbers than by being stopped. Returns whether to go ahead.
 async function confirmDiskRoom(items) {
   if (!items.length) return true;
   let report;
@@ -8260,8 +8006,7 @@ async function confirmDiskRoom(items) {
                 `${report.unknown} file${report.unknown === 1 ? "" : "s"} the host gave no size `
                 + "for, so the real figure is higher"]);
   }
-  facts.push(["If you go ahead", "Each download stops when the drive fills, keeping what "
-                                 + "arrived. Nothing already on disk is touched."]);
+  facts.push(["If queued", "Each download stops when the drive fills, keeping what arrived"]);
   const go = await chooseAction(
     short.length === 1 ? `There is not room on ${short[0].path}`
                        : "Not enough room on these drives",
@@ -8269,14 +8014,11 @@ async function confirmDiskRoom(items) {
   return !!go;
 }
 
-// Whether two paths name the same file, allowing for separator and case differences.
 function samePlace(left, right) {
   const fold = (value) => String(value || "").replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
   return !!left && fold(left) === fold(right);
 }
 
-// Put one model on the queue, asking about the account first and about replacing a file that
-// is already there. Returns whether it was queued.
 async function queueModel(model, { source = "", askTrust = true } = {}) {
   if (askTrust && !(await confirmDownloadTrust(
       model.owner, model.name || "This model", false, formatsOf([model.name])))) {
@@ -8289,8 +8031,6 @@ async function queueModel(model, { source = "", askTrust = true } = {}) {
   };
   let result = await dlPost("/downloads", body);
   if (!result.ok && result.installed && !model.overwrite) {
-    // Storing it somewhere else leaves the copy that is already there, which is a different
-    // thing from replacing it and is worth saying plainly before it happens.
     const elsewhere = model.root
       && !samePlace(result.installed, `${model.root}\\${model.name}`)
       && !samePlace(result.installed, `${model.root}/${model.name}`);
@@ -8316,7 +8056,6 @@ async function queueModel(model, { source = "", askTrust = true } = {}) {
   return true;
 }
 
-// --- the panel ----------------------------------------------------------------------
 
 function dlStatusText(row) {
   if (row.status === "downloading") {
@@ -8336,19 +8075,11 @@ function dlStatusText(row) {
   return "Waiting";
 }
 
-//: How the list is divided. Two questions are asked of the same downloads: what a transfer
-//: is doing, and whether its file is there. A finished transfer therefore appears under both
-//: Transfers and Downloaded, because those answer different things.
-//:
-//: Every tab is shown whether or not it holds anything. The list is a record, and a tab that
-//: vanishes when empty cannot be consulted to find out that nothing is in it.
 const DL_VIEWS = [
   {
     key: "transfers",
     title: "Transfers",
     tabs: [
-      // A transfer in flight is stopped per row rather than swept up, so this tab offers
-      // nothing to clear.
       { key: "downloading", title: "Downloading",
         holds: (row) => ["queued", "downloading", "pausing"].includes(row.status),
         empty: "Nothing is transferring.", clearable: false },
@@ -8364,8 +8095,6 @@ const DL_VIEWS = [
     key: "downloaded",
     title: "Downloaded",
     tabs: [
-      // These rows are files rather than records, so each is managed from its own menu.
-      // A single action over all of them would mean deleting every model at once.
       { key: "on-disk", title: "On Disk",
         holds: (row) => row.on_disk === true,
         empty: "No downloaded file is on disk.", clearable: false },
@@ -8376,11 +8105,10 @@ const DL_VIEWS = [
   },
 ];
 
-//: Which tab the panel opens on, kept so it returns where it was left.
 const DL_VIEW_KEY = "om-dl-view";
 
 function dlRemember(key, value) {
-  try { localStorage.setItem(key, value); } catch { /* private browsing */ }
+  try { localStorage.setItem(key, value); } catch {}
 }
 
 function dlRecall(key, fallback) {
@@ -8418,9 +8146,6 @@ function buildDownloadRow(row, refresh) {
   bar.appendChild(fill);
   item.appendChild(bar);
 
-  // The hash belongs to the file, so it reads with the path above it -- and it goes before
-  // the action row rather than after, so the Manage menu always hangs from the corner of the
-  // card instead of from the middle of one that happens to carry a hash.
   const digest = row.sha256 || row.declared_hash || row.hash || row.sha256_observed;
   if (digest) {
     const line = el("div", "om-dl-hash");
@@ -8478,8 +8203,6 @@ function buildDownloadRow(row, refresh) {
   return item;
 }
 
-// The actions a file already on disk offers. Deleting removes the file and keeps the record,
-// so the entry moves to Archive and can be fetched again from there.
 function fileMenu(row, refresh) {
   const send = async (action) => {
     const answer = await dlPost("/downloads/action", { action, id: row.id, workers: dlWorkers() });
@@ -8539,24 +8262,28 @@ function fileMenu(row, refresh) {
   ];
 }
 
-// The Download Manager: what has been fetched, what is on the way, and a way to add more.
 function openDownloadManager() {
-  if (floatingPanel("downloads")) { closeFloatingPanel("downloads"); return null; }
+  const shown = floatingPanel("downloads");
+  if (shown?.isMinimised?.()) { shown.present(); return shown; }
+  if (shown) { closeFloatingPanel("downloads"); return null; }
 
   const panel = createFloatingPanel({
     key: "downloads", title: "Download Manager", ...windowSize("downloads"),
     modal: !asWindow("downloads"),
     onClose: stopDownloadPolling,
   });
+  panel.setMaskIcon(ICON_DOWNLOADS);
   const dialog = panel.el;
   const summary = el("div", "om-dl-summary", "Reading...");
   panel.bar.querySelector(".om-float-badge").appendChild(summary);
-  const tools = panel.tools;
-  const add = el("button", "om-btn om-go", "+ Add a download");
+  const barEnd = el("span", "om-dl-bar-end");
+  const add = el("button", "om-btn om-go om-dl-plus");
+  add.appendChild(plusMark(14));
+  add.setAttribute("aria-label", "Add a download");
+  liveTip(add, () => "Add a download. A URL, or a model a workflow is missing.");
   add.onclick = () => addModel(refresh);
-  tools.appendChild(add);
+  barEnd.appendChild(add);
   const clear = el("button", "om-btn", "Clear");
-  //: The rows the clear button would act on: whatever the open tab is showing.
   let showing = [];
   clear.onclick = async () => {
     if (!showing.length) return;
@@ -8573,10 +8300,8 @@ function openDownloadManager() {
     await dlPost("/downloads/action", { action: "remove-many", ids: showing.map((row) => row.id) });
     refresh();
   };
-  tools.appendChild(clear);
+  barEnd.appendChild(clear);
 
-  // Which view and tab are showing. Restored from last time, and checked against the
-  // definitions so a renamed tab falls back rather than showing nothing.
   let view = DL_VIEWS.find((one) => one.key === dlRecall(DL_VIEW_KEY, "")) || DL_VIEWS[0];
   let tab = view.tabs.find((one) => one.key === dlRecall(`${DL_VIEW_KEY}-${view.key}`, "")) || view.tabs[0];
 
@@ -8590,11 +8315,10 @@ function openDownloadManager() {
   body.appendChild(list);
   panel.body.appendChild(body);
 
-  //: tab key -> the badge showing how many it holds, so counts update without rebuilding.
   const badges = new Map();
 
   const buildViewBar = () => {
-    viewBar.replaceChildren(...DL_VIEWS.map((one) => {
+    const buttons = DL_VIEWS.map((one) => {
       const button = el("button", `om-dl-view${one === view ? " om-dl-on" : ""}`, one.title);
       button.onclick = () => {
         if (one === view) return;
@@ -8607,7 +8331,8 @@ function openDownloadManager() {
         refresh();
       };
       return button;
-    }));
+    });
+    viewBar.replaceChildren(...buttons, barEnd);
   };
 
   const buildTabBar = () => {
@@ -8633,7 +8358,7 @@ function openDownloadManager() {
   buildTabBar();
 
   const refresh = async () => {
-    if (!dialog.isConnected) { stopDownloadPolling(); return; }
+    if (!dialog.isConnected || panel.isMinimised?.()) { stopDownloadPolling(); return; }
     let state;
     try {
       state = await (await api.fetchApi(`${API}/downloads`)).json();
@@ -8641,21 +8366,18 @@ function openDownloadManager() {
       summary.textContent = "The download list could not be read";
       return;
     }
-    if (!dialog.isConnected) { stopDownloadPolling(); return; }
+    if (!dialog.isConnected || panel.isMinimised?.()) { stopDownloadPolling(); return; }
     const rows = state.downloads || [];
     const busy = (state.running || 0) + (state.queued || 0);
     summary.textContent = busy
       ? `${state.running} running, ${state.queued} queued`
       : (rows.length ? `${rows.length} download${rows.length === 1 ? "" : "s"}` : "");
-    // Counted across everything, not just what is showing, so an idle tab still says how
-    // much is waiting in the others.
     for (const one of view.tabs) {
       const badge = badges.get(one.key);
       if (badge) badge.textContent = String(rows.filter(one.holds).length);
     }
     const mine = rows.filter(tab.holds);
     showing = mine;
-    // Named for the tab it would empty, so it never reads as an action on the whole list.
     clear.textContent = `Clear ${tab.title}`;
     clear.title = `Removes the ${tab.title} entries from this list. Files on disk are left alone.`;
     clear.disabled = tab.clearable === false || !mine.length;
@@ -8665,7 +8387,6 @@ function openDownloadManager() {
     } else {
       const box = el("div", "om-empty");
       box.appendChild(el("div", "om-empty-title", tab.empty));
-      if (!rows.length) box.appendChild(el("div", null, "Add one by URL, or from a workflow."));
       list.replaceChildren(box);
     }
     clearTimeout(dlTimer);
@@ -8673,6 +8394,8 @@ function openDownloadManager() {
     dlTimer = setTimeout(refresh, busy || settling ? DL_POLL_BUSY : DL_POLL_IDLE);
   };
 
+  panel.el.addEventListener("om-win:minimise", stopDownloadPolling);
+  panel.el.addEventListener("om-win:restore", () => refresh());
   refresh();
   return panel;
 }
@@ -8682,7 +8405,6 @@ function stopDownloadPolling() {
   dlTimer = 0;
 }
 
-// --- adding ---------------------------------------------------------------------------
 
 async function addModel(refresh) {
   const how = await chooseAction("Add a download", "",
@@ -8693,8 +8415,6 @@ async function addModel(refresh) {
   if (how === "workflow") await addModelsFromWorkflow(refresh);
 }
 
-// Paste a URL, say where it goes, and queue it. Checked as it is typed, so a URL that will
-// never be allowed says so here rather than as a download that fails later.
 async function addModelByUrl(refresh) {
   const { folders } = await modelFolders();
   const backdrop = el("div", "om-backdrop");
@@ -8723,8 +8443,6 @@ async function addModelByUrl(refresh) {
     option.value = key;
     folder.appendChild(option);
   }
-  // Offered only where the folder has more than one registered path, so the common case of
-  // a single models directory is not given a choice that does not exist.
   const where = el("label", "om-dl-field om-dl-where-field");
   where.appendChild(el("span", null, "Store in"));
   where.style.display = "none";
@@ -8760,8 +8478,6 @@ async function addModelByUrl(refresh) {
   let checked = null;
   let latest = 0;
   let debounce = 0;
-  // The name follows the URL until the reader types one of their own, after which it is
-  // theirs and a new URL leaves it alone.
   let ownName = false;
   const recheck = async () => {
     const typed = url.value.trim();
@@ -8779,21 +8495,16 @@ async function addModelByUrl(refresh) {
     if (mine !== latest || !backdrop.isConnected) return;
     checked = answer;
     if (!ownName && answer.name) name.value = answer.name;
-    // A link that is plainly an image, video or audio file has one place it belongs, so the
-    // folder is filled in rather than left for the reader to find.
     if (!folder.value && answer.suggested_directory) {
       folder.value = answer.suggested_directory;
       await showLocations();
       return recheck();
     }
-    const from = answer.rewritten
-      ? `From ${answer.owner}. That was a link to the page, so the file behind it is used.`
-      : `From ${answer.owner}.`;
+    const from = `From ${answer.owner}.`;
     if (answer.ok) {
       note.textContent = answer.installed ? `${from} Already on disk; downloading replaces it.` : from;
       note.className = "om-dl-note om-dl-ok";
     } else if (answer.needs_directory) {
-      // The URL is sound and only the folder is outstanding, which is not a refusal.
       note.textContent = `${from} Choose the folder it belongs in.`;
       note.className = "om-dl-note";
     } else {
@@ -8825,8 +8536,6 @@ async function addModelByUrl(refresh) {
     backdrop.remove();
     const model = { url: checked.url, name: checked.name, directory: folder.value,
                     owner: checked.owner, root: placeSelect?.value || "" };
-    // Trust first, then the drive. Measuring the file means asking the host for it, and that
-    // is not done until the reader has said this is an account they want a file from.
     if (!(await confirmDownloadTrust(model.owner, model.name, false, formatsOf([model.name])))) {
       return;
     }
@@ -8836,7 +8545,6 @@ async function addModelByUrl(refresh) {
   };
 }
 
-// Every workflow the reader has open, with the one in front marked.
 function openWorkflowChoices() {
   try {
     const store = app.extensionManager?.workflow;
@@ -8852,21 +8560,17 @@ function openWorkflowChoices() {
   }
 }
 
-// One workflow's document. The tab in front is read from the live graph so unsaved edits
-// count; a tab that has been opened carries its own copy; one that has not been loaded yet
-// is read back from where it is saved.
 async function workflowDocument(choice) {
   if (choice.active) {
     try {
       const live = app.graph.serialize();
       if (live) return live;
     } catch {
-      // Fall through to what is stored.
     }
   }
   const content = choice.workflow?.content || choice.workflow?.originalContent;
   if (content) {
-    try { return JSON.parse(content); } catch { /* fall through */ }
+    try { return JSON.parse(content); } catch {}
   }
   const path = choice.workflow?.path;
   if (!path) return null;
@@ -8881,7 +8585,7 @@ async function workflowDocument(choice) {
 async function addModelsFromWorkflow(refresh) {
   const choices = openWorkflowChoices();
   if (!choices.length) {
-    notify("No workflows open", "Open a workflow and try again.");
+    notify("No workflows open");
     return;
   }
 
@@ -8896,7 +8600,7 @@ async function addModelsFromWorkflow(refresh) {
   head.appendChild(el("div", "om-title", "Models in a workflow"));
   const picker = el("select", "om-side-select om-dl-wf");
   choices.forEach((choice, index) => {
-    const option = el("option", null, choice.active ? `${choice.label} (open)` : choice.label);
+    const option = el("option", null, choice.active ? `${choice.label} (current)` : choice.label);
     option.value = String(index);
     picker.appendChild(option);
   });
@@ -8923,7 +8627,6 @@ async function addModelsFromWorkflow(refresh) {
 
   let rows = [];
   const boxes = new Map();
-  //: index -> the location that row will be stored in, where its folder offers a choice.
   const chosen = new Map();
 
   const selected = () => [...boxes.entries()]
@@ -8963,8 +8666,6 @@ async function addModelsFromWorkflow(refresh) {
     if (!rows.length) {
       list.replaceChildren(el("div", "om-empty", "This workflow does not name any model downloads."));
     } else {
-      // Each row is offered the paths its own folder registers; a workflow can pull from
-      // several folders and they do not share a list.
       const places = await Promise.all(rows.map((model) => modelRoots(model.directory)));
       if (!backdrop.isConnected) return;
       list.replaceChildren(...rows.map((model, index) =>
@@ -8978,8 +8679,6 @@ async function addModelsFromWorkflow(refresh) {
   download.onclick = async () => {
     const picked = selected();
     backdrop.remove();
-    // One question per account, counting only what that account is being asked about, and
-    // a refusal covers the rest of their files rather than asking again for each.
     const perOwner = new Map();
     for (const model of picked) {
       if (!perOwner.has(model.owner)) perOwner.set(model.owner, []);
@@ -9000,8 +8699,6 @@ async function addModelsFromWorkflow(refresh) {
       if (!answered.get(model.owner)) continue;
       ready.push({ ...model, overwrite: !!model.installed, root: model.root || "" });
     }
-    // The drive is asked about once for the batch rather than once per file, so a workflow
-    // naming nine models is one question and not nine.
     if (!ready.length || !(await confirmDiskRoom(ready))) { refresh?.(); return; }
     let queued = 0;
     for (const model of ready) {
@@ -9014,8 +8711,6 @@ async function addModelsFromWorkflow(refresh) {
   load();
 }
 
-// One model a workflow asks for. An installed one is dimmed but still selectable: a file on
-// disk can be truncated or the wrong weights, and fetching it again is how that gets fixed.
 function dirOf(path) {
   const value = String(path || "");
   const cut = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
@@ -9051,7 +8746,6 @@ function buildModelRow(model, index, boxes, onChange, roots, chosen) {
     const place = el("div", "om-dl-place");
     place.appendChild(el("span", null, "Store in"));
     const select = rootSelect(roots, model.installed ? dirOf(model.installed) : "");
-    // The label wraps the row, so a click on the select would toggle the checkbox too.
     select.onclick = (event) => event.preventDefault();
     select.onchange = () => chosen.set(index, select.value);
     chosen.set(index, select.value);
@@ -9062,12 +8756,7 @@ function buildModelRow(model, index, boxes, onChange, roots, chosen) {
   return row;
 }
 
-// --- the button -----------------------------------------------------------------------
 
-// A way in at the right-hand end of the workflow tab strip. ComfyUI builds that strip after
-// the extension loads, so this waits for it rather than assuming it is there.
-// The slot at the right-hand end of the workflow tab strip, or nothing where ComfyUI has not
-// drawn it yet.
 function topbarSlot() {
   const strip = document.querySelector(".workflow-tabs-container.pointer-events-auto")?.firstElementChild;
   return strip
@@ -9075,14 +8764,8 @@ function topbarSlot() {
     : null;
 }
 
-//: Set once the interface has been set up, so a setting changed during start-up does not send
-//: the mount into a retry loop before there is anywhere to mount to.
 let topbarReady = false;
 
-// Where the buttons live. The tab strip carries them with their words; the control bar is
-// tight on width and carries them as icons, which is why the two go together rather than
-// being separate settings. Where a build has no control bar, the tab strip is the remaining
-// place, same as the monitor strip does.
 function buttonHost(slot) {
   if (panelSetting("openManager.buttonPlacement", "topbar") === "control") {
     const bar = document.querySelector(".actionbar-container");
@@ -9094,23 +8777,6 @@ function buttonHost(slot) {
   return slot ? { host: slot, before: slot.firstChild, icons: false } : null;
 }
 
-// Each control is decided on its own. They were once nested, which meant switching off the
-// downloads button also took away the library button and the monitor -- three features behind
-// one switch, and no way to tell from the settings that it would happen.
-// Everywhere Open Manager can be reached, in one place.
-//
-// The tab strip renders the entries marked for it; the legacy menu renders all of them. It is
-// one table because it used to be two lists, and the second one fell behind: the Model Library
-// and the Memory panel were reachable from the tab strip for weeks while the legacy menu, which
-// is the only way in for anyone on the classic interface, had never heard of them. A reskin
-// cannot accumulate coverage gaps; a second list can, and did.
-//
-// `available` is whether the feature exists at all. `button` is whether it earns a place in the
-// tab strip, which is a separate question with its own setting.
-//: Whether ComfyUI was started with its legacy manager interface. Read once from the
-//: arguments the server reports, because it is a launch flag and cannot change while running.
-//: Unknown until that read returns, and unknown means modern: an install that never asked for
-//: the old interface should not be given it.
 let legacyUi = false;
 
 async function readLegacyUi() {
@@ -9124,60 +8790,595 @@ async function readLegacyUi() {
   return legacyUi;
 }
 
-// Which way the Extensions button goes. `auto` follows ComfyUI, which is what almost everyone
-// wants: the classic menu exists to serve the classic interface, and offering it on the modern
-// one puts a second, smaller manager in front of the real one.
 function managerEntry() {
   const asked = String(panelSetting("openManager.managerEntry", "auto") || "auto");
   if (asked === "classic" || asked === "panel") return asked;
   return legacyUi ? "classic" : "panel";
 }
 
+const PROGRAM_BASE = new URL("./programs/", import.meta.url).href;
+
+const ENTRY_FILE = "program.mjs";
+
+let deskProgramsOff = [];
+
+let deskGates = { files: false, writes: false, desktop: false };
+
+async function loadGates() {
+  try {
+    const answer = await (await api.fetchApi(`${API}/gates`)).json();
+    if (answer?.ok) deskGates = { ...deskGates, ...answer };
+  } catch {}
+  return deskGates;
+}
+
+function filesOn() {
+  return deskGates.files !== false
+    && panelSetting("openManager.fileBrowser", false) === true;
+}
+
+function filesWritable() {
+  return filesOn() && deskGates.writes === true;
+}
+
+const PROGRAM_WAIT = 6000;
+
+let programRows = [];
+
+const programModules = new Map();
+
+function programOff(id) {
+  return deskProgramsOff.includes(id);
+}
+
+function programIconArt(entry) {
+  const plain = { kind: "mask", url: ICON_PROGRAM };
+  if (!entry.icon) return plain;
+  const url = safeArt(`${PROGRAM_BASE}${entry.id}/${entry.icon}?v=${entry.stamp || 0}`);
+  if (!url) return plain;
+  return { kind: /\.svg($|\?)/i.test(entry.icon) ? "mask" : "src", url };
+}
+
+function programRow(entry) {
+  const art = programIconArt(entry);
+  return {
+    key: entry.id,
+    kind: "program",
+    label: entry.name,
+    hint: entry.hint || `${entry.name}, a program this install ships`,
+    program: entry,
+    desk: {
+      at: 40,
+      label: entry.name,
+      art: art.url,
+      kind: art.kind,
+      window: `${entry.id}:main`,
+      off: !entry.surfaces?.desktop,
+      look: entry.look && (entry.look.tint || entry.look.from) ? entry.look : null,
+    },
+    open: () => runProgram(entry),
+  };
+}
+
+async function importProgram(entry) {
+  if (programModules.has(entry.id)) return programModules.get(entry.id);
+  const url = `${PROGRAM_BASE}${entry.id}/${ENTRY_FILE}?v=${entry.stamp || entry.version || 0}`;
+  const waited = new Promise((_settle, fail) => {
+    setTimeout(() => fail(new Error("took too long to load")), PROGRAM_WAIT);
+  });
+  const held = await Promise.race([import( url), waited]);
+  const made = held?.program || held?.default || null;
+  if (!made || typeof made.open !== "function") {
+    throw new Error("exports no program with an open function");
+  }
+  programModules.set(entry.id, made);
+  return made;
+}
+
+const PROGRAM_VIEWS = 12;
+
+function programView(entry) {
+  if (!entry.multiple || panelSetting("openManager.programWindows", false) !== true) {
+    return "main";
+  }
+  for (let at = 1; at <= PROGRAM_VIEWS; at += 1) {
+    if (!floatingPanel(`${entry.id}:${at}`)) return String(at);
+  }
+  const held = [];
+  for (let at = 1; at <= PROGRAM_VIEWS; at += 1) {
+    const found = floatingPanel(`${entry.id}:${at}`);
+    if (found) held.push([Number(found.el.style.zIndex) || 0, String(at)]);
+  }
+  held.sort((a, b) => a[0] - b[0]);
+  return held.length ? held[0][1] : "main";
+}
+
+async function runProgram(entry, carried, wanted = "") {
+  const view = wanted || programView(entry);
+  const open = floatingPanel(`${entry.id}:${view}`);
+  if (open) {
+    open.present();
+    if (carried !== undefined && typeof open._omCarry === "function") open._omCarry(carried);
+    return open;
+  }
+  let made = null;
+  try {
+    made = await importProgram(entry);
+  } catch (error) {
+    notify(`${entry.name} did not load`, `${entry.name} could not be started: ${error.message}`);
+    return null;
+  }
+  try {
+    return made.open(programApi(entry, view), carried);
+  } catch (error) {
+    notify(`${entry.name} stopped`, `${entry.name} failed while opening: ${error.message}`);
+    return null;
+  }
+}
+
+async function loadPrograms() {
+  let answer = null;
+  try {
+    answer = await (await api.fetchApi(`${API}/programs`)).json();
+  } catch {
+    answer = null;
+  }
+  programRows = (answer?.programs || [])
+    .filter((one) => !programOff(one.id))
+    .map(programRow);
+  for (const row of programRows) TASK_GROUP_NAMES[row.key] = row.label;
+}
+
+let scopeAnswer = null;
+
+function scopesStyles() {
+  if (scopeAnswer !== null) return scopeAnswer;
+  scopeAnswer = false;
+  try {
+    const probe = el("style");
+    probe.textContent =
+      "@scope (.om-scope-probe) { .om-scope-target { color: rgb(1, 2, 3); } }";
+    document.head.appendChild(probe);
+    const outer = el("div", "om-scope-probe");
+    outer.style.cssText = "position: fixed; left: -9999px; top: -9999px;";
+    const inner = el("span", "om-scope-target");
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
+    scopeAnswer = getComputedStyle(inner).color === "rgb(1, 2, 3)";
+    probe.remove();
+    outer.remove();
+  } catch {
+    scopeAnswer = false;
+  }
+  return scopeAnswer;
+}
+
+function programScope(id) {
+  return `om-scope-${id}`;
+}
+
+function programStyle(id, css) {
+  const mark = `om-prog-${id}`;
+  let sheet = document.getElementById(mark);
+  if (!sheet) {
+    sheet = el("style");
+    sheet.id = mark;
+    document.head.appendChild(sheet);
+  }
+  const text = String(css || "");
+  sheet.textContent = scopesStyles()
+    ? `@scope (.${programScope(id)}) {\n${text}\n}`
+    : text;
+}
+
+function programStore(id) {
+  return {
+    get: async (name, fallback = null) => {
+      try {
+        const answer = await (await api.fetchApi(
+          `${API}/programs/store?id=${encodeURIComponent(id)}`)).json();
+        const held = answer?.ok ? (answer.data || {}) : {};
+        return Object.hasOwn(held, name) ? held[name] : fallback;
+      } catch {
+        return fallback;
+      }
+    },
+    set: async (name, value) => {
+      try {
+        const answer = await (await api.fetchApi(
+          `${API}/programs/store?id=${encodeURIComponent(id)}`)).json();
+        const held = answer?.ok ? (answer.data || {}) : {};
+        held[name] = value;
+        const kept = await dlPost("/programs/store", { id, data: held });
+        return kept?.ok === true;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+function programWindow(entry, options = {}) {
+  const view = String(options.view || "main").replace(/[^a-z0-9-]/gi, "").slice(0, 24) || "main";
+  const panel = createFloatingPanel({
+    key: `${entry.id}:${view}`,
+    title: String(options.title || entry.name).slice(0, 80),
+    ...windowSize(Object.hasOwn(WINDOW_SIZES, options.size) ? options.size : "note"),
+    modal: false,
+  });
+  panel.el.classList.add(programScope(entry.id));
+  const art = programIconArt(entry);
+  if (art.kind === "mask") panel.setMaskIcon(art.url);
+  else panel.setIcon(art.url);
+  return {
+    body: panel.body,
+    tools: panel.tools,
+    setTitle: (text) => panel.setTitle(String(text || "").slice(0, 80)),
+    setBadge: (text) => panel.setBadge(String(text || "").slice(0, 24)),
+    present: () => panel.present(),
+    close: () => panel.destroy(),
+    isOpen: () => panel.el.isConnected,
+    onClose: (fn) => { panel.el.addEventListener("om-prog-close", fn, { once: true }); },
+    onCarry: (fn) => { panel._omCarry = fn; },
+    onKey: (fn) => {
+      panel.el.addEventListener("keydown", (event) => {
+        const on = event.target;
+        if (on instanceof Element
+            && on.closest("input, textarea, select, [contenteditable='true']")) return;
+        fn(event);
+      });
+    },
+  };
+}
+
+function assetPath(item) {
+  return item?.sub ? `${item.sub}/${item.name}` : String(item?.name || "");
+}
+
+const HOST_ROOTS = ["output", "input", "temp"];
+
+const SHOWN_KINDS = { image: "still", still: "still", video: "video", audio: "audio" };
+
+const EDITS_HERE = new Set([".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".toml",
+                            ".ini", ".cfg", ".conf", ".log", ".env", ".diff", ".patch"]);
+
+function suffixOf(name) {
+  const at = String(name || "").lastIndexOf(".");
+  return at < 0 ? "" : name.slice(at).toLowerCase();
+}
+
+const PLACE_ROOTS = {
+  "asset:output": "output", "asset:input": "input", "asset:temp": "temp",
+};
+
+function viewRootOf(place) {
+  return PLACE_ROOTS[place] || String(place || "");
+}
+
+function assetUrl(item, { preview = false, root = "output" } = {}) {
+  const where = String(item?.root || root);
+  if (!HOST_ROOTS.includes(where)) {
+    const ours = new URLSearchParams({
+      root: where, path: assetPath(item), v: `${item?.at || 0}-${item?.size || 0}`,
+    });
+    return `${API}/assets/view?${ours.toString()}`;
+  }
+  const query = new URLSearchParams({
+    filename: String(item?.name || ""),
+    subfolder: String(item?.sub || ""),
+    type: where,
+  });
+  if (preview) query.set("preview", "webp;70");
+  return `/api/view?${query.toString()}`;
+}
+
+function assetThumbUrl(item, { root = "output", edge = 0 } = {}) {
+  const query = new URLSearchParams({
+    root: String(item?.root || root),
+    path: assetPath(item),
+    v: `${item?.at || 0}-${item?.size || 0}`,
+  });
+  if (edge) query.set("edge", String(Math.max(64, Math.min(1024, Math.round(edge)))));
+  return `${API}/assets/thumb?${query.toString()}`;
+}
+
+async function assetFile(item, root) {
+  const answer = await fetch(assetUrl(item, { root }));
+  if (!answer.ok) throw new Error(`${item.name} could not be read`);
+  const blob = await answer.blob();
+  return new File([blob], item.name, { type: blob.type || "application/octet-stream" });
+}
+
+async function assetWorkflow(item, root) {
+  const readers = window.comfyAPI || {};
+  const tail = String(item?.name || "").toLowerCase().split(".").pop();
+  const read = {
+    png: readers.png?.getFromPngFile,
+    webp: readers.webp?.getFromWebpFile,
+    mp4: readers.isobmff?.getFromIsobmffFile,
+    mov: readers.isobmff?.getFromIsobmffFile,
+    m4v: readers.isobmff?.getFromIsobmffFile,
+    webm: readers.ebml?.getFromWebmFile,
+    flac: readers.flac?.getFromFlacFile,
+    avif: readers.avif?.getFromAvifFile,
+  }[tail];
+  if (typeof read !== "function") return null;
+  let held = null;
+  try {
+    held = await read(await assetFile(item, root));
+  } catch {
+    return null;
+  }
+  if (!held) return null;
+  const flow = held.workflow || held.Workflow || null;
+  const prompt = held.prompt || held.Prompt || null;
+  if (!flow && !prompt) return null;
+  return { workflow: flow || "", prompt: prompt || "" };
+}
+
+async function loadAssetWorkflow(item, root) {
+  try {
+    await app.handleFile(await assetFile(item, root));
+    return true;
+  } catch (error) {
+    notify("Not loaded", `${item.name} could not be opened as a workflow: ${error.message}`);
+    return false;
+  }
+}
+
+const ASSET_DRAG_TYPE = "application/x-om-asset";
+
+let assetDropWired = false;
+
+function assetCarried(event) {
+  return [...(event.dataTransfer?.types || [])].includes(ASSET_DRAG_TYPE);
+}
+
+function tabDropZone(event) {
+  const at = event.target instanceof Element ? event.target : null;
+  return at?.closest('.workflow-tabs, [data-testid="topbar-workflow-tabs"]') || null;
+}
+
+function markTabDrop(zone) {
+  for (const old of document.querySelectorAll(".om-tab-drop")) {
+    if (old !== zone) old.classList.remove("om-tab-drop");
+  }
+  zone?.classList.add("om-tab-drop");
+}
+
+function mountAssetDrop() {
+  if (assetDropWired) return;
+  assetDropWired = true;
+  document.addEventListener("dragover", (event) => {
+    if (!assetCarried(event)) return;
+    const zone = tabDropZone(event);
+    if (!zone) { markTabDrop(null); return; }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    markTabDrop(zone);
+  }, true);
+  document.addEventListener("dragleave", (event) => {
+    if (assetCarried(event) && !tabDropZone(event)) markTabDrop(null);
+  }, true);
+  document.addEventListener("dragend", () => markTabDrop(null), true);
+  document.addEventListener("drop", async (event) => {
+    if (!assetCarried(event)) return;
+    const zone = tabDropZone(event);
+    markTabDrop(null);
+    if (!zone) return;
+    event.preventDefault();
+    event.stopPropagation();
+    let sent = null;
+    try { sent = JSON.parse(event.dataTransfer.getData(ASSET_DRAG_TYPE)); } catch { return; }
+    if (!sent?.name) return;
+    await loadAssetWorkflow(sent, sent.root || "output");
+  }, true);
+}
+
+function assetDraggable(node, item, root) {
+  if (!(node instanceof Element) || !item?.name) return;
+  mountAssetDrop();
+  node.draggable = true;
+  node.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify({
+      name: String(item.name), sub: String(item.sub || ""), root: String(root || "output"),
+    }));
+    event.dataTransfer.effectAllowed = "copy";
+  });
+}
+
+function programAssets() {
+  return {
+    roots: [...HOST_ROOTS],
+    list: async (options = {}) => {
+      const query = new URLSearchParams({
+        root: options.root || "output",
+        path: options.path || "",
+        page: String(options.page ?? 0),
+        size: String(options.size ?? 120),
+        sort: options.sort || "new",
+        kind: options.kind || "all",
+        q: options.find || "",
+      });
+      try {
+        const answer = await (await api.fetchApi(`${API}/assets?${query}`)).json();
+        return answer?.ok ? answer : { ok: false, items: [], folders: [], total: 0 };
+      } catch {
+        return { ok: false, items: [], folders: [], total: 0 };
+      }
+    },
+    search: async (options = {}) => {
+      const query = new URLSearchParams({
+        root: options.root || "output",
+        path: options.path || "",
+        q: options.find || "",
+        size: String(options.size ?? 120),
+      });
+      try {
+        const answer = await (await api.fetchApi(`${API}/assets/search?${query}`)).json();
+        return answer?.ok ? answer : { ok: false, items: [], read: 0, capped: false };
+      } catch {
+        return { ok: false, items: [], read: 0, capped: false };
+      }
+    },
+    url: (item, root) => assetUrl(item, { root }),
+    preview: (item, root, edge) => assetThumbUrl(item, { root, edge }),
+    hostPreview: (item, root) => assetUrl(item, { preview: true, root }),
+    peek: async (root, path, count = 4) => {
+      const query = new URLSearchParams({
+        root: root || "output", path: path || "", count: String(count),
+      });
+      try {
+        const answer = await (await api.fetchApi(`${API}/assets/peek?${query}`)).json();
+        return answer?.ok ? answer : { ok: false, items: [] };
+      } catch {
+        return { ok: false, items: [] };
+      }
+    },
+    path: (item) => assetPath(item),
+    remove: (root, path) => dlPost("/assets/remove", { root, path }),
+    write: (root, path, data, replace = false) =>
+      dlPost("/assets/write", { root, path, data, replace: !!replace }),
+    workflow: (item, root) => assetWorkflow(item, root),
+    carries: async (root, path) => {
+      try {
+        const query = new URLSearchParams({ root: root || "output", path: path || "" });
+        const answer = await (await api.fetchApi(`${API}/assets/workflow?${query}`)).json();
+        return answer?.ok ? answer : { ok: false, keys: [], kind: "" };
+      } catch {
+        return { ok: false, keys: [], kind: "" };
+      }
+    },
+    strip: (root, path) => dlPost("/assets/workflow/remove", { root, path }),
+    load: (item, root) => loadAssetWorkflow(item, root),
+    drag: (node, item, root) => assetDraggable(node, item, root),
+  };
+}
+
+async function runProgramById(id, carried) {
+  const row = programRows.find((one) => one.key === id);
+  if (!row) {
+    notify("Not here", `No program called ${id} is loaded.`);
+    return null;
+  }
+  return runProgram(row.program, carried);
+}
+
+function programApi(entry, view = "main") {
+  return {
+    id: entry.id,
+    name: entry.name,
+    view,
+    run: (id, carried) => runProgramById(String(id || ""), carried),
+    el: (tag, cls, text) => el(tag, cls, text),
+    window: (options = {}) => programWindow(entry, { view, ...options }),
+    style: (css) => programStyle(entry.id, css),
+    storage: programStore(entry.id),
+    assets: programAssets(),
+    toast: (text, options) => toast(String(text || "").slice(0, 300), options),
+    notify: (title, text) => notify(String(title || entry.name).slice(0, 80),
+                                    String(text || "").slice(0, 600)),
+    confirm: (title, text, label) => confirmAction(String(title || "").slice(0, 80),
+                                                   String(text || "").slice(0, 600),
+                                                   String(label || "Yes").slice(0, 24), false),
+    ask: (title, value, label) => askText(String(title || "").slice(0, 80), value, label),
+    menu: (anchor, items) => openRowMenu(anchor, { items, align: "left" }),
+    tip: (host, say) => liveTip(host, say),
+    setting: (name, fallback = null) => (String(name || "").startsWith("openManager.")
+      ? panelSetting(String(name), fallback)
+      : fallback),
+    bytes: (value) => bytesText(value),
+    count: (value, noun) => countNote(value, noun),
+    when: (date) => whenText(date),
+    canWrite: () => deskGates.writes === true,
+    graph: {
+      nodes: () => graphNodes(),
+      drag: (node, entry) => nodeDragFrom(node, entry),
+      add: (type) => addNodeAt(String(type || ""), canvasCentre()),
+      show: () => hideDesk(),
+    },
+  };
+}
+
 function managerDestinations() {
   return [
-    { key: "registry", label: "Custom Nodes Manager", icon: "\u25a4",
+    { key: "registry", kind: "program", label: "Custom Nodes Manager", icon: "\u25a4",
       hint: "Browse and install from the Comfy Registry",
+      desk: { at: 0, label: "Node Discovery", art: ICON_TAB, kind: "mask", window: "manager" },
       open: () => openPanelWindow("registry") },
-    { key: "missing", label: "Install Missing Custom Nodes", icon: "\u26a0",
+    { key: "missing", kind: "action", label: "Install Missing Custom Nodes", icon: "\u26a0",
       hint: "The packs supplying the node types this workflow is missing",
       open: () => openPanelWindow("missing") },
-    { key: "github", label: "Install via Git URL", icon: "\u2325",
+    { key: "github", kind: "action", label: "Install via Git URL", icon: "\u2325",
       hint: "Repositories you add by URL, kept across uninstalls",
       open: () => openPanelWindow("github") },
-    { key: "installed", label: "Check for Updates", icon: "\u21bb",
+    { key: "installed", kind: "action", label: "Check for Updates", icon: "\u21bb",
       hint: "What is installed, and what has a newer version",
       open: () => openPanelWindow("installed") },
-    { key: "downloads", label: "Download Manager", short: "Downloads", icon: "\u2b73",
+    { key: "downloads", kind: "program", label: "Download Manager", short: "Downloads", icon: "\u2b73",
       cls: "om-dl-downloads",
       hint: "Download Manager: fetch the models a workflow needs",
+      desk: { at: 2, label: "Download Manager", art: ICON_DOWNLOADS, kind: "mask",
+              window: "downloads" },
       open: openDownloadManager,
       button: () => panelSetting("openManager.downloadButton", true) !== false },
-    { key: "library", label: "Model Library", short: "Models", icon: "\u25a4",
+    { key: "library", kind: "program", label: "Model Library", short: "Models", icon: "\u25a4",
       cls: "om-lib-open",
       hint: "Model Library: what is on disk, and what is there twice",
+      desk: { at: 3, label: "Model Library", art: ICON_LIBRARY, kind: "mask",
+              window: "library" },
       open: openModelLibrary,
       available: () => panelSetting("openManager.modelLibrary", false) !== false,
       button: () => panelSetting("openManager.modelLibrary", false) !== false },
-    { key: "memory", label: "Memory", short: "Memory", icon: "\u25a6",
+    { key: "notepad", kind: "program", label: "Notepad",
+      icon: "✎",
+      hint: "A blank note",
+      desk: { at: 3, label: "Notepad", art: ICON_NOTE, kind: "mask", window: "", off: true },
+      open: () => openNote(draftNote()) },
+    { key: "desksettings", kind: "program", label: "Desktop Settings", icon: "⚙",
+      hint: "The wallpaper, the icons, the windows and the programs",
+      desk: { at: 4, label: "Desktop Settings", art: ICON_DESKTOP, kind: "mask",
+              window: "desktop", off: true },
+      open: () => openDesktopSettings() },
+    { key: "documents", kind: "program", label: "Documents", icon: "▤",
+      hint: "Somewhere of your own to keep things",
+      revisit: true,
+      desk: { at: 1, label: "Documents", art: ICON_FOLDER, kind: "mask", window: "files" },
+      available: () => filesOn(),
+      open: () => openFileBrowser("docs:documents", "") },
+    { key: "files", kind: "program", label: "Folders", icon: "▧",
+      hint: "Every folder: the notes, the input, output and temp directories, and the models",
+      revisit: true,
+      desk: { at: 6, label: "Folders", art: ICON_FOLDER, kind: "mask",
+              window: "files", off: true },
+      available: () => filesOn(),
+      open: () => openFileBrowser() },
+    { key: "programs", kind: "program", label: "Manage Programs", icon: "▦",
+      hint: "Everything installed, what it declares, and whether it is switched on",
+      desk: { at: 5, label: "Manage Programs", art: ICON_PROGRAM, kind: "mask",
+              window: "programs", off: true },
+      open: () => openManagePrograms() },
+    { key: "memory", kind: "program", label: "Memory", short: "Memory", icon: "\u25a6",
       cls: "om-mem-open",
       hint: "Memory: what is loaded, what it weighs, and where it sits",
+      desk: { at: 1, label: "Memory", art: ICON_MEMORY, kind: "mask", window: "memory" },
       open: openMemoryPanel,
       button: () => panelSetting("openManager.memoryButton", true) !== false },
-    { key: "scan", label: "Scan an Install", icon: "\u2691",
+    { key: "scan", kind: "action", label: "Scan an Install", icon: "\u2691",
       hint: "Each installed pack's menu offers a VirusTotal scan of the files it ships",
       open: () => openPanelWindow("installed"),
       available: vtReady },
-    { key: "environment", label: "Environment changes", icon: "\u2317",
+    { key: "environment", kind: "action", label: "Environment changes", icon: "\u2317",
       hint: "What recent installs did to your Python packages, and how to undo one",
       open: openEnvironmentDialog },
-    { key: "about", label: "About and updates", icon: "\u2139",
+    { key: "about", kind: "action", label: "About and updates", icon: "\u2139",
       hint: "Which Open Manager this is, and what updating it takes here",
       open: openAboutDialog },
-    { key: "keys", label: "Access keys", icon: "\u26bf",
-      hint: "Hugging Face, GitHub and VirusTotal keys. Kept out of ComfyUI's settings, and "
-            + "never shown back.",
+    { key: "keys", kind: "action", label: "Access keys", icon: "\u26bf",
+      hint: "Hugging Face, GitHub and VirusTotal keys",
       open: openKeysDialog },
-  ].filter((one) => !one.available || one.available());
+  ].concat(programRows)
+    .filter((one) => (!Object.hasOwn(one, "available") || one.available()));
 }
 
 function mountTopbar(attempt = 0) {
@@ -9197,12 +9398,9 @@ function mountTopbar(attempt = 0) {
     return button;
   };
 
-  // Only the entries that ask for a place here, in the table's order.
   const wanted = managerDestinations()
     .filter((one) => one.cls && one.button && one.button())
     .map((one) => make(one.cls, one.icon, one.short || one.label, one.hint, one.open));
-  // Inserted against one reference point, so they read left to right in the table's order
-  // rather than in the reverse of it.
   for (const button of wanted) {
     if (button) where.host.insertBefore(button, where.before);
   }
@@ -9212,8 +9410,6 @@ function mountTopbar(attempt = 0) {
   return true;
 }
 
-// Rebuild the controls from the settings as they stand now. A switch that does nothing until
-// the page is reloaded reads as a switch that does not work.
 function remountTopbar() {
   if (!topbarReady) return;
   stopMonitor();
@@ -9221,12 +9417,10 @@ function remountTopbar() {
   document.querySelectorAll(".om-dl-open, .om-mon, .om-prog").forEach((node) => node.remove());
   runBar.el = null;
   mountTopbar();
+  taskbarSync();
 }
 
-// --- node properties --------------------------------------------------------------------
 
-// The model URLs a node declares. ComfyUI writes these itself when a template is loaded;
-// this is how one is added by hand, so a graph can be shared with its weights named.
 function nodeModels(node) {
   const declared = node?.properties?.models;
   return Array.isArray(declared) ? declared : [];
@@ -9241,13 +9435,10 @@ async function addModelUrlToNode(node) {
   const typed = await askText("Model URL for this node", "", "Check");
   if (!typed) return;
   const answer = await dlPost("/models/check", { url: typed, directory: "" });
-  // Everything but the folder is judged first, so a URL that can never work is refused
-  // before the reader is asked anything else about it.
   if (!answer.needs_directory) {
     notify("Not added", answer.reason || "That is not a URL this can use.");
     return;
   }
-  // The folder is the one thing a URL cannot say, so it is asked rather than guessed.
   const folder = await pickFolder(folders, answer.name);
   if (!folder) return;
   const confirmed = await dlPost("/models/check", {
@@ -9265,8 +9456,6 @@ async function addModelUrlToNode(node) {
   toast(`${confirmed.name} added to this node.`, { kind: "ok" });
 }
 
-// A folder chosen from the ones this ComfyUI has. Presented as a list rather than typed,
-// so the answer is always one the server will accept.
 function pickFolder(folders, name) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
@@ -9292,9 +9481,6 @@ function pickFolder(folders, name) {
     box.appendChild(foot);
     backdrop.appendChild(box);
     document.body.appendChild(backdrop);
-    // Dismissing counts as cancelling. Without this the promise is never settled and
-    // the caller waits for an answer that cannot arrive -- which is how a guarded
-    // action stayed guarded after an Escape and refused to run again.
     closeOn(backdrop, () => { backdrop.remove(); resolve(""); });
   });
 }
@@ -9335,18 +9521,310 @@ async function downloadNodeModels(node) {
   }
 }
 
-// --- resource monitor ---------------------------------------------------------------------
 
-//: This viewer, so renewing a lease replaces it rather than stacking another.
 const MONITOR_CLIENT = `om-${Math.random().toString(36).slice(2, 10)}`;
 
 let monitorStrip = null;
 let monitorTimer = 0;
-let monitorListening = false;
 
 function monitorInterval() {
   const asked = Number(panelSetting("openManager.monitorInterval", 2));
   return Number.isFinite(asked) ? Math.max(1, Math.min(10, asked)) : 2;
+}
+
+const LINK_QUIET = 12000;
+const LINK_WOKE = 8000;
+const LINK_DEADLINE = 8000;
+const LINK_VERIFY = 10000;
+const LINK_TRY_BASE = 15000;
+const LINK_TRY_CAP = 240000;
+const LINK_POLL_BASE = 3000;
+const LINK_POLL_CAP = 30000;
+const LINK_STRIKES = 3;
+
+const link = {
+  pushAt: 0, pullAt: 0, failAt: 0, fail: "", status: 0, every: 0, running: false,
+  strikes: 0, tries: 0, nextTryAt: 0, verifyUntil: 0, socketSeen: null,
+  nextPostAt: 0, pollStep: 0, hiddenAt: 0, hiddenFor: 0,
+};
+
+const readingHooks = new Set();
+
+const monitorFlight = new Set();
+
+function monitorDeadline(ms) {
+  const stop = new AbortController();
+  const timer = setTimeout(
+    () => stop.abort(new DOMException("timed out", "TimeoutError")), ms || LINK_DEADLINE);
+  stop.done = () => { clearTimeout(timer); monitorFlight.delete(stop); };
+  monitorFlight.add(stop);
+  return stop;
+}
+
+function dropMonitorCalls() {
+  for (const stop of [...monitorFlight]) {
+    stop.dropped = true;
+    stop.abort(new DOMException("dropped", "AbortError"));
+    stop.done();
+  }
+}
+
+function linkEvery() {
+  return Math.max(1, link.every || monitorInterval());
+}
+
+function linkReached() {
+  link.pullAt = Date.now();
+  link.fail = "";
+  link.status = 0;
+  link.pollStep = 0;
+  link.nextPostAt = 0;
+}
+
+function linkLeased(answer) {
+  link.running = !!answer?.running;
+  const every = Number(answer?.reading?.every || answer?.interval);
+  if (Number.isFinite(every) && every > 0) link.every = every;
+}
+
+function linkFailed(why, status) {
+  link.failAt = Date.now();
+  link.fail = why;
+  link.status = status || 0;
+  link.pollStep = Math.min(link.pollStep + 1, 4);
+  const base = Math.min(LINK_POLL_CAP, LINK_POLL_BASE * (2 ** link.pollStep));
+  link.nextPostAt = Date.now() + LINK_POLL_BASE + Math.round(Math.random() * base);
+}
+
+function linkMayPost() {
+  return Date.now() >= link.nextPostAt;
+}
+
+async function monFetch(path, options, ms) {
+  const stop = monitorDeadline(ms);
+  let answer;
+  try {
+    answer = await api.fetchApi(`${API}${path}`, { ...options, signal: stop.signal });
+  } catch (wrong) {
+    if (!stop.dropped) linkFailed(wrong?.name === "TimeoutError" ? "slow" : "cut");
+    throw wrong;
+  } finally {
+    stop.done();
+  }
+  if (!answer.ok) {
+    linkFailed("refused", answer.status);
+    throw new Error(`HTTP ${answer.status}`);
+  }
+  linkReached();
+  return answer.json();
+}
+
+function monPost(path, body, ms) {
+  return monFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  }, ms);
+}
+
+function monGet(path, ms) {
+  return monFetch(path, {}, ms);
+}
+
+function monRelease(client) {
+  const stop = monitorDeadline(4000);
+  api.fetchApi(`${API}/monitor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client, release: true }),
+    signal: stop.signal,
+  }).catch(() => {}).finally(() => stop.done());
+}
+
+function pushStale() {
+  const since = link.pushAt || link.pullAt;
+  if (!since) return false;
+  return Date.now() - since > Math.max(LINK_QUIET, linkEvery() * 3000 + 4000);
+}
+
+function httpAlive() {
+  if (!link.pullAt && !link.failAt) return true;
+  return !!link.pullAt && link.pullAt >= link.failAt;
+}
+
+function linkAsleep() {
+  return document.hidden || (!!link.hiddenAt && Date.now() - link.hiddenAt < LINK_WOKE);
+}
+
+function linkState() {
+  if (linkAsleep()) return "asleep";
+  if (Date.now() < link.verifyUntil) return "reviving";
+  if (!httpAlive()) return link.fail || "cut";
+  if (!pushStale()) return "live";
+  return link.running ? "feed" : "idle";
+}
+
+function linkDown() {
+  const state = linkState();
+  return state !== "live" && state !== "feed";
+}
+
+function takeReading(reading) {
+  recordReading(reading);
+  paintMonitor(reading);
+  for (const hook of [...readingHooks]) hook(reading);
+}
+
+function linkTick() {
+  if (linkAsleep()) { link.strikes = 0; return; }
+  if (!pushStale()) {
+    link.strikes = 0;
+    link.tries = 0;
+    link.nextTryAt = 0;
+    link.verifyUntil = 0;
+    return;
+  }
+  if (!httpAlive() || !link.running) return;
+  link.strikes += 1;
+  if (link.strikes < LINK_STRIKES) return;
+  reviveSocket(false);
+}
+
+function reviveSocket(asked) {
+  const now = Date.now();
+  if (now < link.verifyUntil) return;
+  if (!asked && now < link.nextTryAt) return;
+  let socket;
+  try { socket = api.socket; } catch { return; }
+  if (socket === undefined) return;
+  const hold = (ms) => { link.verifyUntil = now + ms; link.strikes = 0; };
+  if (socket === null) { hold(2000); return; }
+  if (socket.readyState === WebSocket.CLOSING || socket.readyState === WebSocket.CLOSED) {
+    hold(2000);
+    return;
+  }
+  if (socket.readyState === WebSocket.CONNECTING && socket !== link.socketSeen) {
+    link.socketSeen = socket;
+    hold(LINK_VERIFY);
+    return;
+  }
+  const wedged = socket === link.socketSeen && link.tries >= 2;
+  link.strikes = 0;
+  link.tries += 1;
+  link.socketSeen = socket;
+  link.verifyUntil = now + LINK_VERIFY;
+  link.nextTryAt = link.verifyUntil
+    + Math.round(Math.random() * Math.min(LINK_TRY_CAP, LINK_TRY_BASE * (2 ** link.tries)));
+  if (!window.name && api.clientId) window.name = api.clientId;
+  if (!wedged) {
+    try { socket.close(); } catch {}
+    return;
+  }
+  api.socket = null;
+  try { socket.close(); } catch {}
+  api.init();
+}
+
+const LINK_SAY = {
+  asleep: {
+    short: "paused while hidden",
+    line: "Paused while this window is not on screen.",
+    lead: "Paused while hidden",
+    tip: "Readings start again when the window comes back.",
+  },
+  reviving: {
+    short: "reconnecting",
+    line: "Rebuilding the connection to the server.",
+    lead: "Reconnecting",
+    tip: "Readings in the gap are lost.",
+  },
+  slow: {
+    short: "the server is not answering",
+    line: "The server is not answering this tab.",
+    lead: "Not answering",
+    tip: "Heavy graph work stops the server answering.",
+  },
+  cut: {
+    short: "cannot reach the server",
+    line: "This tab cannot reach the server.",
+    lead: "Out of reach",
+  },
+  refused: {
+    short: "the request was refused",
+    line: "The server refused the request.",
+    lead: "Refused",
+  },
+  feed: {
+    short: "the live connection is quiet",
+    line: "The live connection is quiet. These readings are the check every few seconds.",
+    lead: "Live connection quiet",
+  },
+  idle: {
+    short: "the server is not sampling",
+    line: "The server is not sampling.",
+    lead: "Not sampling",
+    tip: "The server answered but is not measuring; it starts again when something asks.",
+  },
+};
+
+function linkFacts() {
+  const age = readingAge();
+  const next = link.nextPostAt - Date.now();
+  return [
+    ["Last reading", Number.isFinite(age) ? `${Math.round(age / 1000)}s ago` : "none yet"],
+    ["Failed tries", link.tries ? String(link.tries) : ""],
+    ["Next try", next > 0 ? `in ${Math.max(1, Math.round(next / 1000))}s` : ""],
+  ];
+}
+
+function linkText() {
+  const say = LINK_SAY[linkState()];
+  if (!say) return "";
+  const left = link.nextPostAt - Date.now();
+  return left > 0
+    ? `${say.line} Trying again in ${Math.max(1, Math.round(left / 1000))} seconds.`
+    : say.line;
+}
+
+function buildLinkRow(retry) {
+  const row = el("div", "om-mem-link");
+  const text = el("span", "om-mem-link-text", "");
+  const act = el("button", "om-btn om-dl-btn", "Reconnect");
+  row.appendChild(text);
+  row.appendChild(act);
+  liveTip(row, () => (row._say ? { ...row._say, facts: linkFacts() } : ""));
+  act.onclick = () => retry();
+  row.tell = (state) => {
+    if (row._busy || Date.now() < (row._until || 0)) return;
+    const say = LINK_SAY[state];
+    row.hidden = !say;
+    if (!say) return;
+    row.classList.toggle("om-mem-link-bad", state !== "asleep" && state !== "feed");
+    text.textContent = linkText();
+    row._say = { lead: say.lead, lines: [say.tip] };
+    act.hidden = state === "asleep";
+    act.disabled = state === "reviving";
+  };
+  row.working = (line) => {
+    row._busy = true;
+    row.hidden = false;
+    row.classList.add("om-mem-link-bad");
+    text.textContent = line;
+    act.hidden = false;
+    act.disabled = true;
+  };
+  row.settled = (line, bad) => {
+    row._busy = false;
+    row._until = Date.now() + 5000;
+    row.hidden = false;
+    row.classList.toggle("om-mem-link-bad", !!bad);
+    text.textContent = line;
+    act.hidden = false;
+    act.disabled = false;
+  };
+  row.free = () => { row._busy = false; row._until = 0; };
+  row.tell("live");
+  return row;
 }
 
 function monitorWants(key) {
@@ -9358,8 +9836,6 @@ function meterText(used, total) {
   return `${Math.round((used / total) * 100)}%`;
 }
 
-//: Where a temperature sits on the scale a thermostat draws. Below the floor everything looks
-//: identical; above the ceiling a card is in trouble whatever the exact figure.
 const TEMP_FLOOR = 30;
 const TEMP_CEILING = 95;
 
@@ -9368,17 +9844,15 @@ function tempShare(degrees) {
   return Math.max(0, Math.min(100, ((degrees - TEMP_FLOOR) / span) * 100));
 }
 
+const TEMP_WARM = 70;
+const TEMP_HOT = 84;
+
 function tempColour(degrees) {
-  if (degrees >= 84) return "#f85149";
-  if (degrees >= 70) return "#d29922";
+  if (degrees >= TEMP_HOT) return "#f85149";
+  if (degrees >= TEMP_WARM) return "#d29922";
   return "#3fb950";
 }
 
-//: How the strip is drawn. `mixed` is the default and the reason the others exist: a share of
-//: a total reads naturally as a bar left to right, a temperature reads as a column, and most
-//: people want both read the way they read. The single-axis styles are for anyone who would
-//: rather have one shape than the right one, and the compact ones trade the separate label
-//: for the text sitting on the bar.
 const MONITOR_STYLES = [
   "mixed", "mixed-compact", "horizontal", "horizontal-compact", "vertical", "vertical-compact",
 ];
@@ -9388,8 +9862,6 @@ function monitorStyle() {
   return MONITOR_STYLES.includes(asked) ? asked : "mixed";
 }
 
-// How one cell of a given kind should be drawn under the chosen style. `meter` is a share of
-// a total, `thermo` is a temperature.
 function monitorShape(kind) {
   const style = monitorStyle();
   const compact = style.endsWith("-compact");
@@ -9398,16 +9870,13 @@ function monitorShape(kind) {
   return { axis, compact, base };
 }
 
-// One cell. The parts are the same whichever way round it is drawn -- a track, something that
-// fills it, a label and a figure -- so the shape is a matter of class names and which way the
-// fill grows, not of four separate builders.
 function monitorCell(kind, key, label, title) {
   const { axis, compact, base } = monitorShape(kind);
   const box = el("span",
     `om-mon-cell om-mon-${key} om-mon-${axis}${compact ? " om-mon-compact" : ""}`);
   box._say = title;
-  liveTip(box, () => [box._say, readingQuiet() ? quietText(readingAge()) : ""]
-    .filter(Boolean).join("\n"));
+  liveTip(box, () => tipWith(box._say,
+    linkText() || (readingQuiet() ? quietText(readingAge()) : "")));
   const track = el("span", axis === "v" ? "om-mon-tube" : "om-mon-bar");
   const fill = el("span", "om-mon-fill");
   track.appendChild(fill);
@@ -9419,8 +9888,6 @@ function monitorCell(kind, key, label, title) {
     box.appendChild(name);
     box.appendChild(track);
   } else if (compact) {
-    // The label and the figure read as one phrase, over the bar or under the column. One
-    // element instead of three is the whole point of the compact styles.
     const both = el("span", "om-mon-both");
     both.appendChild(name);
     both.appendChild(value);
@@ -9434,13 +9901,10 @@ function monitorCell(kind, key, label, title) {
   return { box, fill, value, axis };
 }
 
-// A meter: a share of something with a known total.
 function monitorMeter(key, label, title) {
   return monitorCell("meter", key, label, title);
 }
 
-// A temperature. Drawn as a column by default, because that is how a thermometer reads and
-// because it tells the two kinds of figure apart at a glance.
 function monitorThermo(label, title) {
   const parts = monitorCell("thermo", "thermo", label, title);
   return { ...parts, mercury: parts.fill };
@@ -9449,7 +9913,10 @@ function monitorThermo(label, title) {
 function buildMonitorStrip() {
   const strip = el("div", `om-mon om-mon-style-${monitorStyle()}`);
   liveTip(strip, () => ["Open the Memory panel",
-    readingQuiet() ? `${quietText(readingAge())}. These figures are the last that arrived.` : ""]
+    linkText()
+      || (readingQuiet()
+        ? `${quietText(readingAge())}. These figures are the last that arrived.`
+        : "")]
     .filter(Boolean).join("\n"));
   strip.onclick = () => openMemoryPanel();
   strip._cells = {
@@ -9460,8 +9927,6 @@ function buildMonitorStrip() {
   strip.appendChild(strip._cells.ram.box);
   if (!monitorWants("Cpu")) strip._cells.cpu.box.style.display = "none";
   if (!monitorWants("Ram")) strip._cells.ram.box.style.display = "none";
-  //: Built from the reading, because how many processors and cards there are is not something
-  //: to assume. Rebuilt only when that set changes, not on every tick.
   strip._dynamic = el("span", "om-mon-dynamic");
   strip.appendChild(strip._dynamic);
   strip._shape = "";
@@ -9469,8 +9934,6 @@ function buildMonitorStrip() {
   return strip;
 }
 
-// Lay the strip out for the devices this reading describes. One machine has a card, another
-// has four and a pair of sockets; the strip is built to match rather than to a fixed guess.
 function syncMonitorDevices(reading) {
   const devices = monitorWants("Vram") ? (reading.devices || []) : [];
   const temps = monitorWants("Temp") ? (reading.cpu_temps || []) : [];
@@ -9514,7 +9977,6 @@ function syncMonitorDevices(reading) {
 
 
 function paintMonitor(reading) {
-  recordReading(reading);
   if (!monitorStrip?.isConnected) return;
   syncMonitorDevices(reading);
   const cells = monitorStrip._cells;
@@ -9523,27 +9985,45 @@ function paintMonitor(reading) {
     if (parts.axis === "v") { parts.fill.style.height = held; parts.fill.style.width = ""; }
     else { parts.fill.style.width = held; parts.fill.style.height = ""; }
   };
-  const setMeter = (parts, share, text, detail) => {
+  const setMeter = (parts, share, text, said) => {
     parts.value.textContent = text;
     fillTo(parts, share);
     parts.fill.classList.toggle("om-mon-hot", share >= 90);
-    parts.box._say = detail ? `${text} · ${detail}` : text;
+    parts.box._say = said;
   };
-  const setThermo = (parts, degrees, title) => {
+  const setThermo = (parts, degrees, name) => {
     parts.value.textContent = `${Math.round(degrees)}°`;
     fillTo(parts, tempShare(degrees));
     parts.fill.style.background = tempColour(degrees);
-    if (title) parts.box._say = title;
+    if (!name) return;
+    parts.box._say = { lead: name, facts: [
+      ["Temperature", `${Math.round(degrees)} °C`],
+      ["Warm above", `${TEMP_WARM} °C`],
+      ["Hot above", `${TEMP_HOT} °C`],
+    ] };
   };
 
   if (typeof reading.cpu === "number") {
-    setMeter(cells.cpu, reading.cpu, `${Math.round(reading.cpu)}%`,
-             reading.cores?.length ? `${reading.cores.length} logical processors` : "");
+    const cores = reading.cores || [];
+    const hottest = (reading.cpu_temps || [])[0];
+    setMeter(cells.cpu, reading.cpu, `${Math.round(reading.cpu)}%`, { lead: "Processor", facts: [
+      ["Load", `${Math.round(reading.cpu)}%`],
+      ["Busiest core", cores.length ? `${Math.round(Math.max(...cores))}%` : ""],
+      ["Processors", cores.length ? `${cores.length} logical` : ""],
+      ["Temperature", hottest ? `${Math.round(hottest.temp)} °C` : ""],
+    ] });
   }
   if (reading.ram?.total) {
     const share = (reading.ram.used / reading.ram.total) * 100;
-    setMeter(cells.ram, share, meterText(reading.ram.used, reading.ram.total),
-             `${bytesText(reading.ram.used)} of ${bytesText(reading.ram.total)} system memory`);
+    setMeter(cells.ram, share, meterText(reading.ram.used, reading.ram.total), {
+      lead: "System memory",
+      facts: [
+        ["In use", `${bytesText(reading.ram.used)} of ${bytesText(reading.ram.total)}`],
+        ["Share", `${Math.round(share)}%`],
+        ["Free", reading.ram.free ? bytesText(reading.ram.free) : ""],
+      ],
+      lines: [share >= 90 ? "Nearly full." : ""],
+    });
   }
 
   const byIndex = new Map((reading.devices || []).map((one) => [one.index, one]));
@@ -9552,72 +10032,121 @@ function paintMonitor(reading) {
       const device = byIndex.get(part.index);
       if (!device?.total) continue;
       const share = (device.used / device.total) * 100;
-      const busy = typeof device.util === "number" ? ` · ${device.util}% busy` : "";
-      setMeter(part.meter, share, meterText(device.used, device.total),
-               `${bytesText(device.used)} of ${bytesText(device.total)} on ${device.name}${busy}`);
+      setMeter(part.meter, share, meterText(device.used, device.total), {
+        lead: device.name,
+        facts: [
+          ["In use", `${bytesText(device.used)} of ${bytesText(device.total)}`],
+          ["Share", `${Math.round(share)}%`],
+          ["Utilisation", typeof device.util === "number" ? `${device.util}%` : ""],
+          ["Memory traffic", typeof device.mem_util === "number" ? `${device.mem_util}%` : ""],
+          ["Power", device.watts == null ? ""
+            : `${Math.round(device.watts)} W${device.watt_limit
+              ? ` of ${Math.round(device.watt_limit)} W` : ""}`],
+          ["Temperature",
+           typeof device.temp === "number" ? `${Math.round(device.temp)} °C` : ""],
+        ],
+        lines: [share >= 90 ? "Nearly full." : ""],
+      });
     } else if (part.kind === "gpu-temp") {
       const device = byIndex.get(part.index);
       if (device && typeof device.temp === "number") {
-        setThermo(part.thermo, device.temp, `${device.name} at ${device.temp}°C`);
+        setThermo(part.thermo, device.temp, device.name);
       }
     } else if (part.kind === "cpu-temp") {
       const sensors = reading.cpu_temps || [];
       const found = sensors[part.at]?.label === part.label
         ? sensors[part.at]
         : sensors.find((one) => one.label === part.label);
-      if (found) setThermo(part.thermo, found.temp, `${found.label} at ${found.temp}°C`);
+      if (found) setThermo(part.thermo, found.temp, found.label);
     }
   }
 }
 
 function markMonitorQuiet() {
   if (!monitorStrip?.isConnected) return;
-  monitorStrip.classList.toggle("om-mon-quiet", readingQuiet());
+  monitorStrip.classList.toggle("om-mon-quiet", linkDown() || readingQuiet());
 }
+
+let monitorBusy = false;
 
 async function renewMonitorLease() {
   if (!monitorStrip?.isConnected) return;
-  // A hidden tab is not being read, so it stops asking and the server stops sampling.
-  if (document.hidden) return;
   markMonitorQuiet();
+  if (document.hidden || monitorBusy || !linkMayPost()) return;
+  monitorBusy = true;
   try {
-    const answer = await dlPost("/monitor", {
-      client: MONITOR_CLIENT, interval: monitorInterval(),
-    });
-    if (answer?.reading) paintMonitor(answer.reading);
+    const answer = await monPost("/monitor",
+      { client: MONITOR_CLIENT, interval: monitorInterval() },
+      Math.max(LINK_DEADLINE, monitorInterval() * 2000));
+    linkLeased(answer);
+    if (answer?.reading) takeReading(answer.reading);
   } catch {
-    // The server will drop the lease on its own.
+  } finally {
+    monitorBusy = false;
   }
   markMonitorQuiet();
+  linkTick();
 }
 
 function startMonitor() {
-  if (!monitorListening) {
-    // Registering the type is what makes ComfyUI dispatch it rather than report it as an
-    // unknown message, so this goes on before the first push can arrive.
-    api.addEventListener("open_manager.monitor", (event) => paintMonitor(event.detail || {}));
-    monitorListening = true;
-  }
   clearInterval(monitorTimer);
-  // Renewed at a third of the lease's life, so one missed call does not drop it.
   monitorTimer = setInterval(renewMonitorLease, Math.max(1000, monitorInterval() * 1000));
   renewMonitorLease();
+}
+
+function wireMonitorLink() {
+  api.addEventListener("open_manager.monitor", (event) => {
+    link.pushAt = Date.now();
+    link.strikes = 0;
+    link.tries = 0;
+    link.verifyUntil = 0;
+    takeReading(event.detail || {});
+  });
+  api.addEventListener("reconnecting", () => {
+    link.verifyUntil = Date.now() + LINK_VERIFY;
+  });
+  api.addEventListener("reconnected", () => {
+    link.verifyUntil = 0;
+    link.tries = 0;
+    link.strikes = 0;
+    link.nextTryAt = 0;
+    renewMonitorLease();
+  });
+  window.addEventListener("online", () => {
+    link.nextPostAt = 0;
+    link.pollStep = 0;
+    link.nextTryAt = 0;
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      link.hiddenAt = Date.now();
+      if (monitorTimer) stopMonitor();
+      return;
+    }
+    if (link.hiddenAt) link.hiddenFor += Date.now() - link.hiddenAt;
+    link.hiddenAt = 0;
+    link.strikes = 0;
+    link.nextPostAt = 0;
+    if (monitorStrip?.isConnected) startMonitor();
+    else if (panelSetting("openManager.monitor", false) !== false) mountTopbar();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && monitorStrip?.isConnected) startMonitor();
+  });
+  window.addEventListener("pagehide", () => {
+    if (monitorTimer) stopMonitor();
+    if (floatingPanel("memory")) monRelease(MEMORY_CLIENT);
+  });
 }
 
 function stopMonitor() {
   clearInterval(monitorTimer);
   monitorTimer = 0;
-  dlPost("/monitor", { client: MONITOR_CLIENT, release: true }).catch(() => {});
+  monRelease(MONITOR_CLIENT);
 }
 
-// Where the readout goes, and what it goes in front of.
-//
-// The control bar is the default because that is where ComfyUI already gathers this sort of
-// thing, and where another monitor would be if one were installed -- so the two sit beside
-// each other rather than in different corners of the window.
 function monitorHost(fallback) {
   if (panelSetting("openManager.monitorPlacement", "control") !== "topbar") {
-    // Beside whatever else the control bar is carrying, if anything.
     const beside = document.getElementById("crystools-monitors-root");
     if (beside?.parentElement) return { host: beside.parentElement, before: beside };
     const bar = document.querySelector(".actionbar-container");
@@ -9625,17 +10154,13 @@ function monitorHost(fallback) {
       const group = bar.querySelector(".flex.gap-2") || bar.firstElementChild || bar;
       return { host: group, before: group.firstChild };
     }
-    // No control bar on this interface; the tab strip is the remaining place.
   }
-  // Ahead of the account control rather than after it: that button is the end of the strip
-  // and nothing should read as sitting past it.
   const tabs = document.querySelector(".workflow-tabs-container.pointer-events-auto");
   const trailing = tabs?.querySelector(".ml-auto");
   if (trailing) return { host: trailing, before: trailing.firstChild };
   return fallback ? { host: fallback, before: fallback.firstChild } : null;
 }
 
-// A compact readout, shown when it is switched on and not otherwise.
 function mountMonitor(slot) {
   if (panelSetting("openManager.monitor", false) === false) return false;
   if (document.querySelector(".om-mon")) return true;
@@ -9644,15 +10169,206 @@ function mountMonitor(slot) {
   monitorStrip = buildMonitorStrip();
   where.host.insertBefore(monitorStrip, where.before);
   startMonitor();
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopMonitor();
-    else if (monitorStrip?.isConnected) startMonitor();
-  });
-  window.addEventListener("pagehide", stopMonitor);
   return true;
 }
 
-// --- workflow tab marks --------------------------------------------------------------
+
+const NODE_DRAG_TYPE = "application/x-om-node";
+
+const nodeDropHosts = new Set();
+
+let dragGuardReady = false;
+
+function nodeTypeHere(entry) {
+  const types = window.LiteGraph?.registered_node_types;
+  const name = entry?.name ? String(entry.name) : "";
+  if (!types || !name) return "";
+  return Object.prototype.hasOwnProperty.call(types, name) ? name : "";
+}
+
+function shownGraph() {
+  return app.canvas?.graph || app.graph || null;
+}
+
+function addNodeAt(type, at) {
+  const lg = window.LiteGraph;
+  if (!nodeTypeHere({ name: type })) {
+    notify("Not added", `${type} is not registered in this ComfyUI, so it cannot be created.`);
+    return null;
+  }
+  const canvas = app.canvas;
+  const graph = shownGraph();
+  if (!canvas || !graph) return null;
+  let where = [0, 0];
+  try {
+    where = canvas.convertEventToCanvasOffset(at);
+  } catch {
+    where = [0, 0];
+  }
+  const made = lg.createNode(type, undefined, {
+    pos: [Math.round(where[0]), Math.round(where[1])],
+  });
+  if (!made) {
+    notify("Not added", `${type} could not be created.`);
+    return null;
+  }
+  canvas.emitBeforeChange?.();
+  try {
+    graph.add(made);
+  } finally {
+    canvas.emitAfterChange?.();
+  }
+  try {
+    app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.captureCanvasState?.();
+  } catch {
+  }
+  graph.setDirtyCanvas?.(true, true);
+  toast(`${made.title || type} added to the graph.`, { kind: "ok" });
+  return made;
+}
+
+function canvasCentre() {
+  const canvas = app.canvas?.canvas;
+  const rect = canvas?.getBoundingClientRect();
+  if (!rect) return { clientX: 0, clientY: 0 };
+  return { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+}
+
+function mountNodeDrop() {
+  const canvas = app.canvas?.canvas;
+  if (!canvas) return;
+  const carried = (event) => [...(event.dataTransfer?.types || [])].includes(NODE_DRAG_TYPE);
+  for (const host of [canvas.parentElement, canvas]) {
+    if (!host || nodeDropHosts.has(host)) continue;
+    nodeDropHosts.add(host);
+    host.addEventListener("dragover", (event) => {
+      if (!carried(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    }, true);
+    host.addEventListener("drop", (event) => {
+      if (!carried(event)) return;
+      const type = event.dataTransfer.getData(NODE_DRAG_TYPE);
+      event.preventDefault();
+      event.stopPropagation();
+      if (type) addNodeAt(type, event);
+    }, true);
+  }
+}
+
+function guardWindowDrags() {
+  if (dragGuardReady) return;
+  dragGuardReady = true;
+  document.addEventListener("dragstart", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest(".om-float, .om-dialog, .om-lb, .om-backdrop, .om-task, "
+      + ".om-task-pop")) return;
+    if (target.closest("[data-om-drag]")) return;
+    event.preventDefault();
+  }, true);
+}
+
+const GHOST_ROW = 15;
+
+const GHOST_ROWS_MAX = 7;
+
+function nodeGhost(entry, type) {
+  const lg = window.LiteGraph || {};
+  const inputs = entry?.inputs || {};
+  const ins = Number(inputs.required || 0) + Number(inputs.optional || 0);
+  const outs = (entry?.outputs || []).length;
+  const rows = Math.max(1, Math.min(GHOST_ROWS_MAX, Math.max(ins, outs)));
+  const ghost = el("div", "om-node-ghost");
+  ghost.style.setProperty("--om-ghost-title", lg.NODE_DEFAULT_COLOR || "#333");
+  ghost.style.setProperty("--om-ghost-body", lg.NODE_DEFAULT_BGCOLOR || "#353535");
+  ghost.style.setProperty("--om-ghost-text", lg.NODE_TITLE_COLOR || "#e6edf3");
+  ghost.appendChild(el("div", "om-node-ghost-bar", entry?.display_name || type));
+  const body = el("div", "om-node-ghost-body");
+  body.style.height = `${rows * GHOST_ROW + 10}px`;
+  const dot = (side, at) => {
+    const slot = el("span", "om-node-ghost-slot");
+    slot.style[side] = "5px";
+    slot.style.top = `${at * GHOST_ROW + 8}px`;
+    body.appendChild(slot);
+  };
+  for (let at = 0; at < Math.min(rows, ins); at += 1) dot("left", at);
+  for (let at = 0; at < Math.min(rows, outs); at += 1) dot("right", at);
+  ghost.appendChild(body);
+  return ghost;
+}
+
+function carryNode(event, type, entry) {
+  if (!event.dataTransfer) return;
+  event.dataTransfer.setData(NODE_DRAG_TYPE, type);
+  event.dataTransfer.effectAllowed = "copy";
+  const ghost = nodeGhost(entry, type);
+  document.body.appendChild(ghost);
+  try {
+    event.dataTransfer.setDragImage(ghost, 14, 12);
+  } catch {
+  }
+  requestAnimationFrame(() => ghost.remove());
+}
+
+function graphNodes() {
+  const types = window.LiteGraph?.registered_node_types || {};
+  const made = [];
+  for (const [type, held] of Object.entries(types)) {
+    const def = held?.nodeData;
+    const ports = def?.inputs && typeof def.inputs === "object" ? Object.values(def.inputs) : [];
+    made.push({
+      name: type,
+      display_name: def?.display_name || held?.title || type,
+      category: def?.category || held?.category || "",
+      module: def?.python_module || "",
+      description: def?.description || "",
+      deprecated: def?.deprecated === true,
+      experimental: def?.experimental === true,
+      inputs: {
+        required: ports.filter((one) => one && !one.isOptional).length,
+        optional: ports.filter((one) => one && one.isOptional).length,
+      },
+      takes: ports.map((one) => ({ name: String(one?.name || ""),
+                                   type: String(one?.type || ""),
+                                   optional: one?.isOptional === true })),
+      outputs: (def?.outputs || []).map((one) => String(one?.type || one?.name || "")),
+    });
+  }
+  return made;
+}
+
+function nodeDragFrom(item, entry) {
+  const type = nodeTypeHere(entry);
+  if (!type) {
+    item.classList.add("om-node-absent");
+    liveTip(item, () => `${entry.name}\nNot registered in this ComfyUI.`);
+    return;
+  }
+  mountNodeDrop();
+  guardWindowDrags();
+  const dialogued = () => !!item.closest(".om-backdrop");
+  liveTip(item, () => ({ lead: type }));
+  item.classList.add("om-node-here");
+  item.dataset.omDrag = "1";
+  item.draggable = true;
+  item.addEventListener("dragstart", (event) => {
+    if (event.target instanceof Element && event.target.closest("a")) {
+      event.preventDefault();
+      return;
+    }
+    if (dialogued()) {
+      event.preventDefault();
+      return;
+    }
+    carryNode(event, type, entry);
+  });
+  item.ondblclick = (event) => {
+    event.stopPropagation();
+    addNodeAt(type, canvasCentre());
+  };
+}
+
 
 const TAB_MARK_KEY = "om-tab-marks";
 
@@ -9684,15 +10400,38 @@ function tabMarksAll() {
   return tabMarks;
 }
 
+const TAB_SCRATCH_NAME = /(^|\/)Unsaved Workflow( \(\d+\))?\.json$/i;
+
+function tabMarksTidy() {
+  const all = tabMarksAll();
+  const saved = new Set(flowList().map((one) => tabKeyOf(one)));
+  let gone = 0;
+  for (const key of Object.keys(all)) {
+    if (!TAB_SCRATCH_NAME.test(key) || saved.has(key)) continue;
+    delete all[key];
+    gone += 1;
+  }
+  if (gone) tabMarksSave();
+  return gone;
+}
+
 function tabMarksSave() {
-  try { localStorage.setItem(TAB_MARK_KEY, JSON.stringify(tabMarksAll())); } catch { /* private */ }
+  try { localStorage.setItem(TAB_MARK_KEY, JSON.stringify(tabMarksAll())); } catch {}
 }
 
 function tabKeyOf(workflow) {
   return String(workflow?.path || workflow?.key || "");
 }
 
+const tabTemp = new WeakMap();
+
+function tabScratch(workflow) {
+  return !!workflow && workflow.isTemporary === true;
+}
+
 function tabMarkOf(workflow) {
+  if (!workflow) return null;
+  if (tabScratch(workflow)) return tabTemp.get(workflow) || null;
   return tabMarksAll()[tabKeyOf(workflow)] || null;
 }
 
@@ -9731,6 +10470,13 @@ function tabExtrasRead() {
   const title = String(extra.om_custom_title || "").trim().slice(0, TAB_TITLE_CAP);
   const colour = tabTint(extra.om_tab_color);
   if (!title && !colour) return;
+  if (tabScratch(active)) {
+    const held = { ...(tabTemp.get(active) || {}) };
+    if (title) held.title = title;
+    if (colour) held.colour = colour;
+    tabTemp.set(active, held);
+    return;
+  }
   const all = tabMarksAll();
   const key = tabKeyOf(active);
   const now = { ...(all[key] || {}) };
@@ -9741,12 +10487,25 @@ function tabExtrasRead() {
 }
 
 function setTabMark(workflow, patch) {
+  if (!workflow) return;
+  const tidy = (held) => {
+    const now = { ...held, ...patch };
+    if (!now.colour) delete now.colour;
+    if (!now.title) delete now.title;
+    return now;
+  };
+  if (tabScratch(workflow)) {
+    const now = tidy(tabTemp.get(workflow) || {});
+    if (Object.keys(now).length) tabTemp.set(workflow, now);
+    else tabTemp.delete(workflow);
+    tabExtrasWrite(workflow, now);
+    paintTabs();
+    return;
+  }
   const key = tabKeyOf(workflow);
   if (!key) return;
   const all = tabMarksAll();
-  const now = { ...(all[key] || {}), ...patch };
-  if (!now.colour) delete now.colour;
-  if (!now.title) delete now.title;
+  const now = tidy(all[key] || {});
   if (Object.keys(now).length) all[key] = now;
   else delete all[key];
   tabMarksSave();
@@ -9860,7 +10619,7 @@ function pickTabColour(workflow) {
 function injectTabMenu(item, workflow) {
   const host = item.parentElement;
   if (!host || host.querySelector(".om-tab-row")) return;
-  const mark = tabMarkOf(workflow) || {};
+  const mark = (tabMarksOn() ? tabMarkOf(workflow) : null) || {};
   const shell = () => {
     const holder = el(item.tagName.toLowerCase() === "li" ? "li" : "div", null);
     holder.className = item.className;
@@ -9916,7 +10675,7 @@ function injectTabMenu(item, workflow) {
   titles.appendChild(el("span", "om-tab-row-label", "Title"));
   const naming = el("span", "om-tab-swatches");
   const set = el("button", "om-tab-name", mark.title || "Set a title");
-  set.title = "A label for this tab only. The file keeps its own name.";
+  set.title = "A label for this tab only.";
   set.onclick = async (event) => {
     event.stopPropagation();
     closeHostMenu();
@@ -9937,13 +10696,36 @@ function injectTabMenu(item, workflow) {
   }
   titles.appendChild(naming);
 
+  const sending = shell();
+  sending.appendChild(el("span", "om-tab-row-label", "Desktop"));
+  const sender = el("span", "om-tab-swatches");
+  const send = el("button", "om-tab-name",
+                  workflow.isTemporary ? "Not saved yet" : "Put a shortcut on the desktop");
+  send.disabled = !!workflow.isTemporary;
+  send.title = workflow.isTemporary
+    ? "This tab has never been saved."
+    : "A shortcut on the desktop that opens this workflow.";
+  send.onclick = async (event) => {
+    event.stopPropagation();
+    closeHostMenu();
+    const made = await makeFlowLink("", workflow);
+    if (!made) return;
+    await loadDeskDocs();
+    paintDeskIcons();
+    toast(`Made a shortcut to ${made.name}.`, { kind: "ok" });
+  };
+  sender.appendChild(send);
+  sending.appendChild(sender);
+
   host.appendChild(divider());
-  host.appendChild(colours);
-  host.appendChild(titles);
+  if (tabMarksOn()) {
+    host.appendChild(colours);
+    host.appendChild(titles);
+  }
+  host.appendChild(sending);
 }
 
 function onTabMenu(event) {
-  if (!tabMarksOn()) return;
   const workflow = tabAt(event);
   if (workflow) awaitTabMenu(workflow);
 }
@@ -9961,14 +10743,3414 @@ function mountTabMarks() {
   watcher.observe(strip, { childList: true, subtree: true, characterData: true,
                            attributes: true, attributeFilter: ["class"] });
   document.addEventListener("contextmenu", onTabMenu, true);
+  tabMarksTidy();
   tabTick();
 }
 
-// --- the run bar --------------------------------------------------------------------------------
+const TASK_GROUP_NAMES = {
+  pack: "Custom nodes",
+  manager: "Node Discovery",
+  downloads: "Download Manager",
+  library: "Model Library",
+  memory: "Memory",
+  desktop: "Desktop settings",
+  programs: "Manage Programs",
+  files: "Folders",
+  note: "Notes",
+  props: "Properties",
+  wastebasket: "Trash",
+};
 
-//: One run, as it is understood so far. ComfyUI never broadcasts how many nodes a prompt has,
-//: so the total is read from the queue once and allowed to grow: an expanding node -- a loop,
-//: a subgraph -- creates nodes that were never in the prompt that was submitted.
+const TASK_POP_IN = 180;
+
+const TASK_POP_OUT = 260;
+
+let taskBar = null;
+
+let taskStart = null;
+
+let taskStrip = null;
+
+let startPanel = null;
+let taskDue = 0;
+let taskPop = null;
+let taskPopFor = null;
+let taskPopIn = 0;
+let taskPopOut = 0;
+let taskWired = false;
+
+function taskGroupName(group) {
+  const known = Object.hasOwn(TASK_GROUP_NAMES, group) ? TASK_GROUP_NAMES[group] : "";
+  if (known) return known;
+  const text = String(group || "Window");
+  return text.length > 18 ? `${text.slice(0, 17)}…` : text;
+}
+
+function taskWindows() {
+  const out = [];
+  for (const [key, panel] of [...floatPanels]) {
+    if (!panel.el.isConnected) { floatPanels.delete(key); continue; }
+    if (panel.modal) continue;
+    out.push(panel);
+  }
+  return out;
+}
+
+function taskEntries() {
+  const open = taskWindows();
+  if (!taskbarGrouped()) return open.map((panel) => ({ group: panel.group, members: [panel] }));
+  const entries = [];
+  const seen = new Map();
+  for (const panel of open) {
+    const found = seen.get(panel.group);
+    if (found) { found.members.push(panel); continue; }
+    const made = { group: panel.group, members: [panel] };
+    seen.set(panel.group, made);
+    entries.push(made);
+  }
+  return entries;
+}
+
+function taskbarHost() {
+  const bottom = document.getElementById("comfyui-body-bottom");
+  if (bottom) return { host: bottom, before: bottom.firstChild, flow: true };
+  return { host: document.body, before: null, flow: false };
+}
+
+function taskTint(text) {
+  let sum = 0;
+  for (const ch of String(text)) sum = (sum * 31 + ch.codePointAt(0)) % 360;
+  return `hsl(${sum} 42% 38%)`;
+}
+
+function taskInitial(text) {
+  const label = String(text || "?").trim();
+  const node = el("span", "om-task-glyph", (label[0] || "?").toUpperCase());
+  node.style.background = taskTint(label);
+  node.style.color = "#fff";
+  return node;
+}
+
+function omIcon(art, { name = "", cls = "om-task-glyph", img = "om-task-icon" } = {}) {
+  const url = safeArt(art?.url);
+  if (url && art.kind === "src") {
+    const node = el("img", img);
+    node.alt = "";
+    node.draggable = false;
+    node.onerror = () => node.replaceWith(art.fallback?.kind === "mask"
+      ? omIcon({ kind: "mask", url: art.fallback.url }, { name, cls, img })
+      : taskInitial(name));
+    node.src = url;
+    return node;
+  }
+  if (url && art.kind === "mask") {
+    const node = el("span", cls);
+    node.style.backgroundColor = art.tint || "currentColor";
+    node.style.setProperty("-webkit-mask", `center / contain no-repeat url("${url}")`);
+    node.style.setProperty("mask", `center / contain no-repeat url("${url}")`);
+    return node;
+  }
+  return taskInitial(name);
+}
+
+function taskIcon(panel) {
+  return omIcon(panel.icon?.(), { name: panel.title?.() || panel.key });
+}
+
+function taskOneMenu(panel) {
+  const items = [panel.isMinimised()
+    ? { label: "Restore", fn: () => panel.present() }
+    : { label: "Minimise", fn: () => panel.minimise() },
+    { label: "Close", danger: true, fn: () => panel.destroy() }];
+  const rest = taskWindows().filter((one) => one !== panel);
+  if (rest.length) {
+    items.push({
+      label: `Close ${rest.length} other window${rest.length === 1 ? "" : "s"}`,
+      danger: true,
+      fn: () => { for (const one of rest) one.destroy(); },
+    });
+  }
+  return items;
+}
+
+function taskGroupMenu(entry) {
+  const items = [];
+  const away = entry.members.filter((one) => one.isMinimised());
+  const live = entry.members.filter((one) => !one.isMinimised());
+  if (away.length) {
+    items.push({ label: "Restore all", fn: () => { for (const one of away) one.present(); } });
+  }
+  if (live.length) {
+    items.push({ label: "Minimise all", fn: () => { for (const one of live) one.minimise(); } });
+  }
+  items.push({
+    label: `Close these ${entry.members.length} windows`,
+    danger: true,
+    fn: () => { for (const one of [...entry.members]) one.destroy(); },
+  });
+  return items;
+}
+
+function buildTaskRow(panel) {
+  const row = el("div", "om-task-row");
+  row.setAttribute("role", "menuitem");
+  row.tabIndex = -1;
+  row.appendChild(taskIcon(panel));
+  const name = panel.title?.() || panel.key;
+  row.appendChild(el("span", "om-task-row-name", name));
+  const minimised = panel.isMinimised();
+  const front = !minimised && panel.el.classList.contains("om-float-active");
+  row.appendChild(el("span", "om-task-row-state",
+    minimised ? "Minimised" : (front ? "In front" : "")));
+  const shut = el("button", "om-task-shut", "×");
+  shut.type = "button";
+  shut.tabIndex = -1;
+  shut.setAttribute("aria-hidden", "true");
+  shut.onclick = (event) => { event.stopPropagation(); panel.destroy(); };
+  row.appendChild(shut);
+  row.onclick = () => { panel.present(); closeTaskPop(false); };
+  row.addEventListener("auxclick", (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    panel.destroy();
+  });
+  return row;
+}
+
+function fillTaskPop(entry) {
+  if (!taskPop) return;
+  taskPop.replaceChildren(...entry.members.map(buildTaskRow));
+  placeRowMenu(taskPop, taskPopFor, "left");
+}
+
+function taskPopLater() {
+  clearTimeout(taskPopOut);
+  taskPopOut = setTimeout(() => closeTaskPop(false), TASK_POP_OUT);
+}
+
+function closeTaskPop(back) {
+  clearTimeout(taskPopIn);
+  clearTimeout(taskPopOut);
+  taskPopIn = 0;
+  taskPopOut = 0;
+  taskPop?.remove();
+  taskPop = null;
+  const was = taskPopFor;
+  taskPopFor = null;
+  if (was) {
+    was.setAttribute("aria-expanded", "false");
+    was.removeAttribute("aria-controls");
+    if (back && was.isConnected) was.focus();
+  }
+}
+
+function openTaskPop(item, entry, intoIt) {
+  if (taskPopFor === item && taskPop) {
+    if (intoIt) taskPop.querySelector(".om-task-row")?.focus();
+    return;
+  }
+  closeTaskPop(false);
+  taskPop = el("div", "om-task-pop");
+  taskPop.id = `om-task-pop-${String(entry.group).replace(/[^a-z0-9_-]/gi, "-")}`;
+  taskPop.setAttribute("role", "menu");
+  taskPop.setAttribute("aria-label", `${taskGroupName(entry.group)} windows`);
+  taskPop.addEventListener("pointerenter", () => { clearTimeout(taskPopOut); taskPopOut = 0; });
+  taskPop.addEventListener("pointerleave", taskPopLater);
+  taskPop.addEventListener("keydown", onTaskPopKey);
+  document.body.appendChild(taskPop);
+  taskPopFor = item;
+  fillTaskPop(entry);
+  requestAnimationFrame(() => taskPop?.classList.add("om-task-pop-on"));
+  item.setAttribute("aria-expanded", "true");
+  item.setAttribute("aria-controls", taskPop.id);
+  if (intoIt) taskPop.querySelector(".om-task-row")?.focus();
+}
+
+function onTaskPopKey(event) {
+  if (!taskPop) return;
+  const rows = [...taskPop.querySelectorAll(".om-task-row")];
+  const here = event.target instanceof Element ? event.target.closest(".om-task-row") : null;
+  const at = rows.indexOf(here);
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    rows[Math.min(rows.length - 1, at + 1)]?.focus();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    (at <= 0 ? rows[0] : rows[at - 1])?.focus();
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    rows[0]?.focus();
+  } else if (event.key === "End") {
+    event.preventDefault();
+    rows[rows.length - 1]?.focus();
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    here?.click();
+  } else if (event.key === "Delete") {
+    event.preventDefault();
+    here?.querySelector(".om-task-shut")?.click();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeTaskPop(true);
+  } else if (event.key === "Tab") {
+    closeTaskPop(false);
+  }
+}
+
+function buildTaskOne(panel) {
+  const item = el("button", "om-task-item");
+  item.type = "button";
+  item.dataset.omTask = panel.key;
+  const name = panel.title?.() || panel.key;
+  const minimised = panel.isMinimised();
+  const front = !minimised && panel.el.classList.contains("om-float-active");
+  if (!minimised) item.classList.add("om-task-on");
+  if (front) {
+    item.classList.add("om-task-front");
+    item.setAttribute("aria-current", "true");
+  }
+  item.appendChild(taskIcon(panel));
+  item.appendChild(el("span", "om-task-text", name));
+  item.setAttribute("aria-label", minimised ? `${name}, minimised` : name);
+  liveTip(item, () => ({
+    lead: name,
+    facts: [
+      ["State", panel.isMinimised() ? "Minimised"
+        : (panel.el.classList.contains("om-float-active") ? "In front" : "Open")],
+      ["Group", taskGroupName(panel.group)],
+    ],
+  }));
+  item.onclick = () => {
+    if (panel.isMinimised()) { panel.present(); return; }
+    if (panel.el.classList.contains("om-float-active")) { panel.minimise(); return; }
+    panel.present();
+  };
+  item.addEventListener("pointerdown", (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
+  item.addEventListener("auxclick", (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    panel.destroy();
+  });
+  item.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    closeTaskPop(false);
+    openRowMenu(item, { items: taskOneMenu(panel), align: "left" });
+  });
+  return item;
+}
+
+function buildTaskGroup(entry) {
+  const item = el("button", "om-task-item");
+  item.type = "button";
+  item.dataset.omGroup = entry.group;
+  item._omEntry = entry;
+  const label = taskGroupName(entry.group);
+  const live = entry.members.filter((one) => !one.isMinimised());
+  const front = entry.members.some((one) => !one.isMinimised()
+    && one.el.classList.contains("om-float-active"));
+  if (live.length) item.classList.add("om-task-on");
+  if (front) {
+    item.classList.add("om-task-front");
+    item.setAttribute("aria-current", "true");
+  }
+  item.appendChild(entry.group === "pack"
+    ? el("span", "om-task-glyph", "▤")
+    : taskInitial(label));
+  item.appendChild(el("span", "om-task-text", label));
+  item.appendChild(el("span", "om-task-count", String(entry.members.length)));
+  item.setAttribute("aria-haspopup", "menu");
+  item.setAttribute("aria-expanded", "false");
+  item.setAttribute("aria-label", `${label}, ${entry.members.length} windows`);
+  item.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "touch") return;
+    clearTimeout(taskPopOut);
+    taskPopOut = 0;
+    clearTimeout(taskPopIn);
+    taskPopIn = setTimeout(() => openTaskPop(item, entry, false), taskPop ? 0 : TASK_POP_IN);
+  });
+  item.addEventListener("pointerleave", () => {
+    clearTimeout(taskPopIn);
+    taskPopIn = 0;
+    taskPopLater();
+  });
+  item.onclick = () => {
+    if (taskPopFor === item) closeTaskPop(false);
+    else openTaskPop(item, entry, false);
+  };
+  item.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    closeTaskPop(false);
+    openRowMenu(item, { items: taskGroupMenu(entry), align: "left" });
+  });
+  return item;
+}
+
+function taskNodeFor(key) {
+  if (!taskBar || !key) return null;
+  const direct = taskBar.querySelector(`[data-om-task="${CSS.escape(key)}"]`);
+  if (direct) return direct;
+  const panel = floatPanels.get(key);
+  return panel ? taskBar.querySelector(`[data-om-group="${CSS.escape(panel.group)}"]`) : null;
+}
+
+function onTaskKey(event) {
+  const item = event.target instanceof Element
+    ? event.target.closest(".om-task-item") : null;
+  if (!item || !taskBar) return;
+  const items = taskWalk();
+  const at = items.indexOf(item);
+  const go = (to) => {
+    const next = items[Math.max(0, Math.min(items.length - 1, to))];
+    if (!next) return;
+    for (const one of items) one.tabIndex = one === next ? 0 : -1;
+    next.focus();
+    next.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+  if (event.key === "ArrowRight") { event.preventDefault(); go(at + 1); return; }
+  if (event.key === "ArrowLeft") { event.preventDefault(); go(at - 1); return; }
+  if (event.key === "Home") { event.preventDefault(); go(0); return; }
+  if (event.key === "End") { event.preventDefault(); go(items.length - 1); return; }
+  if (event.key === "Escape") { closeTaskPop(true); return; }
+  if (event.key === "Delete") {
+    const panel = item.dataset.omTask ? floatingPanel(item.dataset.omTask) : null;
+    if (panel) { event.preventDefault(); panel.destroy(); }
+    return;
+  }
+  if (item._omEntry && (event.key === "Enter" || event.key === " " || event.key === "ArrowUp")) {
+    event.preventDefault();
+    openTaskPop(item, item._omEntry, true);
+  }
+}
+
+function closeStart(back) {
+  if (!startPanel) return;
+  startPanel.remove();
+  closeStartPop();
+  startPanel = null;
+  taskStart?.setAttribute("aria-expanded", "false");
+  taskStart?.removeAttribute("aria-controls");
+  if (back) taskStart?.focus();
+}
+
+function startRow(art, label, { pin = null, pinned = false, open }) {
+  const row = el("div", "om-start-row");
+  row.tabIndex = -1;
+  row.setAttribute("role", "menuitem");
+  row.appendChild(omIcon(art, { name: label, cls: "om-start-art", img: "om-start-img" }));
+  row.appendChild(el("span", "om-start-name", label));
+  if (pin) {
+    const mark = el("button", "om-start-pin", pinned ? "On the desktop" : "Pin");
+    mark.type = "button";
+    mark.onclick = (event) => {
+      event.stopPropagation();
+      pin(!pinned);
+      closeStart(false);
+    };
+    row.appendChild(mark);
+  }
+  row.addEventListener("pointerenter", () => {
+    if (!row.closest(".om-start-pop")) closeStartPop();
+  });
+  row.onclick = () => { closeStart(false); open(); };
+  row.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    closeStart(false);
+    open();
+  });
+  return row;
+}
+
+let startPop = null;
+
+function closeStartPop() {
+  startPop?.remove();
+  startPop = null;
+}
+
+const START_SETTINGS = new Set(["desksettings", "programs"]);
+
+function startGroupOf(row) {
+  const said = String(row.program?.group || "").trim();
+  if (said) return said;
+  return START_SETTINGS.has(row.key) ? "Settings" : "Programs";
+}
+
+function startProgramRow(row) {
+  const label = row.desk?.label || row.label;
+  return startRow(
+    row.desk ? { kind: row.desk.kind, url: row.desk.art } : { kind: "mask", url: ICON_PROGRAM },
+    label,
+    {
+      open: () => deskOpenRow(row),
+      pinned: pinnedOn(row.key),
+      pin: desktopOn() ? (on) => (on ? pinDesk(row.key) : unpinDesk(row.key)) : null,
+    },
+  );
+}
+
+function openStartPop(anchor, rows) {
+  closeStartPop();
+  if (!rows.length || !startPanel) return;
+  startPop = el("div", "om-start om-start-pop");
+  startPop.setAttribute("role", "menu");
+  startPop.replaceChildren(...rows);
+  document.body.appendChild(startPop);
+  const from = anchor.getBoundingClientRect();
+  const beside = startPanel.getBoundingClientRect();
+  const box = startPop.getBoundingClientRect();
+  const left = beside.right + box.width + 8 <= window.innerWidth
+    ? beside.right + 2
+    : Math.max(8, beside.left - box.width - 2);
+  const top = Math.max(8, Math.min(from.top - 4, window.innerHeight - box.height - 8));
+  startPop.style.left = `${Math.round(left)}px`;
+  startPop.style.top = `${Math.round(top)}px`;
+}
+
+function startGroupRow(label, art, rows) {
+  const row = el("div", "om-start-row om-start-group");
+  row.tabIndex = -1;
+  row.setAttribute("role", "menuitem");
+  row.setAttribute("aria-haspopup", "menu");
+  row.appendChild(omIcon(art, { name: label, cls: "om-start-art", img: "om-start-img" }));
+  row.appendChild(el("span", "om-start-name", label));
+  row.appendChild(el("span", "om-start-more", "›"));
+  const show = () => openStartPop(row, rows);
+  row.addEventListener("pointerenter", show);
+  row.onclick = show;
+  row.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " " || event.key === "ArrowRight") {
+      event.preventDefault();
+      show();
+      startPop?.querySelector(".om-start-row")?.focus();
+    }
+  });
+  return row;
+}
+
+function fillStart(list, want) {
+  const text = want.trim().toLowerCase();
+  const fits = (label) => !text || label.toLowerCase().includes(text);
+  closeStartPop();
+
+  const programs = managerDestinations()
+    .filter((row) => row.kind === "program" && (!row.available || row.available()))
+    .filter((row) => row.program?.surfaces?.start !== false);
+  const docs = deskDocs.slice();
+  const extras = [
+    ["Trash", { kind: "mask", url: ICON_BIN }, () => openWastebasket()],
+  ];
+
+  if (text) {
+    const rows = [];
+    for (const row of programs.filter((one) => fits(one.desk?.label || one.label))) {
+      rows.push(startProgramRow(row));
+    }
+    for (const one of docs.filter((one) => fits(one.name))) {
+      rows.push(startRow(docArt(one), one.name, { open: () => openDoc(one) }));
+    }
+    for (const [label, art, open] of extras.filter(([label]) => fits(label))) {
+      rows.push(startRow(art, label, { open }));
+    }
+    list.replaceChildren(...(rows.length
+      ? rows
+      : [el("div", "om-start-none", "Nothing here matches that.")]));
+    return;
+  }
+
+  const drawers = new Map();
+  for (const row of programs) {
+    const name = startGroupOf(row);
+    if (!drawers.has(name)) drawers.set(name, []);
+    drawers.get(name).push(startProgramRow(row));
+  }
+
+  const rows = [];
+  const named = [...drawers.keys()]
+    .filter((one) => one !== "Programs" && one !== "Settings")
+    .sort((a, b) => a.localeCompare(b));
+  for (const name of ["Programs", ...named, "Settings"]) {
+    const held = drawers.get(name);
+    if (!held?.length) continue;
+    rows.push(startGroupRow(name, { kind: "mask", url: START_ART[name] || ICON_PROGRAM }, held));
+  }
+
+  const deskRows = [
+    ...docs.map((one) => startRow(docArt(one), one.name, { open: () => openDoc(one) })),
+    ...extras.map(([label, art, open]) => startRow(art, label, { open })),
+  ];
+  if (deskRows.length) {
+    rows.push(startGroupRow("Desktop", { kind: "mask", url: ICON_DESKTOP }, deskRows));
+  }
+
+  list.replaceChildren(...(rows.length
+    ? rows
+    : [el("div", "om-start-none", "Nothing here yet.")]));
+}
+
+function openStart() {
+  if (!taskBar?.isConnected) return null;
+  closeTaskPop(false);
+  closeStart(false);
+  startPanel = el("div", "om-start");
+  startPanel.setAttribute("role", "menu");
+  startPanel.setAttribute("aria-label", "Start");
+  startPanel.id = `om-start-${Math.random().toString(36).slice(2, 8)}`;
+  const find = el("input", "om-search om-start-find");
+  find.placeholder = "Search";
+  find.spellcheck = false;
+  const list = el("div", "om-start-list");
+  startPanel.appendChild(find);
+  startPanel.appendChild(list);
+  document.body.appendChild(startPanel);
+  fillStart(list, "");
+  placeRowMenu(startPanel, taskStart, "left");
+  taskStart.setAttribute("aria-expanded", "true");
+  taskStart.setAttribute("aria-controls", startPanel.id);
+  find.addEventListener("input", () => {
+    fillStart(list, find.value);
+    placeRowMenu(startPanel, taskStart, "left");
+  });
+  startPanel.addEventListener("keydown", (event) => {
+    const rows = [...list.querySelectorAll(".om-start-row")];
+    const at = rows.indexOf(document.activeElement);
+    if (event.key === "Escape") { event.preventDefault(); closeStart(true); return; }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      (rows[at + 1] || rows[0])?.focus();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      (at <= 0 ? rows[rows.length - 1] : rows[at - 1])?.focus();
+    }
+  });
+  if (desktopOn() && !deskDocs.length) {
+    loadDeskDocs().then(() => { if (startPanel) fillStart(list, find.value); }).catch(() => {});
+  }
+  find.focus();
+  return startPanel;
+}
+
+function taskWalk() {
+  return [taskStart, ...(taskStrip ? taskStrip.children : [])].filter(Boolean);
+}
+
+function onTaskAway(event) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (startPanel && !(target && (startPanel.contains(target) || startPop?.contains(target)
+      || taskStart?.contains(target)))) {
+    closeStart(false);
+  }
+  if (!taskPop) return;
+  if (target && (taskPop.contains(target) || taskPopFor?.contains(target))) return;
+  closeTaskPop(false);
+}
+
+function dropTaskbar() {
+  closeTaskPop(false);
+  closeStart(false);
+  taskBar?.remove();
+  taskBar = null;
+  taskStart = null;
+  taskStrip = null;
+  setTaskRoom(0);
+}
+
+function mountTaskbar() {
+  if (taskBar?.isConnected) return;
+  const where = taskbarHost();
+  taskBar = el("div", `om-task${where.flow ? "" : " om-task-pinned"}`);
+  taskBar.setAttribute("role", "toolbar");
+  taskBar.setAttribute("aria-label", "Open Manager windows");
+  taskBar.setAttribute("aria-orientation", "horizontal");
+  taskBar.addEventListener("keydown", onTaskKey);
+  taskStart = el("button", "om-task-item om-task-start");
+  taskStart.type = "button";
+  taskStart.setAttribute("aria-label", "Start");
+  taskStart.setAttribute("aria-haspopup", "menu");
+  taskStart.setAttribute("aria-expanded", "false");
+  taskStart.tabIndex = -1;
+  taskStart.appendChild(omIcon({ kind: "src", url: ICON_BRAND },
+                               { name: "Start", cls: "om-task-glyph", img: "om-task-icon" }));
+  const startWord = el("span", "om-task-text", "Start");
+  startWord.hidden = panelSetting("openManager.startLabel", false) !== true;
+  taskStart.classList.toggle("om-task-start-bare", startWord.hidden);
+  taskStart.appendChild(startWord);
+  taskStart.onclick = () => (startPanel ? closeStart(true) : openStart());
+  taskBar.appendChild(taskStart);
+  taskStrip = el("div", "om-task-strip");
+  taskBar.appendChild(taskStrip);
+  taskStrip.addEventListener("wheel", (event) => {
+    if (!event.deltaY || event.deltaX) return;
+    event.preventDefault();
+    taskStrip.scrollLeft += event.deltaY;
+  }, { passive: false });
+  where.host.insertBefore(taskBar, where.before);
+  guardWindowDrags();
+  watchTaskbarEdge();
+  taskbarShow(!taskbarHides());
+  matchStartWidth();
+  if (taskWired) return;
+  taskWired = true;
+  document.addEventListener("pointerdown", onTaskAway, true);
+  window.addEventListener("resize", () => { closeTaskPop(false); closeStart(false); });
+}
+
+function paintTaskbar() {
+  if (!taskbarOn()) { dropTaskbar(); return; }
+  const entries = taskEntries();
+  const had = taskBar?.contains(document.activeElement)
+    ? (document.activeElement.dataset.omTask || document.activeElement.dataset.omGroup || "")
+    : "";
+  const popped = taskPopFor?.dataset.omGroup || "";
+  mountTaskbar();
+  taskStrip.replaceChildren(...entries.map((entry) => (entry.members.length > 1
+    ? buildTaskGroup(entry)
+    : buildTaskOne(entry.members[0]))));
+  setTaskRoom(taskBar.getBoundingClientRect().height);
+  const front = taskStrip.querySelector('[aria-current="true"]')
+    || taskStrip.firstElementChild || taskStart;
+  for (const one of taskWalk()) one.tabIndex = one === front ? 0 : -1;
+  const wanted = floatTakeFocus();
+  const target = (wanted && taskNodeFor(wanted))
+    || (had && (taskStrip.querySelector(`[data-om-task="${CSS.escape(had)}"]`)
+      || taskStrip.querySelector(`[data-om-group="${CSS.escape(had)}"]`)));
+  if (target) {
+    for (const one of taskWalk()) one.tabIndex = one === target ? 0 : -1;
+    target.focus();
+    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  if (!popped) return;
+  const again = entries.find((one) => one.group === popped && one.members.length > 1);
+  const button = again && taskStrip.querySelector(`[data-om-group="${CSS.escape(popped)}"]`);
+  if (!again || !button) { closeTaskPop(false); return; }
+  taskPopFor = button;
+  button.setAttribute("aria-expanded", "true");
+  if (taskPop) button.setAttribute("aria-controls", taskPop.id);
+  fillTaskPop(again);
+}
+
+const DESK_TAB_ID = "om-desk-tab";
+
+const START_ART = {
+  Programs: ICON_PROGRAM,
+  Settings: ICON_DESKTOP,
+  Games: ICON_BRAND,
+};
+
+const DESK_STRIP = '[data-testid="topbar-workflow-tabs"] > div > .workflow-tabs-container';
+
+let deskLayer = null;
+let deskTab = null;
+let deskShown = false;
+let deskWatcher = null;
+let deskChromeWatcher = null;
+let deskRoom = null;
+let deskWired = false;
+let deskWatchTimer = 0;
+let deskSeenPath = "";
+let deskArmAt = 0;
+
+const DESK_HASH = "#desktop";
+
+let deskHashBefore = null;
+
+function deskHashOn() {
+  try {
+    return location.hash === DESK_HASH;
+  } catch {
+    return false;
+  }
+}
+
+let deskHashWanted = deskHashOn();
+
+function deskHashAsked() {
+  return deskHashWanted || deskHashOn();
+}
+
+function setDeskHash(on) {
+  try {
+    if (on) {
+      if (deskHashOn()) return;
+      deskHashBefore = location.hash || "";
+      history.replaceState(null, "", DESK_HASH);
+      return;
+    }
+    if (!deskHashOn()) return;
+    history.replaceState(null, "",
+      deskHashBefore || `${location.pathname}${location.search}`);
+    deskHashBefore = null;
+  } catch {
+  }
+}
+let deskSideRoom = null;
+
+function desktopOn() {
+  return deskGates.desktop !== false
+    && panelSetting("openManager.desktop", false) === true;
+}
+
+function deskStrip() {
+  return document.querySelector(DESK_STRIP);
+}
+
+function deskCanvasBox() {
+  return document.getElementById("graph-canvas-container");
+}
+
+function deskFreeBox() {
+  return document.querySelector(".graph-canvas-panel") || deskCanvasBox();
+}
+
+function deskAsked() {
+  const query = new URLSearchParams(window.location.search);
+  return query.has("share") || query.has("template");
+}
+
+function deskFit() {
+  if (!deskLayer) return;
+  const box = deskCanvasBox()?.getBoundingClientRect();
+  if (!box || !box.width || !box.height) return;
+  const floor = taskBar?.isConnected
+    ? taskBar.getBoundingClientRect().top
+    : window.innerHeight;
+  const bottom = Math.min(box.bottom, floor);
+  const tall = Math.max(80, bottom - box.top);
+  deskLayer.style.left = `${Math.round(box.left)}px`;
+  deskLayer.style.top = `${Math.round(box.top)}px`;
+  deskLayer.style.width = `${Math.round(box.width)}px`;
+  deskLayer.style.height = `${Math.round(tall)}px`;
+  const grid = deskLayer.querySelector(".om-desk-grid");
+  if (!grid) return;
+  const free = deskFreeBox()?.getBoundingClientRect();
+  if (!free || !free.width) return;
+  const strip = document.querySelector('[data-testid="topbar-workflow-tabs"]')
+    ?.getBoundingClientRect();
+  const ceiling = strip && strip.height ? Math.max(strip.bottom, box.top) : free.top;
+  const gap = (value) => Math.max(10, Math.round(value));
+  deskInset.left = gap(free.left - box.left + 10);
+  deskInset.top = gap(ceiling - box.top + 10);
+  deskInset.right = gap(box.right - free.right + 10);
+  deskInset.bottom = gap(Math.min(box.bottom, floor) - free.bottom + 10);
+  placeDeskCells();
+}
+
+function buildDesk() {
+  if (deskLayer?.isConnected) return deskLayer;
+  deskLayer = el("div", "om-desk");
+  deskLayer.hidden = true;
+  deskLayer.classList.remove("om-desk-on");
+  const grid = el("div", "om-desk-grid");
+  grid.setAttribute("role", "listbox");
+  grid.setAttribute("aria-label", "Desktop");
+  grid.addEventListener("keydown", onDeskKey);
+  const deskTypes = (event) => [...(event.dataTransfer?.types || [])];
+  const deskCarried = (event) => {
+    const types = deskTypes(event);
+    return types.includes(DESK_DRAG_TYPE) || types.includes(FILE_DRAG_TYPE);
+  };
+  grid.addEventListener("dragover", (event) => {
+    if (!deskCarried(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const onto = event.target instanceof Element
+      ? event.target.closest(".om-desk-cell[data-om-drop]") : null;
+    deskGhost(onto ? null : deskSpotAt(event));
+  });
+  grid.addEventListener("dragleave", (event) => {
+    if (event.target === grid) deskGhost(null);
+  });
+  grid.addEventListener("drop", (event) => {
+    deskGhost(null);
+    if (!deskCarried(event)) return;
+    let key = event.dataTransfer.getData(DESK_DRAG_TYPE);
+    if (!key) {
+      try { key = docKey(JSON.parse(event.dataTransfer.getData(FILE_DRAG_TYPE))); }
+      catch { return; }
+    }
+    deskArrangeAt(key, deskSpotAt(event));
+  });
+  deskLayer.appendChild(grid);
+  deskLayer.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    const spot = el("span");
+    spot.style.cssText = `position: fixed; left: ${event.clientX}px; top: ${event.clientY}px;`
+      + " width: 1px; height: 1px;";
+    document.body.appendChild(spot);
+    openRowMenu(spot, {
+      items: [
+        { label: "New note", fn: () => newDeskNote() },
+        { label: "New folder", fn: () => newDeskFolder() },
+        { label: "New workflow shortcut", fn: () => newDeskFlow() },
+        { label: "Trash", fn: () => openWastebasket() },
+        { label: "Arrange icons", fn: () => deskArrange() },
+        { label: "Desktop settings", fn: () => openDesktopSettings() },
+        { label: "Leave the desktop", fn: () => hideDesk() },
+      ],
+      align: "left",
+    });
+    setTimeout(() => spot.remove(), 50);
+  });
+  deskLayer.addEventListener("pointerdown", (event) => {
+    if (event.target === deskLayer || event.target === grid) deskSelect(null);
+  });
+  dropDocsInto(deskLayer, () => DOC_DESKTOP, () => {});
+  document.body.appendChild(deskLayer);
+  const box = deskCanvasBox();
+  if (box && window.ResizeObserver) {
+    deskRoom?.disconnect();
+    deskRoom = new ResizeObserver(() => deskFit());
+    deskRoom.observe(box);
+  }
+  window.addEventListener("resize", deskFit);
+  deskFit();
+  return deskLayer;
+}
+
+const DESK_FITS = {
+  cover: { size: "cover", repeat: "no-repeat", movable: true },
+  contain: { size: "contain", repeat: "no-repeat", movable: false },
+  centre: { size: "auto", repeat: "no-repeat", movable: true },
+  tile: { size: "auto", repeat: "repeat", movable: false },
+};
+
+function deskFitNow() {
+  return DESK_FITS[String(panelSetting("openManager.desktopFit", "cover"))] || DESK_FITS.cover;
+}
+
+function deskFocus() {
+  return {
+    x: deskNumber("openManager.desktopFocusX", 50, 0, 100),
+    y: deskNumber("openManager.desktopFocusY", 50, 0, 100),
+  };
+}
+
+function deskPosition(fit) {
+  if (!fit.movable) return "top left";
+  const spot = deskFocus();
+  return `${spot.x}% ${spot.y}%`;
+}
+
+function deskPaperUrl(asked) {
+  const text = String(asked || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text) || text.startsWith("/")) return safeArt(text);
+  return `${API}/wallpaper?name=${encodeURIComponent(text)}`;
+}
+
+function deskNumber(key, fallback, low, high) {
+  const asked = Number(panelSetting(key, fallback));
+  if (!Number.isFinite(asked)) return fallback;
+  return Math.max(low, Math.min(high, Math.round(asked)));
+}
+
+function applyDeskLook() {
+  if (!deskLayer) return;
+  const url = deskPaperUrl(panelSetting("openManager.desktopWallpaper", ""));
+  const fit = deskFitNow();
+  if (url) {
+    const test = new Image();
+    test.onload = () => {
+      if (!deskLayer) return;
+      deskLayer.style.backgroundImage = `url("${url}")`;
+      deskLayer.style.backgroundSize = fit.size;
+      deskLayer.style.backgroundRepeat = fit.repeat;
+      deskLayer.style.backgroundPosition = deskPosition(fit);
+    };
+    test.onerror = () => {
+      if (!deskLayer) return;
+      deskLayer.style.backgroundImage = "";
+      toast("That wallpaper could not be read, so the desktop is plain.", { kind: "warn" });
+    };
+    test.src = url;
+  } else {
+    deskLayer.style.backgroundImage = "";
+  }
+  const grid = deskLayer.querySelector(".om-desk-grid");
+  if (!grid) return;
+  grid.style.setProperty("--om-desk-icon",
+    `${deskNumber("openManager.desktopIconSize", 44, 28, 96)}px`);
+  grid.style.setProperty("--om-desk-label",
+    `${deskNumber("openManager.desktopLabelSize", 12, 9, 18)}px`);
+  placeDeskCells();
+}
+
+async function deskPapers() {
+  try {
+    return await (await api.fetchApi(`${API}/wallpapers`)).json();
+  } catch {
+    return { ok: false, wallpapers: [] };
+  }
+}
+
+const DESK_SNAP_SLACK = 4;
+
+const DESK_DRAG_TYPE = "application/x-om-desk";
+
+const DESK_SPRING = 900;
+
+const DESK_GAP = 3;
+
+const DESK_CELL_KEEP = 300;
+
+let deskCarry = null;
+
+let deskCells = {};
+
+const deskInset = { left: 10, top: 10, right: 10, bottom: 10 };
+
+let deskSaveDue = 0;
+
+let deskPinDue = 0;
+
+let deskOffDue = 0;
+
+let deskWriting = Promise.resolve();
+
+let deskPinned = [];
+
+let deskUnpinned = [];
+
+function deskStep(grid) {
+  const icon = deskNumber("openManager.desktopIconSize", 44, 28, 96);
+  const label = deskNumber("openManager.desktopLabelSize", 12, 9, 18);
+  const probe = grid.querySelector(".om-desk-cell");
+  const wide = probe?.offsetWidth || icon + 28;
+  const tall = probe?.offsetHeight || Math.round(icon + label * 2.7 + 17);
+  return { wide: wide + DESK_GAP, tall: tall + DESK_GAP, cell: { wide, tall } };
+}
+
+function deskCapacity(grid) {
+  const step = deskStep(grid);
+  const room = {
+    wide: grid.clientWidth - deskInset.left - deskInset.right,
+    tall: grid.clientHeight - deskInset.top - deskInset.bottom,
+  };
+  const cols = Math.max(1, Math.floor((room.wide + DESK_GAP) / step.wide));
+  const rows = Math.max(1, Math.floor((room.tall + DESK_GAP) / step.tall));
+  return { cols, rows, step: { wide: step.wide, tall: step.tall, cell: step.cell } };
+}
+
+function deskTaken(grid, except) {
+  const held = new Set();
+  for (const cell of grid.querySelectorAll(".om-desk-cell")) {
+    if (cell === except) continue;
+    const spot = deskCells[cell.dataset.omDeskKey];
+    if (spot) held.add(`${spot.col},${spot.row}`);
+  }
+  return held;
+}
+
+function deskFreeSpot(grid, want, except) {
+  const { cols, rows } = deskCapacity(grid);
+  const held = deskTaken(grid, except);
+  const col = Math.max(0, Math.min(cols - 1, want.col));
+  const row = Math.max(0, Math.min(rows - 1, want.row));
+  if (!held.has(`${col},${row}`)) return { col, row };
+  for (let ring = 1; ring < cols + rows; ring += 1) {
+    for (let dc = -ring; dc <= ring; dc += 1) {
+      for (let dr = -ring; dr <= ring; dr += 1) {
+        if (Math.abs(dc) !== ring && Math.abs(dr) !== ring) continue;
+        const tryCol = col + dc;
+        const tryRow = row + dr;
+        if (tryCol < 0 || tryRow < 0 || tryCol >= cols || tryRow >= rows) continue;
+        if (!held.has(`${tryCol},${tryRow}`)) return { col: tryCol, row: tryRow };
+      }
+    }
+  }
+  return { col, row };
+}
+
+function placeDeskCells() {
+  if (!deskLayer) return;
+  const grid = deskLayer.querySelector(".om-desk-grid");
+  if (!grid || !grid.clientWidth || !grid.clientHeight) return;
+  const { cols, rows, step } = deskCapacity(grid);
+  let next = 0;
+  for (const cell of grid.querySelectorAll(".om-desk-cell")) {
+    const key = cell.dataset.omDeskKey;
+    let spot = deskCells[key];
+    if (!spot) {
+      spot = deskFreeSpot(grid, { col: Math.floor(next / rows) % cols, row: next % rows }, cell);
+      deskCells[key] = spot;
+    }
+    next += 1;
+    cell.style.left = `${deskInset.left + spot.col * step.wide}px`;
+    cell.style.top = `${deskInset.top + spot.row * step.tall}px`;
+  }
+}
+
+function keepDesk(body) {
+  deskWriting = deskWriting
+    .catch(() => {})
+    .then(() => dlPost("/desktop-layout", body).catch(() => {}));
+  return deskWriting;
+}
+
+function sweepDeskCells() {
+  const keys = Object.keys(deskCells);
+  if (keys.length <= DESK_CELL_KEEP) return;
+  const grid = deskGrid();
+  const live = new Set([...(grid ? grid.querySelectorAll(".om-desk-cell") : [])]
+    .map((one) => one.dataset.omDeskKey));
+  for (const key of keys) {
+    if (!live.has(key) && Object.keys(deskCells).length > DESK_CELL_KEEP) {
+      delete deskCells[key];
+    }
+  }
+}
+
+function saveDeskCells() {
+  clearTimeout(deskSaveDue);
+  deskSaveDue = setTimeout(() => {
+    sweepDeskCells();
+    keepDesk({ cells: deskCells });
+  }, 400);
+}
+
+function authorColours() {
+  return panelSetting("openManager.programColours", true) !== false;
+}
+
+function windowColour() {
+  return String(panelSetting("openManager.windowColour", "") || "").trim().toLowerCase();
+}
+
+function deskLook(key) {
+  const row = managerDestinations().find((one) => one.desk?.window === key);
+  const author = authorColours() ? row?.desk?.look : null;
+  if (author?.tint || author?.from) return author;
+  return readColour(windowColour());
+}
+
+async function setWindowColour(tint) {
+  try {
+    await app.extensionManager.setting.set("openManager.windowColour", tint);
+  } catch {}
+  repaintLooks();
+}
+
+function saveProgramsOff() {
+  clearTimeout(deskOffDue);
+  deskOffDue = setTimeout(() => keepDesk({ off: deskProgramsOff }), 400);
+}
+
+async function setProgramOn(id, on) {
+  const at = deskProgramsOff.indexOf(id);
+  if (on && at >= 0) deskProgramsOff.splice(at, 1);
+  if (!on && at < 0) deskProgramsOff.push(id);
+  saveProgramsOff();
+  await loadPrograms();
+  paintDeskIcons();
+}
+
+function saveDeskPins() {
+  clearTimeout(deskPinDue);
+  deskPinDue = setTimeout(() => keepDesk({
+    pinned: deskPinned, unpinned: deskUnpinned,
+  }), 400);
+}
+
+async function loadDeskCells() {
+  try {
+    const answer = await (await api.fetchApi(`${API}/desktop-layout`)).json();
+    if (answer?.cells && typeof answer.cells === "object") deskCells = answer.cells;
+    if (Array.isArray(answer?.pinned)) deskPinned = answer.pinned;
+    if (Array.isArray(answer?.unpinned)) deskUnpinned = answer.unpinned;
+    if (Array.isArray(answer?.off)) deskProgramsOff = answer.off;
+  } catch {
+    deskCells = {};
+  }
+  repaintLooks();
+}
+
+function repaintLooks() {
+  for (const [key, held] of floatPanels) {
+    if (held.el.isConnected) held.setLook?.(deskLook(key));
+  }
+  document.querySelector(".om-deskset-palette")?._omPaint?.();
+}
+
+function deskGrid() {
+  return deskLayer?.querySelector(".om-desk-grid") || null;
+}
+
+function deskCellFor(key) {
+  return deskLayer?.querySelector(`[data-om-desk-key="${CSS.escape(key)}"]`) || null;
+}
+
+function deskGhost(spot) {
+  const grid = deskGrid();
+  if (!grid) return;
+  let ghost = grid.querySelector(".om-desk-ghost");
+  if (!spot) { ghost?.remove(); return; }
+  const probe = grid.querySelector(".om-desk-cell");
+  const { step } = deskCapacity(grid);
+  if (!ghost) {
+    ghost = el("div", "om-desk-ghost");
+    grid.appendChild(ghost);
+  }
+  ghost.style.width = `${probe?.offsetWidth || step.wide - 12}px`;
+  ghost.style.height = `${probe?.offsetHeight || step.tall - 12}px`;
+  ghost.style.left = `${deskInset.left + spot.col * step.wide}px`;
+  ghost.style.top = `${deskInset.top + spot.row * step.tall}px`;
+}
+
+function deskSpotAt(event) {
+  const grid = deskGrid();
+  if (!grid) return null;
+  const box = grid.getBoundingClientRect();
+  const { cols, rows, step } = deskCapacity(grid);
+  const left = event.clientX - box.left - (deskCarry ? deskCarry.grabX : step.wide / 2);
+  const top = event.clientY - box.top - (deskCarry ? deskCarry.grabY : step.tall / 2);
+  const want = {
+    col: Math.max(0, Math.min(cols - 1, Math.round((left - deskInset.left) / step.wide))),
+    row: Math.max(0, Math.min(rows - 1, Math.round((top - deskInset.top) / step.tall))),
+  };
+  return deskFreeSpot(grid, want, deskCarry ? deskCellFor(deskCarry.key) : null);
+}
+
+function deskArrangeAt(key, spot) {
+  if (!key || !spot) return;
+  deskCells[key] = spot;
+  saveDeskCells();
+  placeDeskCells();
+}
+
+function dragDeskByPointer(cell, event) {
+  const grid = cell.parentElement;
+  if (!grid) return;
+  const start = { x: event.clientX, y: event.clientY };
+  const from = { left: cell.offsetLeft, top: cell.offsetTop };
+  const { step, cols, rows } = deskCapacity(grid);
+  let moved = false;
+  let spot = null;
+  try { cell.setPointerCapture(event.pointerId); } catch {}
+
+  const onMove = (move) => {
+    const dx = move.clientX - start.x;
+    const dy = move.clientY - start.y;
+    if (!moved && Math.abs(dx) < DESK_SNAP_SLACK && Math.abs(dy) < DESK_SNAP_SLACK) return;
+    if (!moved) {
+      moved = true;
+      cell.classList.add("om-desk-dragging");
+    }
+    cell.style.left = `${from.left + dx}px`;
+    cell.style.top = `${from.top + dy}px`;
+    spot = deskFreeSpot(grid, {
+      col: Math.max(0, Math.min(cols - 1,
+        Math.round((from.left + dx - deskInset.left) / step.wide))),
+      row: Math.max(0, Math.min(rows - 1,
+        Math.round((from.top + dy - deskInset.top) / step.tall))),
+    }, cell);
+    deskGhost(spot);
+  };
+
+  const onUp = () => {
+    try { cell.releasePointerCapture?.(event.pointerId); } catch {}
+    cell.removeEventListener("pointermove", onMove);
+    cell.removeEventListener("pointerup", onUp);
+    cell.removeEventListener("pointercancel", onUp);
+    if (!moved) return;
+    cell.classList.remove("om-desk-dragging");
+    deskGhost(null);
+    if (spot) deskArrangeAt(cell.dataset.omDeskKey, spot);
+    else placeDeskCells();
+  };
+
+  cell.addEventListener("pointermove", onMove);
+  cell.addEventListener("pointerup", onUp);
+  cell.addEventListener("pointercancel", onUp);
+}
+
+function dragDeskCell(cell) {
+  cell.draggable = true;
+  cell.dataset.omDrag = "1";
+  cell.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    deskSelect(cell);
+    if (event.pointerType !== "mouse") dragDeskByPointer(cell, event);
+  });
+  cell.addEventListener("dragstart", (event) => {
+    const box = cell.getBoundingClientRect();
+    deskCarry = {
+      key: cell.dataset.omDeskKey,
+      grabX: event.clientX - box.left,
+      grabY: event.clientY - box.top,
+    };
+    event.dataTransfer.setData(DESK_DRAG_TYPE, cell.dataset.omDeskKey);
+    event.dataTransfer.effectAllowed = "move";
+    requestAnimationFrame(() => cell.classList.add("om-desk-dragging"));
+  });
+  cell.addEventListener("dragend", () => {
+    cell.classList.remove("om-desk-dragging");
+    deskCarry = null;
+    deskGhost(null);
+  });
+}
+
+function deskArrange() {
+  deskCells = {};
+  placeDeskCells();
+  saveDeskCells();
+  toast("Icons arranged.", { kind: "ok" });
+}
+
+let deskDocs = [];
+
+function docPath(item) {
+  return String(item?.path || "");
+}
+
+const DOC_KINDS = { folder: "folder", link: "link", file: "file" };
+
+const DOC_WORDS = { folder: "Folder", link: "Shortcut", note: "Note" };
+
+function docWord(item) {
+  if (item?.kind === "file") return FILE_WORDS[item.what] || "File";
+  return DOC_WORDS[item?.kind] || "Note";
+}
+
+function keySafe(text) {
+  return encodeURIComponent(String(text || ""))
+    .replace(/[!'()*~]/g, (one) => `%${one.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function awayFromDocs(item) {
+  const place = String(item?.place || "");
+  return place && !place.startsWith("docs:") ? place : "";
+}
+
+function docKey(item) {
+  const kind = DOC_KINDS[item?.kind] || "note";
+  if (item.id) return `${kind}:${item.id}`;
+  const away = awayFromDocs(item);
+  return `${kind}:${keySafe(away ? `${away}/${docPath(item)}` : docPath(item))}`;
+}
+
+function placeDoc(place, path, name) {
+  return { id: "", place, path, name, kind: "file", what: "text", edits: true,
+           size: 0, at: 0, icon: "", colour: "", target: "" };
+}
+
+function docReadOnly(doc) {
+  return !!awayFromDocs(doc) && !filesWritable();
+}
+
+async function readDocText(doc) {
+  const away = awayFromDocs(doc);
+  const where = away
+    ? `${API}/assets/text?${new URLSearchParams({ root: away, path: docPath(doc) })}`
+    : `${API}/docs/note?path=${encodeURIComponent(docPath(doc))}`;
+  try {
+    return await (await api.fetchApi(where)).json();
+  } catch {
+    return { ok: false, reason: "It could not be read." };
+  }
+}
+
+function writeDocText(doc, body) {
+  const away = awayFromDocs(doc);
+  return away
+    ? dlPost("/assets/text", { root: away, path: docPath(doc), body })
+    : dlPost("/docs/write", { path: docPath(doc), body });
+}
+
+const NEW_NOTE_NAME = "New Document";
+
+let noteDrafts = 0;
+
+const NEW_FOLDER_NAME = "New Folder";
+
+function editInPlace(node, was, commit) {
+  if (node._omEditing) return;
+  node._omEditing = true;
+  node.textContent = was;
+  node.contentEditable = "plaintext-only";
+  if (node.contentEditable !== "plaintext-only") node.contentEditable = "true";
+  node.spellcheck = false;
+  node.classList.add("om-rename");
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const picked = window.getSelection();
+  picked?.removeAllRanges();
+  picked?.addRange(range);
+  node.focus();
+  let settled = false;
+  const finish = async (keep) => {
+    if (settled) return;
+    settled = true;
+    const asked = (node.textContent || "").trim();
+    node._omEditing = false;
+    node.contentEditable = "false";
+    node.classList.remove("om-rename");
+    node.removeEventListener("keydown", onKey, true);
+    node.removeEventListener("paste", onPaste, true);
+    node.removeEventListener("blur", onBlur);
+    if (!keep || !asked || asked === was) { node.textContent = was; return; }
+    const got = await commit(asked);
+    node.textContent = typeof got === "string" && got ? got : was;
+  };
+  const onKey = (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") { event.preventDefault(); finish(true); }
+    else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+  };
+  const onPaste = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const text = (event.clipboardData?.getData("text/plain") || "").replace(/\s+/g, " ");
+    document.execCommand("insertText", false, text);
+  };
+  const onBlur = () => finish(true);
+  node.addEventListener("keydown", onKey, true);
+  node.addEventListener("paste", onPaste, true);
+  node.addEventListener("blur", onBlur);
+}
+
+async function docsIn(path) {
+  try {
+    const answer = await (await api.fetchApi(
+      `${API}/docs?path=${encodeURIComponent(path || "")}`)).json();
+    return { ok: answer?.ok === true, items: answer?.ok ? (answer.items || []) : [] };
+  } catch {
+    return { ok: false, items: [] };
+  }
+}
+
+const DOC_DESKTOP = "Desktop";
+
+const DOC_DOCUMENTS = "Documents";
+
+async function loadDeskDocs() {
+  const answer = await docsIn(DOC_DESKTOP);
+  if (answer.ok) deskDocs = answer.items;
+}
+
+function mediaUrl(name) {
+  return `${API}/docs/media?name=${encodeURIComponent(name)}`;
+}
+
+function docIconUrl(item) {
+  return item?.icon ? `${API}/docs/icon?name=${encodeURIComponent(item.icon)}` : "";
+}
+
+const PLAIN_ART = { folder: ICON_FOLDER, link: ICON_FLOW, file: ICON_FILE };
+
+function docThumbUrl(item) {
+  if (item?.kind !== "file" || (item.what !== "image" && item.what !== "video")) return "";
+  const where = docsWhere(docPath(item));
+  return assetThumbUrl({
+    name: where.path.split("/").pop(), sub: parentOf(where.path),
+    at: item.at, size: item.size,
+  }, { root: where.place, edge: 128 });
+}
+
+function docArt(item) {
+  const plain = { kind: "mask", url: PLAIN_ART[item?.kind] || ICON_NOTE,
+                  tint: item?.colour || "" };
+  const url = docIconUrl(item) || docThumbUrl(item);
+  return url ? { kind: "src", url, fallback: plain } : plain;
+}
+
+function applyDocIcon(panel, item) {
+  const url = docIconUrl(item);
+  if (url) panel.setIcon(url);
+  else panel.setMaskIcon(PLAIN_ART[item?.kind] || ICON_NOTE, { tint: item?.colour || "" });
+}
+
+function noteSrcOk(raw) {
+  const text = String(raw || "");
+  if (/^data:image\//i.test(text)) return true;
+  if (/^https?:\/\//i.test(text)) return true;
+  try {
+    const at = new URL(text, window.location.href);
+    return at.origin === window.location.origin && at.pathname === `${API}/docs/media`;
+  } catch {
+    return false;
+  }
+}
+
+function scrubNoteView(view) {
+  for (const node of view.querySelectorAll("script, iframe, object, embed")) node.remove();
+  for (const img of view.querySelectorAll("img")) {
+    if (!noteSrcOk(img.getAttribute("src"))) img.removeAttribute("src");
+  }
+  for (const link of view.querySelectorAll("a[href]")) {
+    if (/^\s*javascript:/i.test(link.getAttribute("href") || "")) {
+      link.removeAttribute("href");
+      continue;
+    }
+    link.target = "_blank";
+    link.rel = "noreferrer noopener";
+  }
+}
+
+async function renderNoteInto(view, text) {
+  try {
+    const html = await app.extensionManager.renderMarkdownToHtml(String(text || ""));
+    view.innerHTML = typeof html === "string" ? html : "";
+    scrubNoteView(view);
+  } catch {
+    view.replaceChildren();
+    const pre = el("pre");
+    pre.textContent = String(text || "");
+    view.appendChild(pre);
+  }
+}
+
+async function keepNoteImage(file) {
+  try {
+    const answer = await (await api.fetchApi(`${API}/docs/media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: await file.arrayBuffer(),
+    })).json();
+    return answer?.ok ? answer.name : "";
+  } catch {
+    return "";
+  }
+}
+
+async function docFind(id) {
+  if (!id) return null;
+  try {
+    const answer = await (await api.fetchApi(
+      `${API}/docs/find?id=${encodeURIComponent(id)}`)).json();
+    return answer?.ok ? answer.item : null;
+  } catch {
+    return null;
+  }
+}
+
+function refreshDocs() {
+  loadDeskDocs().then(() => paintDeskIcons()).catch(() => {});
+  for (const [key, held] of floatPanels) {
+    if (!held.el.isConnected) continue;
+    if (key.startsWith("props:") || key === "wastebasket") {
+      held._omFill?.();
+    }
+  }
+}
+
+async function renameDoc(item, name) {
+  const away = awayFromDocs(item);
+  if (away) {
+    const done = await dlPost("/files/rename",
+                              { place: away, path: docPath(item), name }).catch(() => null);
+    if (!done?.ok) {
+      notify("Not renamed", done?.reason || "It could not be renamed.");
+      return null;
+    }
+    return { ...item, name: done.name, path: parentOf(docPath(item))
+      ? `${parentOf(docPath(item))}/${done.name}` : done.name };
+  }
+  const answer = await dlPost("/docs/rename", { path: docPath(item), name }).catch(() => null);
+  if (!answer?.ok) {
+    notify("Not renamed", answer?.reason || "It could not be renamed.");
+    return null;
+  }
+  floatingPanel(docKey(item))?._omDocSet?.(answer.item);
+  refreshDocs();
+  return answer.item;
+}
+
+function draftNote() {
+  return { kind: "note", id: "", path: "", name: NEW_NOTE_NAME, size: 0, icon: "",
+           at: Math.floor(Date.now() / 1000) };
+}
+
+function openNote(item) {
+  const key = item.id || docPath(item)
+    ? docKey(item)
+    : `note:draft-${++noteDrafts}`;
+  const held = floatingPanel(key);
+  if (held) { held.present(); return held; }
+  let doc = item;
+  let dirty = false;
+  const panel = createFloatingPanel({
+    key, title: item.name || "Note", ...windowSize("note"), modal: false,
+  });
+  applyDocIcon(panel, doc);
+  const onDisk = () => !!docPath(doc);
+
+  const wrap = el("div", "om-pad");
+  const tools = el("div", "om-pad-tools");
+  const state = el("span", "om-pad-state", "");
+  const edit = el("textarea", "om-pad-edit");
+  edit.spellcheck = true;
+  const view = el("div", "om-pad-view");
+
+  const heading = panel.bar.querySelector(".om-float-title");
+  heading?.classList.add("om-float-title-name");
+  let pressed = null;
+  heading?.addEventListener("pointerdown", (event) => {
+    pressed = { x: event.clientX, y: event.clientY };
+  });
+  heading?.addEventListener("click", (event) => {
+    const from = pressed;
+    pressed = null;
+    if (!from) return;
+    if (Math.abs(event.clientX - from.x) > 3 || Math.abs(event.clientY - from.y) > 3) return;
+    editInPlace(heading, doc.name || "", async (name) => {
+      if (!onDisk()) {
+        doc = { ...doc, name };
+        return name;
+      }
+      const next = await renameDoc(doc, name);
+      if (!next) return "";
+      doc = next;
+      return doc.name;
+    });
+  });
+
+  const tabs = tabbedPanel({ remember: "om-note-tab", collapsible: false });
+  tabs.root.classList.add("om-pad-tabs");
+  let saveDue = 0;
+  const sealed = docReadOnly(doc);
+  if (sealed) {
+    edit.readOnly = true;
+    tools.classList.add("om-pad-tools-quiet");
+  }
+
+  panel._omDocSet = (next) => {
+    doc = next;
+    panel.setTitle(next.name || "Note");
+    applyDocIcon(panel, next);
+  };
+
+  const saveAs = async ({ copy = false } = {}) => {
+    const where = await askSaveTarget(parentOf(docPath(doc)), doc.name || NEW_NOTE_NAME);
+    if (!where) return false;
+    clearTimeout(saveDue);
+    const answer = await dlPost("/docs/new",
+      { parent: where.parent, name: where.name, body: edit.value }).catch(() => null);
+    if (!answer?.ok) {
+      state.textContent = answer?.reason || "Not saved";
+      notify("Not saved", answer?.reason || "It could not be saved.");
+      return false;
+    }
+    doc = answer.item;
+    dirty = false;
+    panel.setTitle(doc.name || "Note");
+    panel.rekey(`note:${doc.id}`);
+    state.textContent = copy ? "Saved as a copy" : "Saved";
+    refreshDocs();
+    return true;
+  };
+
+  let saving = null;
+
+  const save = async () => {
+    clearTimeout(saveDue);
+    if (saving) return saving;
+    saving = saveNow();
+    try {
+      return await saving;
+    } finally {
+      saving = null;
+    }
+  };
+
+  const saveNow = async () => {
+    if (!onDisk()) return saveAs();
+    state.textContent = "Saving";
+    let answer = await writeDocText(doc, edit.value).catch(() => null);
+    if (!answer?.ok && !awayFromDocs(doc)) {
+      const found = await docFind(doc.id);
+      if (found) {
+        doc = found;
+        panel.setTitle(doc.name || "Note");
+        answer = await writeDocText(doc, edit.value).catch(() => null);
+      }
+    }
+    if (answer?.ok) dirty = false;
+    state.textContent = answer?.ok ? "Saved" : (answer?.reason || "Not saved");
+    return !!answer?.ok;
+  };
+  wrap.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key !== "s") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (sealed && !event.shiftKey) {
+      state.textContent = "Read-only";
+      return;
+    }
+    void (event.shiftKey ? saveAs() : save());
+  });
+
+  const keep = () => {
+    clearTimeout(saveDue);
+    if (sealed) {
+      state.textContent = "Read-only";
+      return;
+    }
+    dirty = true;
+    if (!onDisk()) {
+      state.textContent = "Not saved yet";
+      return;
+    }
+    state.textContent = "Editing";
+    saveDue = setTimeout(save, 900);
+  };
+
+  const wrapSelection = (before, after) => {
+    const start = edit.selectionStart;
+    const end = edit.selectionEnd;
+    const held2 = edit.value.slice(start, end);
+    edit.focus();
+    document.execCommand("insertText", false, `${before}${held2}${after}`);
+    if (!held2) edit.setSelectionRange(start + before.length, start + before.length);
+    keep();
+  };
+
+  for (const [label, before, after, hint] of [
+    ["B", "**", "**", "Bold"],
+    ["I", "*", "*", "Italic"],
+    ["#", "## ", "", "Heading"],
+    ["•", "- ", "", "List item"],
+    ["“", "> ", "", "Quote"],
+    ["</>", "`", "`", "Code"],
+    ["⚓", "[", "](https://)", "Link"],
+  ]) {
+    const button = el("button", "om-pad-tool", label);
+    button.type = "button";
+    liveTip(button, () => hint);
+    button.onclick = () => wrapSelection(before, after);
+    tools.appendChild(button);
+  }
+  const fileMenu = el("button", "om-pad-tool om-pad-file", "File ▾");
+  fileMenu.type = "button";
+  fileMenu.onclick = () => openRowMenu(fileMenu, {
+    items: [
+      { label: "New", fn: () => openNote(draftNote()) },
+      !sealed && { label: "Save", fn: () => save() },
+      { label: "Save As", fn: () => saveAs({ copy: onDisk() }) },
+      { label: "Export", fn: () => (onDisk()
+        ? exportDoc(doc)
+        : exportText(`${doc.name || NEW_NOTE_NAME}.md`, edit.value)) },
+    ].filter(Boolean),
+    align: "left",
+  });
+  tools.insertBefore(el("span", "om-pad-split"), tools.firstChild);
+  tools.insertBefore(fileMenu, tools.firstChild);
+  tools.appendChild(state);
+
+  edit.oninput = keep;
+  edit.onkeydown = (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    const key2 = event.key.toLowerCase();
+    if (key2 === "b") { event.preventDefault(); wrapSelection("**", "**"); }
+    else if (key2 === "i") { event.preventDefault(); wrapSelection("*", "*"); }
+    else if (key2 === "k") { event.preventDefault(); wrapSelection("[", "](https://)"); }
+    else if (key2 === "s") { event.preventDefault(); clearTimeout(saveDue); save(); }
+  };
+
+  const carried = (event) => [...(event.clipboardData?.files || [])]
+    .filter((one) => one.type.startsWith("image/"));
+
+  edit.addEventListener("paste", async (event) => {
+    const images = carried(event);
+    if (!images.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+    for (const file of images) {
+      state.textContent = "Adding the image";
+      const name = await keepNoteImage(file);
+      if (!name) { state.textContent = "The image was not kept"; continue; }
+      edit.focus();
+      document.execCommand("insertText", false, `\n![](${mediaUrl(name)})\n`);
+      keep();
+    }
+  });
+
+  const editor = el("div", "om-pad-pane");
+  editor.appendChild(edit);
+
+  tabs.add({
+    id: "editor",
+    title: "Editor",
+    order: 10,
+    pane: editor,
+    onShow: () => tools.classList.toggle("om-pad-tools-quiet", sealed),
+  });
+  tabs.add({
+    id: "view", title: "View", order: 20, pane: view,
+    onShow: () => {
+      tools.classList.add("om-pad-tools-quiet");
+      renderNoteInto(view, edit.value);
+    },
+  });
+  wrap.appendChild(tools);
+  wrap.appendChild(tabs.root);
+  panel.body.appendChild(wrap);
+
+  panel.confirmClose = () => (dirty && !onDisk()
+    ? confirmAction(`${doc.name} has not been saved`,
+                    "Closing this window now loses what is in it.", "Close anyway", true)
+    : true);
+
+  if (!onDisk()) {
+    tabs.start();
+    tabs.show("editor");
+    state.textContent = "Not saved yet";
+    edit.focus();
+    return panel;
+  }
+
+  readDocText(doc)
+    .then((answer) => {
+      if (!answer?.ok) { state.textContent = answer?.reason || "Could not be read"; return; }
+      edit.value = answer.body || "";
+      if (sealed) state.textContent = "Read-only";
+      panel.setTitle(answer.name || doc.name || "Note");
+      tabs.start();
+      tabs.show(item.openAt === "view" ? "view" : "editor");
+      if (item.openAt === "view") renderNoteInto(view, edit.value);
+      else edit.focus();
+    })
+    .catch(() => { state.textContent = "Could not be read"; });
+
+  return panel;
+}
+
+const FILE_DRAG_TYPE = "application/x-om-file";
+
+function carriedDoc(event) {
+  return [...(event.dataTransfer?.types || [])].includes(FILE_DRAG_TYPE);
+}
+
+function carriedHost(event) {
+  return [...(event.dataTransfer?.types || [])].includes(FILE_MOVE_TYPE);
+}
+
+function docKindOf(name, folder) {
+  if (folder) return "folder";
+  if (name.endsWith(".omlink")) return "link";
+  return name.endsWith(".md") ? "note" : "file";
+}
+
+function docsPathOf(place, path) {
+  const home = place === "docs:documents" ? DOC_DOCUMENTS : DOC_DESKTOP;
+  return path ? `${home}/${path}` : home;
+}
+
+function parentOf(path) {
+  const at = String(path || "").lastIndexOf("/");
+  return at < 0 ? "" : path.slice(0, at);
+}
+
+function dragDocFrom(node, item) {
+  node.dataset.omDrag = "1";
+  node.draggable = true;
+  node.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData(FILE_DRAG_TYPE, JSON.stringify({
+      path: docPath(item), id: item.id, kind: item.kind, name: item.name,
+    }));
+    const where = docsWhere(docPath(item));
+    event.dataTransfer.setData(FILE_MOVE_TYPE, JSON.stringify({
+      place: where.place, path: where.path, name: item.name, kind: item.kind,
+    }));
+    event.dataTransfer.effectAllowed = "copyMove";
+    requestAnimationFrame(() => node.classList.add("om-fold-lift"));
+  });
+  node.addEventListener("dragend", () => node.classList.remove("om-fold-lift"));
+}
+
+async function hostDropInto(event, parent) {
+  let sent = null;
+  try { sent = JSON.parse(event.dataTransfer.getData(FILE_MOVE_TYPE)); } catch { return; }
+  if (!sent?.path) return;
+  const into = docsWhere(parent);
+  const keep = event.ctrlKey;
+  const spot = parent === DOC_DESKTOP ? deskSpotAt(event) : null;
+  if (sent.place === into.place
+      && (sent.path === into.path || parentOf(sent.path) === into.path)) return;
+  const answer = await dlPost(keep ? "/files/copy" : "/files/move",
+                              { place: sent.place, path: sent.path,
+                                into: into.path, intoPlace: into.place }).catch(() => null);
+  if (!answer?.ok) {
+    notify(keep ? "Not copied" : "Not moved",
+           answer?.reason || (keep ? "It could not be copied." : "It could not be moved."));
+    return;
+  }
+  await loadDeskDocs().catch(() => {});
+  if (spot) {
+    const landed = deskDocs.find((one) => docPath(one) === `${DOC_DESKTOP}/${answer.name}`);
+    if (landed) deskArrangeAt(docKey(landed), spot);
+  }
+  refreshDocs();
+  toast(keep ? `Copied ${sent.name}` : `Moved ${sent.name}`);
+}
+
+function dropDocsInto(node, where, after, { spring = null } = {}) {
+  node.dataset.omDrop = "1";
+  let springDue = 0;
+  const restSpring = () => { clearTimeout(springDue); springDue = 0; };
+  node.addEventListener("dragover", (event) => {
+    if (!carriedDoc(event) && !carriedHost(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = !carriedDoc(event) && event.ctrlKey ? "copy" : "move";
+    node.classList.add("om-fold-over");
+    if (spring && !springDue) {
+      springDue = setTimeout(() => { springDue = 0; spring(); }, DESK_SPRING);
+    }
+  });
+  node.addEventListener("dragleave", () => {
+    node.classList.remove("om-fold-over");
+    restSpring();
+  });
+  node.addEventListener("drop", async (event) => {
+    if (!carriedDoc(event) && !carriedHost(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    node.classList.remove("om-fold-over");
+    restSpring();
+    if (!carriedDoc(event)) {
+      await hostDropInto(event, where());
+      after?.();
+      return;
+    }
+    let sent = null;
+    try { sent = JSON.parse(event.dataTransfer.getData(FILE_DRAG_TYPE)); } catch { return; }
+    if (!sent?.path) return;
+    const parent = where();
+    if (sent.path === parent || parentOf(sent.path) === parent) return;
+    const answer = await dlPost("/docs/move", { path: sent.path, parent }).catch(() => null);
+    if (!answer?.ok) { notify("Not moved", answer?.reason || "It could not be moved."); return; }
+    const gone = docKey(sent);
+    if (parent && deskCells[gone]) {
+      delete deskCells[gone];
+      saveDeskCells();
+    }
+    floatingPanel(gone)?._omDocSet?.(answer.item);
+    refreshDocs();
+    after?.();
+  });
+}
+
+function sortDocs(items, way) {
+  const by = {
+    name: (a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()),
+    edited: (a, b) => (b.at || 0) - (a.at || 0),
+    size: (a, b) => (b.size || 0) - (a.size || 0),
+  }[way] || (() => 0);
+  return [...items].sort((a, b) =>
+    (a.kind !== "folder") - (b.kind !== "folder") || by(a, b));
+}
+
+function docsWhere(path) {
+  const whole = String(path || "");
+  const at = whole.indexOf("/");
+  const home = (at < 0 ? whole : whole.slice(0, at)).toLowerCase();
+  return {
+    place: home === DOC_DOCUMENTS.toLowerCase() ? "docs:documents" : "docs:desktop",
+    path: at < 0 ? "" : whole.slice(at + 1),
+  };
+}
+
+function openFolder(item) {
+  const where = docsWhere(docPath(item));
+  return openFileBrowser(where.place, where.path);
+}
+
+function flowStore() {
+  try {
+    return app.extensionManager?.workflow || null;
+  } catch {
+    return null;
+  }
+}
+
+function flowList() {
+  const store = flowStore();
+  const held = store?.workflows;
+  const all = Array.isArray(held) ? held : (held?.value || []);
+  return [...all].filter((one) => one && !one.isTemporary);
+}
+
+function flowMissing(target) {
+  const text = String(target || "");
+  if (!text) return true;
+  const store = flowStore();
+  const held = store?.workflows;
+  const all = Array.isArray(held) ? held : (held?.value || []);
+  if (!all.length) return false;
+  return !store.getWorkflowByPath?.(text);
+}
+
+async function flowByPath(target, { fresh = false } = {}) {
+  const store = flowStore();
+  if (!store) return null;
+  let found = store.getWorkflowByPath?.(target) || null;
+  if (!found) {
+    await store.loadWorkflows?.().catch(() => {});
+    found = store.getWorkflowByPath?.(target) || null;
+  }
+  if (!found || fresh) {
+    await store.syncWorkflows?.().catch(() => {});
+    found = store.getWorkflowByPath?.(target) || found;
+  }
+  return found;
+}
+
+async function openFlowLink(item) {
+  const target = String(item?.target || "");
+  if (!target) {
+    notify("Nothing to open", "This shortcut names no workflow.");
+    return false;
+  }
+  const store = flowStore();
+  const flow = await flowByPath(target);
+  if (!flow) {
+    notify("Workflow not found", `${target} is no longer in this ComfyUI.`);
+    return false;
+  }
+  if (store?.activeWorkflow?.path === flow.path) {
+    hideDesk();
+    return true;
+  }
+  try {
+    if (!flow.isLoaded) await flow.load();
+    await app.loadGraphData(flow.activeState, true, true, flow,
+                            { checkForRerouteMigration: false });
+  } catch (error) {
+    notify("Not opened", `${target} could not be opened: ${error.message}`);
+    return false;
+  }
+  hideDesk();
+  return true;
+}
+
+async function relinkFlow(item, after) {
+  const chosen = await askWorkflow();
+  if (!chosen) return;
+  const answer = await dlPost("/docs/link/target",
+                              { path: docPath(item), target: chosen.path || chosen })
+    .catch(() => null);
+  if (!answer?.ok) {
+    notify("Not pointed", answer?.reason || "The shortcut could not be pointed at that.");
+    return;
+  }
+  floatingPanel(docKey(item))?._omDocSet?.(answer.item);
+  refreshDocs();
+  after?.();
+}
+
+function openDoc(item) {
+  if (item.kind === "folder") return openFolder(item);
+  if (item.kind === "link") return openFlowLink(item);
+  if (item.kind === "file" && !item.edits) return openDocFile(item);
+  return openNote(item);
+}
+
+function openDocFile(item) {
+  const kind = SHOWN_KINDS[item.what] || "";
+  if (!kind) {
+    notify(item.name, `There is no viewer here for ${docWord(item).toLowerCase()} files.`);
+    return null;
+  }
+  const where = docsWhere(docPath(item));
+  const sub = parentOf(where.path);
+  const beside = deskDocs.some((one) => docPath(one) === docPath(item))
+    ? deskDocs.filter((one) => SHOWN_KINDS[one.what] === kind)
+    : [item];
+  runProgramById(kind === "still" ? "viewer" : "player", {
+    items: beside.map((one) => ({
+      name: docsWhere(docPath(one)).path.split("/").pop(),
+      sub, kind, size: one.size, at: one.at,
+    })),
+    name: where.path.split("/").pop(),
+    root: where.place,
+  });
+  return null;
+}
+
+function askWorkflow() {
+  return new Promise((settle) => {
+    const backdrop = el("div", "om-backdrop");
+    const box = el("div", "om-note om-note-wide om-save");
+    box.appendChild(el("div", "om-note-title", "Which workflow?"));
+    const find = el("input", "om-search");
+    find.placeholder = "Filter by name";
+    find.spellcheck = false;
+    const list = el("div", "om-fold-list om-save-list");
+    const foot = el("div", "om-note-foot");
+    const cancel = el("button", "om-btn", "Cancel");
+    const add = el("button", "om-btn om-go", "Choose");
+    add.disabled = true;
+    foot.appendChild(cancel);
+    foot.appendChild(add);
+    box.appendChild(find);
+    box.appendChild(list);
+    box.appendChild(foot);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    let chosen = null;
+    const done = (answer) => { backdrop.remove(); settle(answer); };
+
+    const fill = () => {
+      const want = find.value.trim().toLowerCase();
+      const all = flowList()
+        .filter((one) => !want || String(one.filename || one.path).toLowerCase().includes(want))
+        .sort((a, b) => String(a.filename || a.path).toLowerCase()
+          .localeCompare(String(b.filename || b.path).toLowerCase()));
+      if (!all.length) {
+        list.replaceChildren(el("div", "om-fold-empty", "No saved workflows match"));
+        return;
+      }
+      list.replaceChildren(...all.slice(0, 400).map((one) => {
+        const row = el("div", "om-fold-row");
+        row.appendChild(omIcon({ kind: "mask", url: ICON_FLOW },
+                               { name: one.filename, cls: "om-fold-art", img: "om-fold-img" }));
+        row.appendChild(el("span", "om-fold-name", one.filename || one.path));
+        const where = String(one.directory || "").replace(/^workflows\/?/, "");
+        if (where) row.appendChild(el("span", "om-fold-meta", where));
+        row.onclick = () => {
+          chosen = one;
+          add.disabled = false;
+          for (const other of list.querySelectorAll(".om-fold-row")) {
+            other.classList.toggle("om-fold-row-on", other === row);
+          }
+        };
+        row.ondblclick = () => { chosen = one; add.click(); };
+        return row;
+      }));
+    };
+
+    cancel.onclick = () => done(null);
+    add.onclick = () => (chosen ? done(chosen) : find.focus());
+    find.addEventListener("input", fill);
+    find.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && chosen) { event.preventDefault(); add.click(); }
+    });
+    closeOn(backdrop, () => done(null));
+    Promise.resolve(flowStore()?.loadWorkflows?.()).catch(() => {}).then(() => {
+      if (backdrop.isConnected) fill();
+    });
+    fill();
+    find.focus();
+  });
+}
+
+async function makeFlowLink(parent, flow) {
+  const answer = await dlPost("/docs/link", {
+    parent: parent || DOC_DESKTOP, name: flow.filename || flow.key || "Workflow",
+    target: flow.path,
+  }).catch(() => null);
+  if (!answer?.ok) {
+    notify("Not created", answer?.reason || "The shortcut could not be created.");
+    return null;
+  }
+  refreshDocs();
+  return answer.item;
+}
+
+async function newDeskFlow() {
+  const flow = await askWorkflow();
+  if (!flow) return;
+  const made = await makeFlowLink("", flow);
+  if (!made) return;
+  await loadDeskDocs();
+  paintDeskIcons();
+  const cell = deskCellFor(docKey(made));
+  if (cell) deskSelect(cell);
+}
+
+function askSaveTarget(startAt, startName) {
+  return new Promise((settle) => {
+    const backdrop = el("div", "om-backdrop");
+    const box = el("div", "om-note om-note-wide om-save");
+    box.appendChild(el("div", "om-note-title", "Save as"));
+    const trail = el("div", "om-save-trail");
+    const list = el("div", "om-fold-list om-save-list");
+    const field = el("input", "om-search");
+    field.value = startName || NEW_NOTE_NAME;
+    field.spellcheck = false;
+    const foot = el("div", "om-note-foot");
+    const folder = el("button", "om-btn", "New folder");
+    const cancel = el("button", "om-btn", "Cancel");
+    const keep = el("button", "om-btn om-go", "Save");
+    foot.appendChild(folder);
+    foot.appendChild(cancel);
+    foot.appendChild(keep);
+    box.appendChild(trail);
+    box.appendChild(list);
+    box.appendChild(field);
+    box.appendChild(foot);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    let here = String(startAt || "");
+    let chosen = "";
+
+    const done = (answer) => { backdrop.remove(); settle(answer); };
+
+    const paintTrail = () => {
+      const steps = here ? here.split("/") : [];
+      trail.replaceChildren();
+      const step = (label, to) => {
+        const hop = el("button", "om-save-step", label);
+        hop.onclick = () => { here = to; chosen = ""; fill(); };
+        trail.appendChild(hop);
+      };
+      step("Desktop", "");
+      let walked = "";
+      for (const part of steps) {
+        walked = walked ? `${walked}/${part}` : part;
+        trail.appendChild(el("span", "om-save-sep", "›"));
+        step(part.split("~")[0], walked);
+      }
+    };
+
+    const fill = async () => {
+      paintTrail();
+      const answer = await docsIn(here);
+      if (!backdrop.isConnected) return;
+      if (!answer.ok) { here = ""; fill(); return; }
+      const rows = sortDocs(answer.items, "name").map((one) => {
+        const row = el("div", "om-fold-row");
+        if (one.kind !== "folder") row.classList.add("om-save-dim");
+        row.appendChild(omIcon(docArt(one),
+                               { name: one.name, cls: "om-fold-art", img: "om-fold-img" }));
+        row.appendChild(el("span", "om-fold-name", one.name));
+        if (one.kind === "folder") {
+          row.onclick = () => {
+            chosen = docPath(one);
+            for (const other of list.querySelectorAll(".om-fold-row")) {
+              other.classList.toggle("om-fold-row-on", other === row);
+            }
+          };
+          row.ondblclick = () => { here = docPath(one); chosen = ""; fill(); };
+        } else {
+          row.onclick = () => { field.value = one.name; };
+        }
+        return row;
+      });
+      list.replaceChildren(...rows);
+    };
+
+    folder.onclick = async () => {
+      const answer = await dlPost("/docs/folder", { parent: here, name: NEW_FOLDER_NAME })
+        .catch(() => null);
+      if (!answer?.ok) {
+        notify("Not created", answer?.reason || "It could not be created.");
+        return;
+      }
+      here = docPath(answer.item);
+      chosen = "";
+      refreshDocs();
+      fill();
+    };
+    cancel.onclick = () => done(null);
+    keep.onclick = () => {
+      const name = field.value.trim();
+      if (!name) { field.focus(); return; }
+      done({ parent: chosen || here, name });
+    };
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); keep.click(); }
+    });
+    closeOn(backdrop, () => done(null));
+    fill();
+    field.focus();
+    field.select();
+  });
+}
+
+async function trashHolds() {
+  try {
+    const answer = await (await api.fetchApi(`${API}/docs/trash`)).json();
+    return answer?.ok ? (answer.items || []) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function emptyWastebasket() {
+  const items = await trashHolds();
+  if (!items.length) {
+    toast("The Trash is already empty.", { kind: "ok" });
+    return false;
+  }
+  const sure = await confirmAction("Empty the Trash",
+    `${countNote(items.length, "item")} will be deleted from disk. This cannot be undone.`,
+    "Empty", true);
+  if (!sure) return false;
+  const answer = await dlPost("/docs/trash/empty", {}).catch(() => null);
+  if (!answer?.ok) {
+    notify("Not emptied", answer?.reason || "It could not be emptied.");
+    return false;
+  }
+  refreshDocs();
+  return true;
+}
+
+function openWastebasket() {
+  const key = "wastebasket";
+  const held = floatingPanel(key);
+  if (held) { held.present(); return held; }
+  const panel = createFloatingPanel({
+    key, title: "Trash", ...windowSize("folder"), modal: false,
+  });
+  panel.setMaskIcon(ICON_BIN);
+
+  const list = el("div", "om-fold-list");
+  const drain = el("button", "om-btn om-danger", "Empty Trash");
+  panel.tools.appendChild(drain);
+
+  const fill = async () => {
+    const items = await trashHolds();
+    if (!panel.el.isConnected) return;
+    drain.disabled = !items.length;
+    panel.setBadge(items.length ? countNote(items.length, "item") : "");
+    if (!items.length) {
+      list.replaceChildren();
+      return;
+    }
+    list.replaceChildren(...items.map((one) => buildTrashRow(one, fill)));
+  };
+
+  panel._omFill = fill;
+
+  drain.onclick = () => emptyWastebasket().then((done) => { if (done) fill(); });
+
+  binDropInto(panel.body, fill);
+
+  panel.body.appendChild(list);
+  fill();
+  return panel;
+}
+
+function buildTrashRow(entry, after) {
+  const row = el("div", "om-trash-row");
+  const art = el("span", "om-fold-art");
+  const url = entry.kind === "folder" ? ICON_FOLDER : ICON_NOTE;
+  art.style.setProperty("-webkit-mask", `center / contain no-repeat url("${url}")`);
+  art.style.setProperty("mask", `center / contain no-repeat url("${url}")`);
+  row.appendChild(art);
+  row.appendChild(el("span", "om-fold-name", entry.name));
+  row.appendChild(el("span", "om-trash-when", whenText(new Date(entry.at * 1000))));
+  const back = el("button", "om-btn", "Restore");
+  back.onclick = async () => {
+    back.disabled = true;
+    const answer = await dlPost("/docs/restore", { token: entry.token }).catch(() => null);
+    if (!answer?.ok) {
+      back.disabled = false;
+      notify("Not restored", answer?.reason || "It could not be restored.");
+      return;
+    }
+    refreshDocs();
+    after?.();
+  };
+  row.appendChild(back);
+  return row;
+}
+
+const ICON_TYPES = ".ico,.png,.webp,image/x-icon,image/vnd.microsoft.icon,image/png,image/webp";
+
+function propsKey(item) {
+  return `props:${docKey(item)}`;
+}
+
+function propsRow(label, value) {
+  const row = el("div", "om-props-row");
+  row.appendChild(el("span", "om-props-key", label));
+  row.appendChild(el("span", "om-props-value", value));
+  return row;
+}
+
+async function docMeasure(path) {
+  try {
+    const answer = await (await api.fetchApi(
+      `${API}/docs/measure?path=${encodeURIComponent(path || "")}`)).json();
+    return answer?.ok ? answer : null;
+  } catch {
+    return null;
+  }
+}
+
+function drawable(file) {
+  return new Promise((settle) => {
+    const url = URL.createObjectURL(file);
+    const probe = new Image();
+    probe.onload = () => { URL.revokeObjectURL(url); settle(true); };
+    probe.onerror = () => { URL.revokeObjectURL(url); settle(false); };
+    probe.src = url;
+  });
+}
+
+function openDocProps(item) {
+  const key = propsKey(item);
+  const held = floatingPanel(key);
+  if (held) { held.present(); return held; }
+  let doc = item;
+  const panel = createFloatingPanel({
+    key, title: `${item.name} properties`, ...windowSize("props"), modal: false,
+  });
+  applyDocIcon(panel, doc);
+
+  const wrap = el("div", "om-props");
+  const head = el("div", "om-props-head");
+  const face = el("div", "om-props-face");
+  const named = el("div", "om-props-name", doc.name);
+  head.appendChild(face);
+  head.appendChild(named);
+  const rows = el("div", "om-props-rows");
+  const tools = el("div", "om-props-tools");
+  wrap.appendChild(head);
+  wrap.appendChild(rows);
+  wrap.appendChild(tools);
+  panel.body.appendChild(wrap);
+
+  const shades = el("div", "om-props-shades");
+  const swatches = el("span", "om-tab-swatches");
+  shades.appendChild(el("span", "om-props-key", "Colour"));
+  shades.appendChild(swatches);
+  wrap.insertBefore(shades, tools);
+
+  const paintShades = () => {
+    swatches.replaceChildren();
+    const plain = el("button", "om-tab-swatch om-props-plain");
+    plain.type = "button";
+    plain.title = "Default";
+    plain.classList.toggle("om-tab-swatch-on", !doc.colour);
+    plain.onclick = () => tintDoc("");
+    swatches.appendChild(plain);
+    for (const [name, value] of TAB_TINTS) {
+      const dot = el("button", "om-tab-swatch");
+      dot.type = "button";
+      dot.style.background = value;
+      dot.title = name;
+      dot.classList.toggle("om-tab-swatch-on", doc.colour === value);
+      dot.onclick = () => tintDoc(value);
+      swatches.appendChild(dot);
+    }
+    const custom = el("button", "om-tab-swatch om-tab-swatch-pick", "+");
+    custom.type = "button";
+    custom.title = "Custom colour";
+    custom.onclick = () => {
+      const field = el("input");
+      field.type = "color";
+      field.value = doc.colour || "#58a6ff";
+      field.style.cssText = "position: fixed; left: -100px; top: 0; opacity: 0;";
+      document.body.appendChild(field);
+      field.addEventListener("change", () => {
+        const picked = field.value;
+        field.remove();
+        tintDoc(picked);
+      });
+      field.click();
+    };
+    swatches.appendChild(custom);
+  };
+
+  const tintDoc = async (colour) => {
+    const answer = await dlPost("/docs/colour", { path: docPath(doc), colour }).catch(() => null);
+    if (!answer?.ok) {
+      notify("Not coloured", answer?.reason || "The colour could not be kept.");
+      return;
+    }
+    took(answer.item);
+  };
+
+  const pickIcon = el("button", "om-btn", "Choose icon");
+  const dropIcon = el("button", "om-btn", "Use the plain folder");
+  const file = el("input");
+  file.type = "file";
+  file.accept = ICON_TYPES;
+  file.hidden = true;
+  tools.appendChild(pickIcon);
+  tools.appendChild(dropIcon);
+  tools.appendChild(file);
+
+  const paint = () => {
+    panel.setTitle(`${doc.name} properties`);
+    applyDocIcon(panel, doc);
+    named.textContent = doc.name;
+    face.replaceChildren(omIcon(docArt(doc),
+                                { name: doc.name, cls: "om-props-art", img: "om-props-img" }));
+    const where = parentOf(docPath(doc));
+    rows.replaceChildren(
+      propsRow("Kind", docWord(doc)),
+      propsRow("Where", where ? where.split("/").map((one) => one.split("~")[0]).join(" / ")
+                              : "Desktop"),
+      propsRow("Edited", whenText(new Date(doc.at * 1000))),
+      propsRow("Id", doc.id || "none"),
+    );
+    if (doc.colour) rows.appendChild(propsRow("Colour", doc.colour));
+    if (doc.kind === "folder") rows.appendChild(propsRow("Holds", countNote(doc.holds || 0, "item")));
+    else if (doc.kind !== "link") rows.appendChild(propsRow("Size", bytesText(doc.size)));
+    if (doc.kind === "link") {
+      rows.appendChild(propsRow("Opens", doc.target || "nothing"));
+      const found = propsRow("Workflow", "looking");
+      rows.appendChild(found);
+      const said = found.querySelector(".om-props-value");
+      flowByPath(doc.target).then((flow) => {
+        if (!panel.el.isConnected) return;
+        said.textContent = flow ? "here" : "no longer in this ComfyUI";
+        found.classList.toggle("om-props-gone", !flow);
+      });
+    } else {
+      const total = propsRow(doc.kind === "folder" ? "Total" : "Words", "counting");
+      rows.appendChild(total);
+      const spot = total.querySelector(".om-props-value");
+      docMeasure(docPath(doc)).then((got) => {
+        if (!panel.el.isConnected) return;
+        if (!got) { spot.textContent = "could not be counted"; return; }
+        spot.textContent = doc.kind === "folder"
+          ? `${bytesText(got.bytes)} in ${countNote(got.files, "file")}`
+            + `${got.folders ? `, ${countNote(got.folders, "folder")}` : ""}`
+            + `${got.capped ? ", partial count" : ""}`
+          : `${got.words} in ${countNote(got.lines, "line")}`;
+      });
+    }
+    const folderish = doc.kind === "folder";
+    pickIcon.hidden = !folderish;
+    dropIcon.hidden = !folderish || !doc.icon;
+    paintShades();
+    shades.classList.toggle("om-props-muted", !!doc.icon);
+    shades.title = doc.icon
+      ? "A colour does not show while the folder has its own icon."
+      : "";
+  };
+
+  const took = (next) => {
+    doc = next;
+    floatingPanel(docKey(next))?._omDocSet?.(next);
+    refreshDocs();
+    paint();
+  };
+
+  named.addEventListener("click", () => {
+    editInPlace(named, doc.name || "", async (name) => {
+      const next = await renameDoc(doc, name);
+      if (!next) return "";
+      doc = next;
+      paint();
+      return doc.name;
+    });
+  });
+
+  pickIcon.onclick = () => file.click();
+  file.onchange = async () => {
+    const chosen = file.files?.[0];
+    file.value = "";
+    if (!chosen) return;
+    if (!await drawable(chosen)) {
+      notify("Not kept", "That file could not be decoded as an image, so it was not kept.");
+      return;
+    }
+    let answer = null;
+    try {
+      answer = await (await api.fetchApi(
+        `${API}/docs/icon?path=${encodeURIComponent(docPath(doc))}`,
+        { method: "POST", headers: { "Content-Type": "application/octet-stream" },
+          body: await chosen.arrayBuffer() },
+      )).json();
+    } catch {
+      answer = null;
+    }
+    if (!answer?.ok) {
+      notify("Not kept", answer?.reason || "That icon could not be kept.");
+      return;
+    }
+    took(answer.item);
+  };
+  dropIcon.onclick = async () => {
+    const answer = await dlPost("/docs/icon/clear", { path: docPath(doc) }).catch(() => null);
+    if (!answer?.ok) {
+      notify("Not cleared", answer?.reason || "The icon could not be cleared.");
+      return;
+    }
+    took(answer.item);
+  };
+
+  panel._omDocSet = (next) => { doc = next; paint(); };
+  panel._omFill = async () => {
+    const found = await docFind(doc.id);
+    if (!panel.el.isConnected) return;
+    if (!found) { panel.destroy(); return; }
+    doc = found;
+    paint();
+  };
+
+  paint();
+  return panel;
+}
+
+function undoToast(message, label, fn) {
+  const node = el("div", "om-toast om-toast-ok");
+  node.appendChild(el("span", "om-toast-text", message));
+  const button = el("button", "om-btn om-go", label);
+  button.onclick = async () => {
+    button.disabled = true;
+    await fn();
+    node.remove();
+  };
+  node.appendChild(button);
+  const timer = setTimeout(() => node.remove(), 9000);
+  toastShut(node, () => clearTimeout(timer));
+  toastHost().appendChild(node);
+}
+
+function pullDown(url, name) {
+  const link = el("a");
+  link.href = url;
+  link.download = name || "";
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function exportDoc(item) {
+  pullDown(`${API}/docs/export?path=${encodeURIComponent(docPath(item))}`);
+}
+
+function exportText(name, text) {
+  const blob = new Blob([String(text ?? "")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  pullDown(url, name);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function renameDocIn(node, item, after) {
+  const label = node?.querySelector(".om-fold-name, .om-desk-name");
+  if (!label) return;
+  editInPlace(label, item.name || "", async (name) => {
+    const next = await renameDoc(item, name);
+    after?.();
+    return next?.name || "";
+  });
+}
+
+async function removeDoc(item, after) {
+  const answer = await dlPost("/docs/remove", { path: docPath(item) }).catch(() => null);
+  if (!answer?.ok) {
+    notify("Not deleted", answer?.reason || "It could not be deleted.");
+    return;
+  }
+  floatingPanel(docKey(item))?.destroy?.();
+  if (deskCells[docKey(item)]) {
+    delete deskCells[docKey(item)];
+    saveDeskCells();
+  }
+  refreshDocs();
+  after?.();
+  undoToast(`${item.name} moved to the Trash.`, "Undo", async () => {
+    await dlPost("/docs/restore", { token: answer.token }).catch(() => {});
+    refreshDocs();
+    after?.();
+  });
+}
+
+const OPEN_WORDS = { folder: "Open folder", link: "Open workflow", file: "Open" };
+
+function docMenuItems(item, after, node) {
+  return [
+    { label: OPEN_WORDS[item.kind] || "Open note", fn: () => openDoc(item) },
+    item.kind === "note" || (item.kind === "file" && item.edits)
+      ? { label: "Open in View", fn: () => openDoc({ ...item, openAt: "view" }) }
+      : null,
+    { label: "Rename", fn: () => renameDocIn(node, item, after) },
+    item.kind === "link"
+      ? { label: flowMissing(item.target) ? "Locate workflow" : "Point at another workflow",
+          fn: () => relinkFlow(item, after) }
+      : null,
+    item.kind === "link" ? null : { label: "Export", fn: () => exportDoc(item) },
+    { label: "Properties", fn: () => openDocProps(item) },
+    { label: "Delete", danger: true, fn: () => removeDoc(item, after) },
+  ].filter(Boolean);
+}
+
+async function newDeskNote() {
+  const answer = await dlPost("/docs/new", { parent: DOC_DESKTOP, name: NEW_NOTE_NAME })
+    .catch(() => null);
+  if (!answer?.ok) {
+    notify("Not created", answer?.reason || "It could not be created.");
+    return;
+  }
+  await loadDeskDocs();
+  paintDeskIcons();
+  openNote(answer.item);
+}
+
+async function newDeskFolder() {
+  const answer = await dlPost("/docs/folder", { parent: DOC_DESKTOP, name: NEW_FOLDER_NAME })
+    .catch(() => null);
+  if (!answer?.ok) {
+    notify("Not created", answer?.reason || "It could not be created.");
+    return;
+  }
+  await loadDeskDocs();
+  paintDeskIcons();
+  const cell = deskLayer?.querySelector(
+    `[data-om-desk-key="${CSS.escape(docKey(answer.item))}"]`);
+  if (cell) {
+    deskSelect(cell);
+    renameDocIn(cell, answer.item, async () => { await loadDeskDocs(); paintDeskIcons(); });
+  }
+}
+
+function buildDocCell(item) {
+  const cell = el("div", "om-desk-cell");
+  cell._omDoc = item;
+  cell.dataset.omDeskKey = docKey(item);
+  cell.dataset.omDeskWindow = docKey(item);
+  cell.tabIndex = -1;
+  cell.setAttribute("role", "option");
+  cell.setAttribute("aria-selected", "false");
+  cell.appendChild(omIcon(docArt(item),
+                          { name: item.name, cls: "om-desk-art", img: "om-desk-img" }));
+  cell.appendChild(el("span", "om-desk-name", item.name));
+  cell.appendChild(el("span", "om-desk-live"));
+  if (item.kind === "link") cell.dataset.omFlowTarget = String(item.target || "");
+  liveTip(cell, () => ({
+    lead: item.name,
+    facts: [
+      ["Kind", docWord(item)],
+      item.kind === "folder"
+        ? ["Holds", `${item.holds} item${item.holds === 1 ? "" : "s"}`]
+        : (item.kind === "link"
+          ? ["Opens", String(item.target || "").replace(/^workflows\//, "")]
+          : ["Size", bytesText(item.size)]),
+      ["Edited", whenText(new Date(item.at * 1000))],
+    ],
+    lines: item.kind === "link" && flowMissing(item.target)
+      ? ["That workflow is not in this ComfyUI any more."]
+      : undefined,
+  }));
+  cell.onclick = () => deskSelect(cell);
+  cell.ondblclick = () => openDoc(item);
+  cell.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deskSelect(cell);
+    openRowMenu(cell, { items: docMenuItems(item, refreshDocs, cell), align: "left" });
+  });
+  if (item.kind === "folder") {
+    dropDocsInto(cell, () => docPath(item), refreshDocs, { spring: () => openFolder(item) });
+  }
+  dragDocFrom(cell, item);
+  dragDeskCell(cell);
+  return cell;
+}
+
+const PROGRAM_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+function packPinnable(id) {
+  return installedIndex.has(foldId(id));
+}
+
+function deskRowFor(key) {
+  const found = managerDestinations().find((one) => one.key === key);
+  if (found) {
+    return found.desk ? found : { ...found, desk: {
+      at: 50, label: found.short || found.label, art: ICON_BRAND, kind: "src",
+      window: `panel:${found.key}`,
+    } };
+  }
+  if (key.startsWith("pack:")) {
+    const id = key.slice(5);
+    if (!id || !packPinnable(id)) return null;
+    return {
+      key, kind: "program", label: id, hint: `The page for ${id}`,
+      desk: { at: 60, label: id, art: ICON_BRAND, kind: "src", window: key },
+      open: () => openPack(id),
+    };
+  }
+  const pinned = filePinParts(key);
+  if (pinned) {
+    const where = pinned.place.split(":")[1] || pinned.place;
+    const label = pinned.path ? pinned.path.split("/").pop() : where;
+    return {
+      key, kind: "program", label,
+      hint: `${where}${pinned.path ? `/${pinned.path}` : ""}`,
+      revisit: true,
+      desk: { at: 70, label, art: ICON_FOLDER, kind: "mask", window: "files" },
+      open: () => openFileBrowser(pinned.place, pinned.path),
+    };
+  }
+  if (!programOff(key) && PROGRAM_ID.test(key)) {
+    return {
+      key, kind: "program", label: key, gone: true,
+      hint: `${key} is not in this install any more.`,
+      desk: { at: 60, label: key, art: ICON_PROGRAM, kind: "mask", window: "" },
+      open: () => notify("Not installed",
+        `The program ${key} is not in this install any more.`),
+    };
+  }
+  return null;
+}
+
+function deskRows() {
+  const built = managerDestinations()
+    .filter((row) => row.desk && (!row.available || row.available()))
+    .filter((row) => !row.desk.off || deskPinned.includes(row.key))
+    .filter((row) => !deskUnpinned.includes(row.key))
+    .sort((a, b) => a.desk.at - b.desk.at);
+  const seen = new Set(built.map((one) => one.key));
+  for (const key of deskPinned) {
+    if (seen.has(key)) continue;
+    const row = deskRowFor(key);
+    if (!row) continue;
+    seen.add(key);
+    built.push(row);
+  }
+  return built;
+}
+
+function pinnedOn(key) {
+  return deskRows().some((one) => one.key === key);
+}
+
+function pinDesk(key) {
+  const away = deskUnpinned.indexOf(key);
+  if (away >= 0) deskUnpinned.splice(away, 1);
+  else if (!deskPinned.includes(key)) deskPinned.push(key);
+  const spot = deskCells[key];
+  const grid = deskGrid();
+  if (spot && grid && deskTaken(grid, null).has(`${spot.col},${spot.row}`)) {
+    delete deskCells[key];
+    saveDeskCells();
+  }
+  saveDeskPins();
+  paintDeskIcons();
+}
+
+function unpinDesk(key) {
+  const held = deskPinned.indexOf(key);
+  if (held >= 0) deskPinned.splice(held, 1);
+  else if (!deskUnpinned.includes(key)) deskUnpinned.push(key);
+  if (deskCells[key]) {
+    delete deskCells[key];
+    saveDeskCells();
+  }
+  saveDeskPins();
+  paintDeskIcons();
+}
+
+function deskOpenRow(row) {
+  if (!row) return;
+  const held = row.desk?.window ? floatingPanel(row.desk.window) : null;
+  if (held && !row.revisit) { held.present(); return; }
+  row.open?.();
+}
+
+function deskSelect(cell) {
+  if (!deskLayer) return;
+  for (const one of deskLayer.querySelectorAll(".om-desk-cell")) {
+    const want = one === cell;
+    one.classList.toggle("om-desk-cell-on", want);
+    one.tabIndex = want ? 0 : -1;
+    one.setAttribute("aria-selected", want ? "true" : "false");
+  }
+}
+
+function paintDeskLive() {
+  if (!deskLayer) return;
+  for (const cell of deskLayer.querySelectorAll(".om-desk-cell")) {
+    const held = floatingPanel(cell.dataset.omDeskWindow);
+    cell.classList.toggle("om-desk-cell-live", !!held);
+    if (!Object.hasOwn(cell.dataset, "omFlowTarget")) continue;
+    cell.classList.toggle("om-desk-cell-lost", flowMissing(cell.dataset.omFlowTarget));
+  }
+}
+
+function onDeskKey(event) {
+  const cell = event.target instanceof Element
+    ? event.target.closest(".om-desk-cell") : null;
+  if (!cell || !deskLayer) return;
+  const cells = [...deskLayer.querySelectorAll(".om-desk-cell")];
+  const at = cells.indexOf(cell);
+  const go = (to) => {
+    const next = cells[Math.max(0, Math.min(cells.length - 1, to))];
+    if (!next) return;
+    deskSelect(next);
+    next.focus();
+  };
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    event.preventDefault();
+    go(at + 1);
+  } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    go(at - 1);
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    go(0);
+  } else if (event.key === "End") {
+    event.preventDefault();
+    go(cells.length - 1);
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    if (cell._omDoc) openDoc(cell._omDoc);
+    else if (cell._omOpen) cell._omOpen();
+    else if (cell._omRow) deskOpenRow(cell._omRow);
+  } else if (event.key === "F2" && cell._omDoc) {
+    event.preventDefault();
+    renameDocIn(cell, cell._omDoc, refreshDocs);
+  } else if (event.key === "Delete" && cell._omDoc) {
+    event.preventDefault();
+    removeDoc(cell._omDoc, refreshDocs);
+  }
+}
+
+function buildDeskCell(row) {
+  const cell = el("div", "om-desk-cell");
+  cell._omRow = row;
+  cell.dataset.omDeskKey = row.key;
+  cell.dataset.omDeskWindow = row.desk.window || "";
+  cell.tabIndex = -1;
+  cell.setAttribute("role", "option");
+  cell.setAttribute("aria-selected", "false");
+  cell.appendChild(omIcon({ kind: row.desk.kind, url: row.desk.art },
+                          { name: row.desk.label, cls: "om-desk-art", img: "om-desk-img" }));
+  cell.appendChild(el("span", "om-desk-name", row.desk.label));
+  cell.appendChild(el("span", "om-desk-live"));
+  cell.classList.toggle("om-desk-cell-lost", !!row.gone);
+  liveTip(cell, () => ({
+    lead: row.desk.label,
+    lines: [row.gone || !floatingPanel(row.desk.window)
+      ? row.hint
+      : "Its window is open."],
+  }));
+  cell.onclick = () => deskSelect(cell);
+  cell.ondblclick = () => deskOpenRow(row);
+  cell.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deskSelect(cell);
+    openRowMenu(cell, {
+      items: [
+        row.gone ? null : { label: `Open ${row.desk.label}`, fn: () => deskOpenRow(row) },
+        { label: "Remove from the desktop", fn: () => unpinDesk(row.key) },
+      ].filter(Boolean),
+      align: "left",
+    });
+  });
+  dragDeskCell(cell);
+  return cell;
+}
+
+function buildBinCell() {
+  const cell = el("div", "om-desk-cell");
+  cell.dataset.omDeskKey = "wastebasket";
+  cell.dataset.omDeskWindow = "wastebasket";
+  cell.tabIndex = -1;
+  cell.setAttribute("role", "option");
+  cell.setAttribute("aria-selected", "false");
+  cell._omOpen = () => openWastebasket();
+  cell.appendChild(omIcon({ kind: "mask", url: ICON_BIN },
+                          { name: "Trash", cls: "om-desk-art", img: "om-desk-img" }));
+  cell.appendChild(el("span", "om-desk-name", "Trash"));
+  cell.appendChild(el("span", "om-desk-live"));
+  liveTip(cell, () => ({ lead: "Trash" }));
+  cell.onclick = () => deskSelect(cell);
+  cell.ondblclick = () => openWastebasket();
+  cell.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deskSelect(cell);
+    openRowMenu(cell, {
+      items: [
+        { label: "Open Trash", fn: () => openWastebasket() },
+        { label: "Empty Trash", danger: true, fn: () => emptyWastebasket() },
+      ],
+      align: "left",
+    });
+  });
+  binDropInto(cell);
+  dragDeskCell(cell);
+  return cell;
+}
+
+function binDropInto(node, after = null) {
+  node.dataset.omDrop = "bin";
+  node.addEventListener("dragover", (event) => {
+    if (!carriedDoc(event) && !carriedHost(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    node.classList.add("om-fold-over");
+  });
+  node.addEventListener("dragleave", () => node.classList.remove("om-fold-over"));
+  node.addEventListener("drop", async (event) => {
+    if (!carriedDoc(event) && !carriedHost(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    node.classList.remove("om-fold-over");
+    const sent = carriedDoc(event)
+      ? readDrag(event, FILE_DRAG_TYPE)
+      : binnable(readDrag(event, FILE_MOVE_TYPE));
+    if (!sent?.path) return;
+    await removeDoc(sent, () => {});
+    after?.();
+  });
+}
+
+function readDrag(event, type) {
+  try { return JSON.parse(event.dataTransfer.getData(type)); } catch { return null; }
+}
+
+function binnable(sent) {
+  if (!sent?.path) return null;
+  if (!String(sent.place || "").startsWith("docs:")) {
+    notify(sent.name || "Not binned",
+           "Only items in Desktop and Documents can go to the Trash.");
+    return null;
+  }
+  return { ...sent, path: docsPathOf(sent.place, sent.path) };
+}
+
+function paintDeskIcons() {
+  if (!deskLayer) return;
+  const grid = deskLayer.querySelector(".om-desk-grid");
+  if (!grid) return;
+  const rows = deskRows();
+  const shape = [...rows.map((one) => one.key), "wastebasket",
+                 ...deskDocs.map((one) => `${docKey(one)}=${one.name}=${one.icon || ""}`
+                   + `=${one.target || ""}=${one.colour || ""}`)]
+                 .join("|");
+  if (grid._shape === shape) { paintDeskLive(); return; }
+  grid._shape = shape;
+  grid.replaceChildren(...rows.map(buildDeskCell), buildBinCell(),
+                       ...deskDocs.map(buildDocCell));
+  const first = grid.firstElementChild;
+  if (first) first.tabIndex = 0;
+  placeDeskCells();
+  paintDeskLive();
+}
+
+function deskChrome() {
+  const found = [];
+  const bar = document.querySelector(".actionbar-container");
+  const cluster = bar?.closest(".mx-1") || bar?.parentElement || bar;
+  if (cluster) found.push(cluster);
+  const crumb = document.querySelector(".subgraph-breadcrumb");
+  if (crumb) found.push(crumb);
+  const panel = deskFreeBox();
+  const room = panel?.getBoundingClientRect();
+  for (const group of panel?.querySelectorAll(".p-buttongroup") || []) {
+    const box = group.getBoundingClientRect();
+    if (!box.height || !room) continue;
+    if (box.bottom > room.bottom - 160) found.push(group);
+  }
+  return found;
+}
+
+function slideChrome(away) {
+  const room = deskFreeBox()?.getBoundingClientRect();
+  for (const node of deskChrome()) {
+    const box = node.getBoundingClientRect();
+    node.classList.add("om-desk-chrome");
+    if (room && box.height) {
+      node.classList.toggle("om-desk-under", box.top > room.top + room.height / 2);
+    }
+    node.classList.toggle("om-desk-away", away);
+  }
+}
+
+function chromeHost() {
+  const bar = document.querySelector(".actionbar-container");
+  return bar?.closest(".p-splitterpanel") || document.body;
+}
+
+function watchDeskChrome() {
+  if (deskChromeWatcher) return;
+  let due = 0;
+  deskChromeWatcher = new MutationObserver(() => {
+    if (due) return;
+    due = requestAnimationFrame(() => { due = 0; slideChrome(deskShown); });
+  });
+  deskChromeWatcher.observe(chromeHost(), { childList: true, subtree: true });
+}
+
+function deskSidebar() {
+  return document.querySelector(".side-tool-bar-container");
+}
+
+function fitDeskTab() {
+  if (!deskTab?.isConnected) return;
+  const side = deskSidebar()?.getBoundingClientRect();
+  const wide = side && side.width >= 24 ? Math.round(side.width) : 38;
+  deskTab.style.width = `${wide}px`;
+}
+
+function watchDeskTabWidth() {
+  const side = deskSidebar();
+  if (!side || !window.ResizeObserver) return;
+  deskSideRoom?.disconnect();
+  deskSideRoom = new ResizeObserver(() => fitDeskTab());
+  deskSideRoom.observe(side);
+}
+
+function paintDeskTab() {
+  if (!deskTab) return;
+  deskTab.classList.toggle("om-desk-tab-on", deskShown);
+  deskTab.setAttribute("aria-pressed", deskShown ? "true" : "false");
+}
+
+function showDesk() {
+  if (!desktopOn()) return;
+  loadDeskDocs().then(() => paintDeskIcons()).catch(() => {});
+  buildDesk();
+  paintDeskIcons();
+  applyDeskLook();
+  deskFit();
+  deskLayer.hidden = false;
+  deskLayer.classList.add("om-desk-on");
+  requestAnimationFrame(() => { deskFit(); placeDeskCells(); });
+  deskShown = true;
+  deskSeenPath = activePath();
+  deskArmAt = Date.now() + (sessionReady ? 1200 : 8000);
+  document.body.classList.add("om-desk-open");
+  setDeskHash(true);
+  slideChrome(true);
+  paintDeskTab();
+  taskbarSync();
+  sessionKeep();
+}
+
+function hideDesk() {
+  if (!deskShown) return;
+  deskShown = false;
+  deskHashWanted = false;
+  if (deskLayer) {
+    deskLayer.hidden = true;
+    deskLayer.classList.remove("om-desk-on");
+  }
+  document.body.classList.remove("om-desk-open");
+  setDeskHash(false);
+  slideChrome(false);
+  paintDeskTab();
+  taskbarSync();
+  sessionKeep();
+}
+
+function deskShowing() {
+  return deskShown;
+}
+
+function mountDeskTab() {
+  if (!desktopOn()) return;
+  const strip = deskStrip();
+  if (!strip) return;
+  const held = document.getElementById(DESK_TAB_ID);
+  if (held && held.parentElement === strip && strip.firstChild === held) return;
+  held?.remove();
+  deskTab = el("button", "om-desk-tab");
+  deskTab.id = DESK_TAB_ID;
+  deskTab.type = "button";
+  deskTab.setAttribute("aria-label", "Desktop");
+  const mark = el("span", "om-desk-mark");
+  mark.style.setProperty("-webkit-mask", `center / contain no-repeat url("${ICON_DESKTOP}")`);
+  mark.style.setProperty("mask", `center / contain no-repeat url("${ICON_DESKTOP}")`);
+  deskTab.appendChild(mark);
+  liveTip(deskTab, () => ({
+    lead: "Desktop",
+    lines: [deskShown ? "Hide the desktop" : "Show the desktop"],
+  }));
+  deskTab.onclick = () => { if (deskShown) hideDesk(); else showDesk(); };
+  strip.insertBefore(deskTab, strip.firstChild);
+  fitDeskTab();
+  watchDeskTabWidth();
+  paintDeskTab();
+}
+
+function watchDeskTab() {
+  if (deskWatcher) return;
+  const host = document.querySelector('[data-testid="topbar-workflow-tabs"]')
+    || document.body;
+  let due = 0;
+  deskWatcher = new MutationObserver(() => {
+    if (due) return;
+    due = requestAnimationFrame(() => { due = 0; mountDeskTab(); });
+  });
+  deskWatcher.observe(host, { childList: true, subtree: true });
+}
+
+function activePath() {
+  try {
+    return String(app.extensionManager?.workflow?.activeWorkflow?.path || "");
+  } catch {
+    return "";
+  }
+}
+
+function watchDeskWork() {
+  clearInterval(deskWatchTimer);
+  deskSeenPath = activePath();
+  let deskChromeAway = null;
+  deskWatchTimer = setInterval(() => {
+    const open = deskShown && !!deskLayer && !deskLayer.hidden;
+    if (deskLayer && !deskShown) deskLayer.classList.remove("om-desk-on");
+    document.body.classList.toggle("om-desk-open", open);
+    if (open || deskChromeAway !== false) {
+      slideChrome(open);
+      deskChromeAway = open;
+    }
+    if (!deskShown) return;
+    const now = activePath();
+    if (!now) return;
+    if (!deskSeenPath || Date.now() < deskArmAt) { deskSeenPath = now; return; }
+    if (now !== deskSeenPath) {
+      deskSeenPath = now;
+      hideDesk();
+    }
+  }, 250);
+}
+
+function leaveDeskOnWork() {
+  if (deskWired) return;
+  deskWired = true;
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !deskShown) return;
+    if (document.querySelector(".om-backdrop, .om-menu, .om-lb, .om-task-pop, .om-start")) return;
+    const on = event.target;
+    if (on instanceof Element
+        && on.closest(".om-float input, .om-float textarea, .om-float select, "
+          + ".om-float [contenteditable='true']")) return;
+    hideDesk();
+  }, true);
+  document.addEventListener("pointerdown", (event) => {
+    if (!deskShown) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest(`#${DESK_TAB_ID}`) || target.closest(".om-desk")) return;
+    if (target.closest(".p-togglebutton") || target.closest(".new-blank-workflow-button")) {
+      hideDesk();
+    }
+  }, true);
+}
+
+function applyDesktop() {
+  const on = desktopOn();
+  if (!on) {
+    hideDesk();
+    document.body.classList.remove("om-desk-open");
+    slideChrome(false);
+    document.getElementById(DESK_TAB_ID)?.remove();
+    deskTab = null;
+    deskWatcher?.disconnect();
+    deskWatcher = null;
+    deskChromeWatcher?.disconnect();
+    deskChromeWatcher = null;
+    deskSideRoom?.disconnect();
+    deskSideRoom = null;
+    clearInterval(deskWatchTimer);
+    deskWatchTimer = 0;
+    deskRoom?.disconnect();
+    deskRoom = null;
+    deskLayer?.remove();
+    deskLayer = null;
+    taskbarSync();
+    return;
+  }
+  mountDeskTab();
+  watchDeskTab();
+  watchDeskChrome();
+  leaveDeskOnWork();
+  watchDeskWork();
+  buildDesk();
+  paintDeskIcons();
+  applyDeskLook();
+  taskbarSync();
+}
+
+const SESSION_KEY = "om-session";
+
+let sessionReady = false;
+
+let sessionDue = 0;
+
+function sessionRead() {
+  try {
+    const held = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!held || typeof held !== "object") return null;
+    return { desk: held.desk === true, windows: Array.isArray(held.windows) ? held.windows : [] };
+  } catch {
+    return null;
+  }
+}
+
+function sessionWrite() {
+  if (!sessionReady) return;
+  const windows = [...floatPanels.values()]
+    .filter((one) => one.el.isConnected && !one.modal && one.key)
+    .map((one) => ({ key: one.key, away: one.isMinimised?.() === true }));
+  try {
+    localStorage.setItem(SESSION_KEY,
+      JSON.stringify({ v: 1, desk: deskShown === true, windows }));
+  } catch {
+  }
+}
+
+function sessionKeep() {
+  clearTimeout(sessionDue);
+  sessionDue = setTimeout(sessionWrite, 300);
+}
+
+function windowOpener(key) {
+  if (key === "desktop") return () => openDesktopSettings();
+  if (key === "wastebasket") return () => openWastebasket();
+  if (key.startsWith("pack:")) {
+    const id = key.slice(5);
+    return id ? () => openPack(id) : null;
+  }
+  if (key.startsWith("note:")) {
+    const id = key.slice(key.indexOf(":") + 1);
+    return async () => {
+      const found = await docFind(id);
+      if (found) openDoc(found);
+    };
+  }
+  const at = key.indexOf(":");
+  if (at > 0) {
+    const id = key.slice(0, at);
+    const view = key.slice(at + 1);
+    const program = programRows.find((one) => one.key === id);
+    if (program) return () => runProgram(program.program, undefined, view);
+  }
+  const row = managerDestinations().find((one) => one.desk?.window === key);
+  if (row) return () => deskOpenRow(row);
+  if (key === "manager") return () => openPanelWindow("registry");
+  if (key.startsWith("files:")) return () => openFileBrowser();
+  return null;
+}
+
+async function restoreSession() {
+  const held = sessionRead();
+  const asked = deskHashAsked();
+  if (!held) {
+    if (asked) showDesk();
+    sessionReady = true;
+    return asked;
+  }
+  for (const one of held.windows) {
+    const key = String(one?.key || "");
+    const open = windowOpener(key);
+    if (!open) continue;
+    try {
+      await open();
+    } catch {
+      continue;
+    }
+    if (one.away) floatingPanel(key)?.minimise?.();
+  }
+  if (held.desk || asked) showDesk();
+  sessionReady = true;
+  sessionWrite();
+  return true;
+}
+
+function deskNothingOpen() {
+  return new Promise((settle) => {
+    let tries = 0;
+    const look = () => {
+      tries += 1;
+      if (openWorkflows().length || activePath()) { settle(false); return; }
+      if (tries >= 25) { settle(true); return; }
+      setTimeout(look, 200);
+    };
+    look();
+  });
+}
+
+async function startDesktop() {
+  await loadGates().catch(() => {});
+  const programsReady = loadPrograms().then(() => {
+    if (deskLayer) paintDeskIcons();
+  }).catch(() => {});
+  if (!desktopOn()) {
+    programsReady.then(() => restoreSession()).catch(() => { sessionReady = true; });
+    return;
+  }
+  loadDeskCells().then(() => placeDeskCells()).catch(() => {});
+  loadDeskDocs().then(() => paintDeskIcons()).catch(() => {});
+  applyDesktop();
+  programsReady.then(() => restoreSession()).then((remembered) => {
+    if (remembered || deskAsked()) return;
+    return deskNothingOpen().then((empty) => {
+      if (empty && !deskShown) showDesk();
+    });
+  }).catch(() => { sessionReady = true; });
+}
+
+let taskHideWired = false;
+
+function matchStartWidth(tries = 12) {
+  if (!taskStart) return;
+  const tab = document.getElementById(DESK_TAB_ID);
+  const wide = Math.round(tab?.getBoundingClientRect().width || 0);
+  if (wide >= 24) {
+    taskStart.style.setProperty("--om-start-wide", `${wide}px`);
+    return;
+  }
+  if (tries > 0) requestAnimationFrame(() => matchStartWidth(tries - 1));
+}
+
+function taskbarHides() {
+  return panelSetting("openManager.taskbarHide", false) === true;
+}
+
+function taskbarShow(on) {
+  if (!taskBar) return;
+  taskBar.classList.toggle("om-task-hidden", taskbarHides() && !on);
+}
+
+function watchTaskbarEdge() {
+  if (taskHideWired) return;
+  taskHideWired = true;
+  let over = false;
+  const near = (event) => {
+    if (!taskBar || !taskbarHides()) return;
+    const bar = taskBar.getBoundingClientRect();
+    const reach = Math.max(28, bar.height);
+    over = event.clientY >= window.innerHeight - reach;
+    taskbarShow(over || !!startPanel);
+  };
+  document.addEventListener("pointermove", near, { passive: true });
+  document.addEventListener("pointerleave", () => {
+    over = false;
+    if (!startPanel) taskbarShow(false);
+  });
+}
+
+function taskbarSync() {
+  matchStartWidth();
+  if (taskDue) return;
+  taskDue = requestAnimationFrame(() => { taskDue = 0; paintTaskbar(); });
+}
+
+floatHooks.add(taskbarSync);
+
+floatHooks.add(paintDeskLive);
+
+floatHooks.add(sessionKeep);
+
+function applyTaskbar() {
+  const on = taskbarOn();
+  closeTaskPop(false);
+  if (!on) {
+    const back = [...floatPanels.values()]
+      .filter((one) => one.el.isConnected && one.isMinimised?.())
+      .sort((a, b) => a.minimisedAt() - b.minimisedAt());
+    for (const one of back) one.restore();
+  }
+  for (const button of document.querySelectorAll(".om-float-min")) {
+    button.hidden = !on || !!button.closest(".om-backdrop");
+  }
+  paintTaskbar();
+}
+
+
 const runBar = {
   el: null,
   promptId: "",
@@ -9981,19 +14163,12 @@ const runBar = {
   loopAnchor: null,
   expanded: false,
   error: "",
-  //: node id -> class name, read from the queued prompt. The graph can name its own nodes;
-  //: a run submitted from the API or another tab is not in this graph at all, and "node 5"
-  //: tells the reader nothing.
   types: new Map(),
 };
 
-//: The pack's own colours, for a palette that offers nothing but grey. From the project's
-//: own mark: blue leads, yellow answers.
 const BRAND_BLUE = "#84bbe7";
 const BRAND_YELLOW = "#f9f276";
 
-//: A colour at or below this saturation is grey, whatever its hue claims. ComfyUI's stock
-//: node colour is a dark grey, and a grey progress bar reads as a disabled one.
 const GREY_AT = 22;
 
 function runHex(colour) {
@@ -10019,7 +14194,6 @@ function runIsGrey(colour) {
   return Math.max(...rgb) - Math.min(...rgb) <= GREY_AT;
 }
 
-// Lighter for a positive amount, darker for a negative one.
 function runShade(colour, amount) {
   const rgb = runHex(colour) || runHex(BRAND_BLUE);
   const moved = rgb.map((one) => (amount >= 0
@@ -10033,17 +14207,11 @@ function runAlpha(colour, alpha) {
   return `rgba(${rgb.map((one) => Math.round(one)).join(", ")}, ${alpha})`;
 }
 
-// The graph's progress takes the colour a node's header wears in the palette in use, so the
-// bar belongs to the theme rather than to us. Where that is grey, the pack's own blue stands
-// in: a grey bar reads as one that is not doing anything.
 function runMainColour() {
   const header = String(window.LiteGraph?.NODE_DEFAULT_COLOR || "");
   return !runIsGrey(header) ? header : BRAND_BLUE;
 }
 
-// The running node's own colour, by the same rules the canvas draws it with, so the block
-// filling in is the colour of the node you can see filling it. A run submitted from
-// elsewhere is not in this graph, so its class is looked up for a category instead.
 function runNodeColour(nodeId, type) {
   let node = null;
   try {
@@ -10062,8 +14230,6 @@ function runNodeColour(nodeId, type) {
 function buildRunBar() {
   const bar = el("div", "om-prog");
   const track = el("div", "om-prog-track");
-  // The node's own progress goes in first, so the graph's progress paints over it rather
-  // than beside it: a finished node's block belongs to the graph.
   const sub = el("div", "om-prog-sub");
   const main = el("div", "om-prog-main");
   track.appendChild(sub);
@@ -10075,28 +14241,22 @@ function buildRunBar() {
   return bar;
 }
 
-// What a node is called, for the readout. The graph knows; the progress message only carries
-// ids, and an id on its own tells the reader nothing.
 function runNodeLabel(nodeId) {
   const id = String(nodeId);
   try {
     const node = app.graph?.getNodeById?.(Number(id));
     if (node?.title || node?.type) return node.title || node.type;
   } catch {
-    // Not in this graph, which is normal for a run submitted from somewhere else.
   }
   return runBar.types.get(id) || `node ${id}`;
 }
 
-// How many nodes the prompt has. Read from the queue rather than from this tab's own submit,
-// so a run started from the API or another tab is measured too instead of reading "??%".
 async function runTotalFor(promptId) {
   try {
     const queue = await (await api.fetchApi("/queue")).json();
     const running = (queue.queue_running || []).find((item) => item?.[1] === promptId);
     const prompt = running?.[2];
     if (!prompt || typeof prompt !== "object") return 0;
-    // The same read gives every node's class, which is what the readout should say.
     runBar.types = new Map(Object.entries(prompt)
       .map(([id, node]) => [String(id), String(node?.class_type || "")])
       .filter(([, type]) => type));
@@ -10129,8 +14289,6 @@ function paintRunBar() {
   const share = (finished / total) * 100;
   const slice = 100 / total;
 
-  // Recoloured as it paints rather than fixed when it was built, so switching palette during
-  // a run is followed rather than waited out.
   if (!runBar.error) {
     const lead = runMainColour();
     bar.style.setProperty("--om-prog-from", runShade(lead, -0.4));
@@ -10138,8 +14296,6 @@ function paintRunBar() {
     bar.style.setProperty("--om-prog-cap", runShade(lead, 0.6));
     bar.style.setProperty("--om-prog-glow", runAlpha(lead, 0.85));
     bar.style.setProperty("--om-prog-halo", runAlpha(lead, 0.45));
-    // The node's block is the node's own colour, held back a little so the graph's progress
-    // stays the brighter of the two and keeps the glow to itself.
     const tint = runBar.active
       ? runNodeColour(runBar.active.id, runBar.types.get(String(runBar.active.id)))
       : BRAND_YELLOW;
@@ -10147,9 +14303,6 @@ function paintRunBar() {
   }
 
   main.style.width = `${share}%`;
-  // The node's progress occupies the block it is working through, and no more: a node that
-  // is a fifth of the graph cannot advance the bar by more than a fifth however many steps
-  // it takes.
   const node = runBar.active;
   const within = node && node.max > 0 ? Math.min(1, node.value / node.max) : 0;
   sub.style.left = `${share}%`;
@@ -10168,7 +14321,7 @@ function paintRunBar() {
   if (runBar.error) parts.push(runBar.error);
   text.textContent = parts.join(" · ");
   bar.title = runBar.expanded
-    ? "A node expanded into more nodes than the prompt held, so the total grew. The + says so."
+    ? "A node expanded into more nodes than the prompt held, so the total grew."
     : "Graph progress over the running node's own.";
 }
 
@@ -10178,9 +14331,6 @@ function runBarShow(on) {
   bar.classList.toggle("om-prog-on", on);
 }
 
-// Every reading comes from ComfyUI's own progress messages. `progress_state` carries one
-// entry per non-pending node, which is what makes a per-node bar possible at all; the older
-// `progress` message only ever describes whichever node happens to be running.
 function onProgressState(detail) {
   if (!runBar.el) return;
   const nodes = detail?.nodes || {};
@@ -10189,8 +14339,6 @@ function onProgressState(detail) {
   let active = null;
   for (const [id, entry] of Object.entries(nodes)) {
     const state = entry?.state;
-    // A node that runs again having already finished is a loop coming round. The first such
-    // node anchors the cycle, so the count follows the loop rather than every node in it.
     if (state === "running" && runBar.done.has(id)) {
       runBar.done.delete(id);
       if (runBar.loopAnchor === null) {
@@ -10213,7 +14361,6 @@ function onProgressState(detail) {
     }
   }
   runBar.active = active;
-  // Expansion: more nodes have been seen than the prompt was submitted with.
   if (runBar.submitted && runBar.seen.size > runBar.submitted) {
     runBar.expanded = true;
     runBar.total = Math.max(runBar.total, runBar.seen.size);
@@ -10221,11 +14368,6 @@ function onProgressState(detail) {
   paintRunBar();
 }
 
-// Where the bar goes. ComfyUI's current layout puts a strip above the header in
-// `comfyui-body-top`, and that container carries its own stacking context, so a bar pinned
-// to the window behind it is invisible however high its own z-index is. Mounting into the
-// container is the only way to share that space rather than fight it. Older layouts have no
-// such container, so the bar pins itself to the top of the window there instead.
 function runBarHost() {
   const top = document.querySelector(".comfyui-body-top");
   if (top) return { host: top, before: top.firstChild, flow: true };
@@ -10256,8 +14398,6 @@ function wireRunBar() {
       paintRunBar();
     }
   });
-  // Cached nodes are done before they start. They never reach `progress_state`, so without
-  // this a run that reuses most of its graph would sit at nothing until the one new node ran.
   api.addEventListener("execution_cached", (event) => {
     if (!runBar.el) return;
     for (const id of event.detail?.nodes || []) {
@@ -10281,7 +14421,6 @@ function wireRunBar() {
     paintRunBar();
     setTimeout(() => { if (!runBar.active) runBarShow(false); }, 1400);
   });
-  // Anything that ends a run without saying so, including an interrupt.
   api.addEventListener("executing", (event) => {
     if (!runBar.el) return;
     if (event.detail?.node == null && event.detail !== null) return;
@@ -10293,18 +14432,11 @@ function wireRunBar() {
   });
 }
 
-// --- memory panel ------------------------------------------------------------------------------
 
-//: Readings kept for the graphs. At one a second this is four minutes of history, which is
-//: enough to see a model load and not enough to be worth storing anywhere.
 const MEMORY_HISTORY = 240;
 
-//: Kept whether or not the panel is open, so opening it shows a graph rather than a blank
-//: box waiting to fill.
 const memoryHistory = { cpu: [], ram: [], vram: [] };
 
-//: The panel asks for readings on its own lease, so it can have them faster than the strip
-//: without changing what the strip asked for.
 const MEMORY_CLIENT = `${MONITOR_CLIENT}-panel`;
 
 const READING_QUIET = 6000;
@@ -10312,7 +14444,9 @@ const READING_QUIET = 6000;
 let lastReadingAt = 0;
 
 function readingAge() {
-  return lastReadingAt ? Date.now() - lastReadingAt : Infinity;
+  if (!lastReadingAt) return Infinity;
+  const hidden = link.hiddenFor + (link.hiddenAt ? Date.now() - link.hiddenAt : 0);
+  return Math.max(0, Date.now() - lastReadingAt - hidden);
 }
 
 function readingQuiet() {
@@ -10329,6 +14463,8 @@ function quietText(age) {
 
 function recordReading(reading) {
   lastReadingAt = Date.now();
+  link.hiddenFor = 0;
+  link.hiddenAt = document.hidden ? Date.now() : 0;
   const push = (key, value) => {
     if (typeof value !== "number" || Number.isNaN(value)) return;
     const series = memoryHistory[key];
@@ -10340,8 +14476,6 @@ function recordReading(reading) {
   if (reading.vram?.total) push("vram", (reading.vram.used / reading.vram.total) * 100);
 }
 
-// A filled line of recent history, drawn the way a resource monitor draws one: newest at the
-// right, the scale fixed at nought to a hundred so two graphs can be compared by eye.
 function drawGraph(canvas, series, colour) {
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 260;
@@ -10393,8 +14527,6 @@ function drawGraph(canvas, series, colour) {
   pen.stroke();
 }
 
-// A header bar, a graph that runs the full width beneath it, and a line of figures. The bars
-// are what separate one reading from the next, so the graphs need no frame of their own.
 function memoryBar(label) {
   const bar = el("div", "om-mem-bar");
   bar.appendChild(el("span", "om-mem-bar-label", label));
@@ -10407,8 +14539,6 @@ function buildGraphBlock(key, label, colour) {
   const box = el("div", "om-mem-graph");
   const head = memoryBar(label);
   head.value.textContent = "-";
-  // The bar is the control: a graph nobody is watching folds away and gives its height to the
-  // ones that are, and the reading stays on the bar so it is still legible while folded.
   head.bar.classList.add("om-mem-bar-toggle");
   const chevron = el("span", "om-mem-bar-fold", "▾");
   head.bar.insertBefore(chevron, head.bar.firstChild);
@@ -10431,9 +14561,6 @@ function buildGraphBlock(key, label, colour) {
            folded: () => box.classList.contains("om-mem-folded") };
 }
 
-//: Colours for the map, in the order the devices are reported: the one holding most of the
-//: model first. A device is a colour rather than a label so a long resident stretch reads as
-//: one band.
 const BLOCK_COLOURS = ["#a371f7", "#3fb950", "#58a6ff", "#d29922", "#db61a2", "#39c5cf"];
 
 function keyItem(device, seat) {
@@ -10451,8 +14578,7 @@ function heatKeyItem() {
   swatch.style.background = `rgba(${BLOCK_HOT}, .8)`;
   item.appendChild(swatch);
   item.appendChild(el("span", null, "in use now"));
-  item.title = "A square lights where the run has just faulted that page in, and fades as it "
-    + "goes quiet. It is drawn over the colour that says where the page is.";
+  item.title = "Pages the run has just faulted in, fading as they go quiet.";
   return item;
 }
 
@@ -10466,12 +14592,6 @@ const BLOCK_CELL_MAX = 14;
 
 const BLOCK_ROWS_LIMIT = 10;
 
-// Squares laid out to fill the width exactly, rather than wrapped and left ragged.
-//
-// Drawn rather than built from elements. Flex wrapping divides a row by whole squares and
-// leaves whatever does not fit as a gap at the end, so every row ends in a different place
-// and the map looks like it has holes in it. Working out the size from the width instead
-// means the columns always come out even, and a map costs one node rather than hundreds.
 function blockGrid(canvas, count) {
   const width = canvas.clientWidth;
   if (!width || !count) return null;
@@ -10548,12 +14668,8 @@ function paintBlockHeat(canvas, heat, at) {
   return lit;
 }
 
-// Where each part of a model sits, drawn the way a disk map is drawn: one square per stretch
-// of the model, in the order the model is written, coloured by the device holding it.
 function buildBlockMap(map) {
   const box = el("div", "om-mem-map");
-  // The frame carries the border and the padding. A canvas measured with padding on it
-  // reports a width it does not draw into, and the map comes out stretched.
   const frame = el("div", "om-mem-grid-frame");
   const canvas = el("canvas", "om-mem-grid");
   frame.appendChild(canvas);
@@ -10604,21 +14720,17 @@ function buildBlockMap(map) {
   const hot = heatKeyItem();
   hot.hidden = !map.heat;
   key.appendChild(hot);
-  // Named for what was actually counted. The page figures are coarser than the byte figure on
-  // the row above, and saying which is which stops the two looking like a contradiction.
   const note = el("span", "om-mem-key-note", `${map.modules} ${map.unit || "blocks"}`);
   note.title = (map.source === "pages"
-    ? "Read from the streaming library, a page at a time, so the shares here step in whole "
+    ? "Read from the streaming library, a page at a time. The shares here step in whole "
       + "pages and differ slightly from the byte figure above."
     : "Read from the model's own modules.")
     + (map.heat ? " A square lights when the run faults that page in, and fades as it goes "
-                  + "quiet, so the light is where the work is rather than where the weights are."
+                  + "quiet."
                 : "");
   key.appendChild(note);
   box.appendChild(key);
 
-  // Repainting the same canvas and rewriting the key is what keeps a map that changes every
-  // few seconds from flashing.
   return {
     el: box,
     update: (next) => {
@@ -10649,14 +14761,10 @@ function buildBlockMap(map) {
   };
 }
 
-// Every map in the panel, redrawn at the width it now has.
 function repaintBlockMaps(root) {
   for (const map of root.querySelectorAll(".om-mem-map")) map._redraw?.();
 }
 
-// A model ComfyUI is holding, and where its weights are.
-// A model ComfyUI is holding. Built once and then kept up to date: these figures change every
-// few seconds, and a row rebuilt on every reading is a row that blinks.
 const BLOCK_CELLS_FIRST = 240;
 
 const BLOCK_CELLS_MAX = 1024;
@@ -10669,15 +14777,10 @@ function buildMemoryModelRow(model, refresh) {
   const size = el("span", "om-lib-size", bytesText(model.total));
   top.appendChild(name);
   top.appendChild(size);
-  // One model at a time, and only while the queue is idle -- the server refuses otherwise
-  // rather than pulling weights out from under a sampler.
   const drop = el("button", "om-btn om-mem-drop", "Unload");
   drop.title = "Unload this model and its clones. ComfyUI loads it again when a prompt needs "
     + "it. Refused while a prompt is running.";
   drop.onclick = async () => {
-    // Asked for the same reason the two freeing buttons are: this hands memory back without
-    // looking at what is holding it. The one guard that does exist is named rather than
-    // relied on silently.
     const go = await chooseAction(`Unload ${row._name}?`,
       `This unloads ${row._name} regardless of what is holding it.`,
       [{ key: "go", label: "Unload", primary: true }],
@@ -10685,7 +14788,7 @@ function buildMemoryModelRow(model, refresh) {
         ["Frees", bytesText(row._total || 0)],
         ["Also unloads", "Any clone of this model, meaning a second copy made for another device"],
         ["Costs", "The next prompt that needs it loads it again"],
-        ["While a prompt is running", "Refused, rather than pulling weights out from under it"],
+        ["While a prompt is running", "Refused"],
       ] });
     if (!go) return;
     drop.disabled = true;
@@ -10719,14 +14822,11 @@ function buildMemoryModelRow(model, refresh) {
   const slot = el("div", "om-mem-map-slot");
   row.appendChild(slot);
 
-  //: The map is drawn into the same canvas each time, so it changes rather than flashing.
   let drawn = null;
 
   const tell = (model) => {
     name.textContent = model.name;
     size.textContent = bytesText(model.total);
-    // Identity rather than position: the list is sorted by size and shifts as models come
-    // and go, so the button has to say which model it meant.
     row._id = model.id;
     row._name = model.name;
     row._total = model.total;
@@ -10734,8 +14834,6 @@ function buildMemoryModelRow(model, refresh) {
     bar._say = `${bytesText(model.resident)} on ${model.device}`
       + (model.offloaded ? `\n${bytesText(model.offloaded)} offloaded to host memory` : "");
 
-    // The tags are a short list that changes shape, so they are rewritten; the parts that
-    // move continuously are not.
     const tags = [model.device, `${bytesText(model.resident)} resident`];
     if (model.offloaded) tags.push(`${bytesText(model.offloaded)} offloaded`);
     if (model.in_use) tags.push("in use");
@@ -10743,8 +14841,6 @@ function buildMemoryModelRow(model, refresh) {
     const parts = tags.map((text, index) =>
       el("span", index ? "om-dl-src" : null, text));
     if (model.streaming) {
-      // "Streaming" on its own says nothing. What streams is the model's own weights, block
-      // by block, so the tag says that and the map below shows which blocks are where.
       const tag = el("span", "om-dl-src om-mem-stream", "weights stream in blocks");
       tag.title = "This model's weights move between host and device while it runs, a block "
         + "at a time, so what is resident changes as it works.";
@@ -10787,75 +14883,1517 @@ function buildMemoryModelRow(model, refresh) {
   return row;
 }
 
-// What the machine is doing, at more length than the strip can show.
-//: What the light can say, and how it says it. The wording is the server's, because the
-//: server is what can tell a slow node from a stalled one; this only decides the colour.
 const ACTIVITY_LOOK = {
-  working: { title: "Working" },
-  stalling: { title: "Potential memory stall" },
-  stalled: { title: "Memory stalled" },
-  oom: { title: "Out of memory" },
-  idle: { title: "Idle" },
-  quiet: { title: "Not reporting" },
-  thrashing: { title: "Streaming thrash" },
+  working: { title: "Working", legend: "The card is doing arithmetic." },
+  streaming: { title: "Streaming weights", legend: "The model is larger than the card, so "
+    + "weights cross the bus as they are needed." },
+  stalling: { title: "Potential memory stall", legend: "Memory is nearly full and nothing has "
+    + "moved for a short while." },
+  stalled: { title: "Memory stalled", legend: "Quiet, memory full, and nothing has moved for "
+    + "the better part of a minute." },
+  hang: { title: "Possible GPU hang", legend: "Busy, memory full, nothing arriving and "
+    + "nothing advancing." },
+  oom: { title: "Out of memory", legend: "The last run failed for memory. ComfyUI unloaded "
+    + "everything it held." },
+  idle: { title: "Idle", legend: "Nothing is running. Models may still be held." },
+  quiet: { title: "Not reporting", legend: "No reading has arrived. The figures shown are the "
+    + "last that did." },
+  thrashing: { title: "Streaming thrash", legend: "Weights are being fetched again as fast as "
+    + "they are dropped." },
 };
 
-// A light in the panel's header. Green while there is work going through, amber where the
-// card has gone quiet with memory full, red after an out-of-memory failure, grey when
-// nothing is running. The reasoning is on the hover, because a colour on its own is a
-// thing to worry about rather than something to act on.
+function activityLegend() {
+  const list = el("dl", "om-facts");
+  for (const [state, look] of Object.entries(ACTIVITY_LOOK)) {
+    if (!look.legend) continue;
+    const term = el("dt");
+    term.appendChild(el("span", `om-orb om-orb-${state}`));
+    term.appendChild(document.createTextNode(` ${look.title}`));
+    list.appendChild(term);
+    list.appendChild(el("dd", null, look.legend));
+  }
+  return list;
+}
+
+function openActivityLegend() {
+  chooseAction("What the light means", "", [], { wide: true, extra: activityLegend() });
+}
+
 function buildActivityOrb() {
   const orb = el("span", "om-orb om-orb-idle");
   orb.setAttribute("role", "img");
   orb.tabIndex = 0;
   liveTip(orb, () => orb._say || "");
-  orb.tell = (activity, quietFor = 0) => {
-    const state = quietFor ? "quiet" : (ACTIVITY_LOOK[activity?.state] ? activity.state : "idle");
-    if (orb._state !== state) {
-      orb._state = state;
-      orb.className = `om-orb om-orb-${state}`;
+  orb.onclick = (event) => { event.stopPropagation(); openActivityLegend(); };
+  orb.onkeydown = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    openActivityLegend();
+  };
+  orb.tell = (activity, quietFor = 0, state = "") => {
+    const look = quietFor ? "quiet" : (ACTIVITY_LOOK[activity?.state] ? activity.state : "idle");
+    const say = LINK_SAY[state];
+    if (orb._state !== look) {
+      orb._state = look;
+      orb.className = `om-orb om-orb-${look}`;
     }
     const label = quietFor
       ? `Not reporting: ${quietText(quietFor)}`
-      : (activity?.label || ACTIVITY_LOOK[state].title);
+      : (activity?.label || ACTIVITY_LOOK[look].title);
     const detail = quietFor
-      ? "The server has not sent a reading. It is the same process that runs the graph, so "
-        + "work heavy enough to stop it answering stops the readings too. Every figure here "
-        + "is from the last one that arrived."
+      ? (say?.tip || "No reading has arrived; the figures shown are the last that did.")
       : (activity?.detail || "");
-    orb._say = detail ? `${label}\n${detail}` : label;
+    orb._say = { lead: label, facts: quietFor ? [] : (activity?.facts || []), lines: [detail] };
     orb.setAttribute("aria-label", label);
   };
   orb.tell(null);
   return orb;
 }
 
-function openMemoryPanel() {
-  if (floatingPanel("memory")) { closeFloatingPanel("memory"); return null; }
+const DESKSET_SCALE = 0.26;
 
-  //: The most recent reading, read by the toolbar and the light as well as the graphs.
+function deskRealRect() {
+  const box = deskCanvasBox()?.getBoundingClientRect();
+  if (!box || !box.width || !box.height) {
+    return { width: window.innerWidth, height: window.innerHeight };
+  }
+  const floor = taskBar?.isConnected
+    ? taskBar.getBoundingClientRect().top
+    : window.innerHeight;
+  return { width: box.width, height: Math.max(80, Math.min(box.bottom, floor) - box.top) };
+}
+
+function deskSetPreview(screen) {
+  const real = deskRealRect();
+  screen.style.aspectRatio = `${Math.round(real.width)} / ${Math.round(real.height)}`;
+  const shown = screen.getBoundingClientRect();
+  const scale = shown.width > 0 ? shown.width / real.width : DESKSET_SCALE;
+  const url = deskPaperUrl(panelSetting("openManager.desktopWallpaper", ""));
+  const fit = deskFitNow();
+  screen.style.backgroundImage = url ? `url("${url}")` : "";
+  screen.style.backgroundSize = fit.size === "auto" ? "auto" : fit.size;
+  screen.style.backgroundRepeat = fit.repeat;
+  screen.style.backgroundPosition = deskPosition(fit);
+  screen.style.cursor = url && fit.movable ? "grab" : "default";
+  const icon = deskNumber("openManager.desktopIconSize", 44, 28, 96) * scale;
+  const label = deskNumber("openManager.desktopLabelSize", 12, 9, 18) * scale;
+  const step = { wide: (88 + 12) * scale, tall: (109 + 12) * scale };
+  const inset = { left: 73 * scale, top: 48 * scale };
+  const cells = deskRows().map((row, at) => {
+    const spot = deskCells[row.key] || { col: 0, row: Number(row.desk.at) || at };
+    const cell = el("div", "om-deskset-cell");
+    cell.style.left = `${inset.left + spot.col * step.wide}px`;
+    cell.style.top = `${inset.top + spot.row * step.tall}px`;
+    cell.style.width = `${Math.max(8, step.wide - 4)}px`;
+    const art = omIcon({ kind: row.desk.kind, url: row.desk.art },
+                       { name: row.desk.label, cls: "om-desk-art", img: "om-desk-img" });
+    art.style.width = `${Math.max(6, icon)}px`;
+    art.style.height = `${Math.max(6, icon)}px`;
+    cell.appendChild(art);
+    const name = el("span", null, row.desk.label);
+    name.style.fontSize = `${Math.max(3, label)}px`;
+    cell.appendChild(name);
+    return cell;
+  });
+  screen.replaceChildren(...cells);
+}
+
+function slideWallpaper(screen, after) {
+  screen.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    if (!deskFitNow().movable) return;
+    if (!String(panelSetting("openManager.desktopWallpaper", "")).trim()) return;
+    const box = screen.getBoundingClientRect();
+    const start = deskFocus();
+    const from = { x: event.clientX, y: event.clientY };
+    let moved = false;
+    let spot = start;
+    try { screen.setPointerCapture(event.pointerId); } catch {}
+    screen.style.cursor = "grabbing";
+
+    const onMove = (move) => {
+      const dx = (move.clientX - from.x) / Math.max(1, box.width) * 100;
+      const dy = (move.clientY - from.y) / Math.max(1, box.height) * 100;
+      if (!moved && Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      moved = true;
+      spot = {
+        x: Math.round(Math.max(0, Math.min(100, start.x - dx))),
+        y: Math.round(Math.max(0, Math.min(100, start.y - dy))),
+      };
+      screen.style.backgroundPosition = `${spot.x}% ${spot.y}%`;
+      if (deskLayer) deskLayer.style.backgroundPosition = `${spot.x}% ${spot.y}%`;
+    };
+
+    const onUp = async () => {
+      try { screen.releasePointerCapture?.(event.pointerId); } catch {}
+      screen.removeEventListener("pointermove", onMove);
+      screen.removeEventListener("pointerup", onUp);
+      screen.removeEventListener("pointercancel", onUp);
+      screen.style.cursor = "grab";
+      if (!moved) return;
+      await app.extensionManager.setting.set("openManager.desktopFocusX", spot.x);
+      await app.extensionManager.setting.set("openManager.desktopFocusY", spot.y);
+      after?.(spot);
+    };
+
+    screen.addEventListener("pointermove", onMove);
+    screen.addEventListener("pointerup", onUp);
+    screen.addEventListener("pointercancel", onUp);
+  });
+}
+
+function deskSetPapers(box, screen) {
+  deskPapers().then((answer) => {
+    if (!box.isConnected) return;
+    const held = String(panelSetting("openManager.desktopWallpaper", ""));
+    const found = answer.wallpapers || [];
+    if (!found.length) {
+      box.replaceChildren(el("div", "om-deskset-note", "No wallpapers yet."));
+      return;
+    }
+    box.replaceChildren(...found.map((one) => {
+      const pick = el("button", "om-deskset-paper");
+      pick.type = "button";
+      pick.style.backgroundImage = `url("${deskPaperUrl(one.name)}")`;
+      pick.classList.toggle("om-deskset-paper-on", one.name === held);
+      liveTip(pick, () => ({
+        lead: one.name,
+        facts: one.builtin
+          ? [["Size", bytesText(one.size)], ["Source", "Came with Open Manager"]]
+          : [["Size", bytesText(one.size)], ["Added", whenText(new Date(one.at * 1000))]],
+        lines: one.builtin ? [] : ["Middle-click deletes it."],
+      }));
+      pick.onclick = async () => {
+        await app.extensionManager.setting.set("openManager.desktopWallpaper", one.name);
+        applyDeskLook();
+        deskSetPreview(screen);
+        deskSetPapers(box, screen);
+      };
+      pick.addEventListener("auxclick", async (event) => {
+        if (event.button !== 1 || one.builtin) return;
+        event.preventDefault();
+        const answer2 = await dlPost("/wallpaper/remove", { name: one.name }).catch(() => null);
+        if (!answer2?.ok) { notify("Not removed", answer2?.reason || "It could not be removed."); return; }
+        if (one.name === held) {
+          await app.extensionManager.setting.set("openManager.desktopWallpaper", "");
+          applyDeskLook();
+          deskSetPreview(screen);
+        }
+        deskSetPapers(box, screen);
+      });
+      return pick;
+    }));
+  }).catch(() => {});
+}
+
+function deskHeading(title) {
+  const head = el("div", "om-deskset-head");
+  head.appendChild(el("span", null, title));
+  return head;
+}
+
+function windowPalette() {
+  const box = el("div", "om-deskset-palette");
+  const row = el("div", "om-deskset-palette-row");
+  const custom = el("div", "om-deskset-custom");
+  custom.hidden = true;
+  const pair = { from: el("input"), to: el("input") };
+  const paint = () => {
+    row.replaceChildren();
+    const held = windowColour();
+    const named = readColour(held);
+    for (const name of Object.keys(BAR_PAINTS)) {
+      const dot = el("button", "om-tab-swatch om-deskset-swatch");
+      dot.type = "button";
+      dot.title = name === "plain" ? "The theme's own bar" : name;
+      dot.style.background = name === "plain"
+        ? "var(--om-surface)"
+        : `var(--om-surface) ${barPaint({ tint: name }, { over: "var(--om-surface)" })}`;
+      dot.style.backgroundBlendMode = "normal";
+      dot.classList.toggle("om-tab-swatch-on", held === name || (!held && name === "plain"));
+      dot.onclick = () => {
+        custom.hidden = true;
+        setWindowColour(name === "plain" ? "" : name).then(paint);
+      };
+      row.appendChild(dot);
+    }
+    const mine = el("button", "om-tab-swatch om-deskset-swatch om-tab-swatch-pick", "+");
+    mine.type = "button";
+    mine.title = "A colour, or a gradient, of your own";
+    const own = named && !Object.hasOwn(BAR_PAINTS, held);
+    if (own) {
+      mine.textContent = "";
+      mine.style.background =
+        `var(--om-surface) ${barPaint(named, { over: "var(--om-surface)" })}`;
+    }
+    mine.classList.toggle("om-tab-swatch-on", !!own);
+    mine.onclick = () => {
+      custom.hidden = !custom.hidden;
+      if (custom.hidden) return;
+      pair.from.value = TAB_HEX.test(named?.from || named?.tint || "")
+        ? (named.from || named.tint) : "#58a6ff";
+      pair.to.value = TAB_HEX.test(named?.to || "") ? named.to : pair.from.value;
+    };
+    row.appendChild(mine);
+  };
+
+  const apply = () => {
+    const from = pair.from.value;
+    const to = pair.to.value;
+    setWindowColour(from === to ? from : `${from},${to}`).then(paint);
+  };
+  for (const [side, field] of Object.entries(pair)) {
+    field.type = "color";
+    field.className = "om-deskset-dip";
+    field.title = side === "from" ? "Left of the bar" : "Right of the bar";
+    field.addEventListener("change", apply);
+  }
+  custom.appendChild(el("span", "om-deskset-dip-label", "From"));
+  custom.appendChild(pair.from);
+  custom.appendChild(el("span", "om-deskset-dip-label", "to"));
+  custom.appendChild(pair.to);
+
+  box.appendChild(el("span", "om-deskset-paint-name", "Window colour"));
+  box.appendChild(row);
+  box.appendChild(custom);
+  box._omPaint = paint;
+  paint();
+  return box;
+}
+
+function colourSwitch() {
+  const row = el("label", "om-deskset-row om-deskset-switch");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = authorColours();
+  box.onchange = async () => {
+    try {
+      await app.extensionManager.setting.set("openManager.programColours", box.checked);
+    } catch {}
+    repaintLooks();
+  };
+  row.appendChild(box);
+  row.appendChild(el("span", null, "Let programs colour their window bar"));
+  return row;
+}
+
+function openProgramProps(entry) {
+  const key = `props:program:${entry.id}`;
+  const held = floatingPanel(key);
+  if (held) { held.present(); return held; }
+  const panel = createFloatingPanel({
+    key, title: `${entry.name} properties`, ...windowSize("props"), modal: false,
+  });
+  const art = programIconArt(entry);
+  if (art.kind === "mask") panel.setMaskIcon(art.url);
+  else panel.setIcon(art.url);
+
+  const wrap = el("div", "om-props");
+  const head = el("div", "om-props-head");
+  const face = el("div", "om-props-face");
+  face.appendChild(omIcon({ kind: art.kind, url: art.url },
+                          { name: entry.name, cls: "om-props-art", img: "om-props-img" }));
+  head.appendChild(face);
+  const titles = el("div");
+  titles.appendChild(el("div", "om-props-name", entry.name));
+  titles.appendChild(el("div", "om-props-sub", entry.hint || ""));
+  head.appendChild(titles);
+  wrap.appendChild(head);
+
+  const rows = el("div", "om-props-rows");
+  const row = (label, value) => {
+    const one = el("div", "om-props-row");
+    one.appendChild(el("span", "om-props-key", label));
+    one.appendChild(el("span", "om-props-value", value));
+    rows.appendChild(one);
+    return one;
+  };
+  const surfaces = [];
+  if (entry.surfaces?.desktop) surfaces.push("desktop");
+  if (entry.surfaces?.start !== false) surfaces.push("start menu");
+  row("Name", entry.name);
+  row("Id", entry.id);
+  row("Author", entry.author || "unstated");
+  row("Version", entry.version || "unstated");
+  row("Windows", entry.multiple ? "several at once" : "one at a time");
+  row("Appears in", surfaces.join(", ") || "nowhere on its own");
+  row("State", deskProgramsOff.includes(entry.id) ? "Switched off" : "Switched on");
+  wrap.appendChild(rows);
+
+  if ((entry.tags || []).length) {
+    wrap.appendChild(el("div", "om-props-head2", "Keywords"));
+    const keys = el("div", "om-props-keys");
+    for (const tag of entry.tags) keys.appendChild(el("span", "om-props-key-chip", tag));
+    wrap.appendChild(keys);
+  }
+
+  wrap.appendChild(el("div", "om-props-head2", "Declared"));
+  const caps = el("div", "om-props-keys");
+  const held2 = entry.capabilities || [];
+  if (!held2.length) caps.appendChild(el("span", "om-props-note", "Nothing."));
+  for (const one of held2) caps.appendChild(el("span", "om-props-key-chip", one));
+  wrap.appendChild(caps);
+  wrap.appendChild(el("div", "om-props-note",
+    "Declared by the author and not verified. A program ships with Open Manager and runs "
+    + "with everything this page has."));
+
+  panel.body.appendChild(wrap);
+  return panel;
+}
+
+function openManagePrograms() {
+  const held = floatingPanel("programs");
+  if (held) { held.present(); return held; }
+  const panel = createFloatingPanel({
+    key: "programs", title: "Manage Programs", ...windowSize("folder"), modal: false,
+  });
+  panel.setMaskIcon(ICON_PROGRAM);
+
+  const find = el("input", "om-search");
+  find.placeholder = "Search by name, author or keyword";
+  find.spellcheck = false;
+  panel.tools.appendChild(find);
+  const list = el("div", "om-mgr-list");
+  panel.body.appendChild(list);
+
+  const state = { all: [], problems: [], find: "" };
+
+  const matches = (one) => {
+    const want = state.find.trim().toLowerCase();
+    if (!want) return true;
+    return [one.name, one.id, one.author, one.hint, ...(one.tags || [])]
+      .filter(Boolean).some((text) => String(text).toLowerCase().includes(want));
+  };
+
+  const draw = () => {
+    const shown = state.all.filter(matches);
+    list.replaceChildren();
+    if (!shown.length) {
+      list.appendChild(el("div", "om-fold-empty",
+        state.all.length ? "Nothing matches that." : "No programs are installed."));
+    }
+    for (const one of shown) {
+      const row = el("div", "om-mgr-row");
+      const art = programIconArt(one);
+      row.appendChild(omIcon({ kind: art.kind, url: art.url },
+                             { name: one.name, cls: "om-mgr-art", img: "om-mgr-shot" }));
+      const text = el("div", "om-mgr-text");
+      const head = el("div", "om-mgr-name", one.name);
+      if (one.author) head.appendChild(el("span", "om-mgr-by", one.author));
+      text.appendChild(head);
+      text.appendChild(el("div", "om-mgr-hint", one.hint || ""));
+      if ((one.tags || []).length) {
+        text.appendChild(el("div", "om-mgr-keys", one.tags.join("  ·  ")));
+      }
+      row.appendChild(text);
+      const mark = el("label", "om-mgr-switch");
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = !deskProgramsOff.includes(one.id);
+      box.onchange = () => { setProgramOn(one.id, box.checked); };
+      mark.appendChild(box);
+      row.appendChild(mark);
+      row.ondblclick = () => openProgramProps(one);
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openRowMenu(row, { items: [
+          { label: "Properties", fn: () => openProgramProps(one) },
+          { label: deskProgramsOff.includes(one.id) ? "Switch on" : "Switch off",
+            fn: () => { setProgramOn(one.id, deskProgramsOff.includes(one.id)); draw(); } },
+        ], align: "left" });
+      });
+      liveTip(row, () => ({
+        lead: one.name,
+        facts: [
+          ["Version", one.version || "unstated"],
+          ["Windows", one.multiple ? "several allowed" : "one"],
+        ],
+        lines: [one.hint || ""],
+      }));
+      list.appendChild(row);
+    }
+    for (const problem of state.problems) {
+      list.appendChild(el("div", "om-deskset-note", problem));
+    }
+  };
+
+  const fill = async () => {
+    try {
+      const answer = await (await api.fetchApi(`${API}/programs`)).json();
+      state.all = answer?.programs || [];
+      state.problems = answer?.problems || [];
+    } catch {
+      state.all = [];
+      state.problems = ["The programs could not be read."];
+    }
+    if (!panel.el.isConnected) return;
+    panel.setBadge(countNote(state.all.length, "program"));
+    draw();
+  };
+
+  let typing = 0;
+  find.oninput = () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => { state.find = find.value; draw(); }, 200);
+  };
+  panel._omFill = fill;
+  fill();
+  return panel;
+}
+
+const FILE_WORDS = {
+  image: "Image", video: "Video", audio: "Audio", model: "Model", text: "Text",
+  other: "File",
+};
+
+let fileWindows = 0;
+
+function openFileBrowser(start = "", at = "") {
+  const wanted = `${start}|${at || ""}`;
+  for (const [key, one] of floatPanels) {
+    if (!key.startsWith("files:")) continue;
+    if (start ? one._omAt?.() === wanted : true) {
+      one.present();
+      return one;
+    }
+  }
+  const panel = createFloatingPanel({
+    key: `files:${++fileWindows}`, title: "Folders", ...windowSize("folder"), modal: false,
+  });
+  panel.setMaskIcon(ICON_FOLDER);
+
+  const state = { places: [], place: start, path: at || "", writable: false, heavy: false,
+                  folders: [], items: [], marks: {} };
+
+  const placeWritable = (held) => !!state.places.find((one) => one.id === held)?.writable;
+
+  const wrap = el("div", "om-files");
+  const tree = el("div", "om-files-tree");
+  const right = el("div", "om-files-right");
+  const trail = el("div", "om-files-trail");
+  const list = el("div", "om-files-list");
+  list.tabIndex = 0;
+  right.appendChild(trail);
+  right.appendChild(list);
+  const grip = el("div", "om-files-grip");
+  grip.title = "Resize";
+  wrap.appendChild(tree);
+  wrap.appendChild(grip);
+  wrap.appendChild(right);
+
+  const TREE_KEY = "om-files-tree-width";
+  const TREE_MIN = 150;
+  const TREE_MAX = 560;
+
+  const setTree = (width) => {
+    const held = Math.max(TREE_MIN, Math.min(TREE_MAX, Math.round(width)));
+    tree.style.width = `${held}px`;
+    return held;
+  };
+
+  try {
+    setTree(Number(localStorage.getItem(TREE_KEY)) || 212);
+  } catch {
+    setTree(212);
+  }
+
+  grip.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    try {
+      grip.setPointerCapture(event.pointerId);
+    } catch {
+    }
+    const from = { x: event.clientX, width: tree.offsetWidth };
+    const move = (held) => setTree(from.width + (held.clientX - from.x));
+    const done = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", done);
+      grip.removeEventListener("pointercancel", done);
+      try { localStorage.setItem(TREE_KEY, String(tree.offsetWidth)); } catch {}
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", done);
+    grip.addEventListener("pointercancel", done);
+  });
+  panel.body.appendChild(wrap);
+
+  const here = (name) => (state.path ? `${state.path}/${name}` : name);
+
+  let chosen = "";
+  let order = [];
+
+  const rowFor = (name) => list.querySelector(`[data-om-name="${CSS.escape(name)}"]`);
+
+  const mark = (name, { scroll = false } = {}) => {
+    chosen = name || "";
+    for (const row of list.querySelectorAll(".om-files-row")) {
+      row.classList.toggle("om-files-row-on", row.dataset.omName === chosen);
+    }
+    if (scroll) rowFor(chosen)?.scrollIntoView({ block: "nearest" });
+  };
+
+  const step = (by) => {
+    if (!order.length) return;
+    const at = order.indexOf(chosen);
+    const to = at < 0
+      ? (by > 0 ? 0 : order.length - 1)
+      : Math.max(0, Math.min(order.length - 1, at + by));
+    mark(order[to], { scroll: true });
+  };
+
+  const markOf = (place, path) => state.marks[`${place}|${path || ""}`] || null;
+
+  const markArt = (place, path, name) => {
+    const mark = markOf(place, path);
+    if (mark?.icon) {
+      return omIcon(
+        { kind: "src", url: `${API}/marks/icon?name=${encodeURIComponent(mark.icon)}`,
+          fallback: { kind: "mask", url: ICON_FOLDER } },
+        { name, cls: "om-fold-art", img: "om-fold-img" });
+    }
+    return omIcon({ kind: "mask", url: ICON_FOLDER, tint: mark?.colour || "" },
+                  { name, cls: "om-fold-art", img: "om-fold-img" });
+  };
+
+  const readMarks = async () => {
+    try {
+      const answer = await (await api.fetchApi(`${API}/marks`)).json();
+      state.marks = answer?.ok ? (answer.marks || {}) : {};
+    } catch {
+      state.marks = {};
+    }
+  };
+
+  const ask = async (place, path) => {
+    const query = new URLSearchParams({ place, path: path || "" });
+    try {
+      return await (await api.fetchApi(`${API}/files?${query}`)).json();
+    } catch {
+      return { ok: false, reason: "That directory could not be read." };
+    }
+  };
+
+  const post = async (where, body) => {
+    try {
+      return await dlPost(where, body);
+    } catch {
+      return { ok: false, reason: "The server did not answer." };
+    }
+  };
+
+  const drawTrail = () => {
+    trail.replaceChildren();
+    const place = state.places.find((one) => one.id === state.place);
+    if (!place) return;
+    const step = (label, to, last) => {
+      const crumb = el("button", `gal-step${last ? " gal-step-here" : ""}`, label);
+      crumb.onclick = () => go(state.place, to);
+      trail.appendChild(crumb);
+    };
+    const parts = state.path ? state.path.split("/") : [];
+    step(place.label, "", !parts.length);
+    let walked = "";
+    parts.forEach((part, at) => {
+      walked = walked ? `${walked}/${part}` : part;
+      trail.appendChild(el("span", "gal-sep", "›"));
+      step(shownName(part), walked, at === parts.length - 1);
+    });
+    if (!state.writable) trail.appendChild(el("span", "om-files-readonly", "Read-only"));
+  };
+
+  const tintFolder = (path) => {
+    const field = el("input");
+    field.type = "color";
+    field.value = markOf(state.place, path)?.colour || "#3fb950";
+    field.style.position = "fixed";
+    field.style.left = "-9999px";
+    document.body.appendChild(field);
+    field.addEventListener("change", async () => {
+      const picked = field.value;
+      field.remove();
+      const answer = await post("/marks/colour",
+                                { place: state.place, path, colour: picked });
+      if (!answer?.ok) {
+        notify("Not coloured", answer?.reason || "The colour could not be kept.");
+        return;
+      }
+      await readMarks();
+      drawTree();
+      fill();
+    });
+    field.click();
+  };
+
+  const iconFolder = (path) => {
+    const field = el("input");
+    field.type = "file";
+    field.accept = ".png,.webp,.ico,image/png,image/webp,image/x-icon";
+    field.style.display = "none";
+    document.body.appendChild(field);
+    field.addEventListener("change", async () => {
+      const file = field.files?.[0];
+      field.remove();
+      if (!file) return;
+      const at = file.name.lastIndexOf(".");
+      const suffix = at < 0 ? "" : file.name.slice(at).toLowerCase();
+      const held = await file.arrayBuffer();
+      let raw = "";
+      const bytes = new Uint8Array(held);
+      for (let i = 0; i < bytes.length; i += 1) raw += String.fromCharCode(bytes[i]);
+      const answer = await post("/marks/icon",
+                                { place: state.place, path, suffix, data: btoa(raw) });
+      if (!answer?.ok) {
+        notify("Not set", answer?.reason || "The icon could not be kept.");
+        return;
+      }
+      await readMarks();
+      drawTree();
+      fill();
+    });
+    field.click();
+  };
+
+  const shownName = (part) => (state.place.startsWith("docs:")
+    ? String(part || "").replace(/~[0-9a-z]{8}(\.[A-Za-z0-9]+)?$/, "")
+    : part);
+
+
+  const openFileAt = async (one) => {
+    const kind = SHOWN_KINDS[one.kind] || "";
+    if (kind) {
+      const beside = state.items
+        .filter((other) => SHOWN_KINDS[other.kind] === kind)
+        .map((other) => ({ name: other.name, sub: state.path || "", kind,
+                           size: other.size, at: other.at }));
+      runProgramById(kind === "still" ? "viewer" : "player",
+                     { items: beside, name: one.name, root: viewRootOf(state.place) });
+      return;
+    }
+    if (state.place.startsWith("docs:")) {
+      const here = docsPathHere();
+      const want = here ? `${here}/${one.name}` : one.name;
+      const answer = await docsIn(here);
+      const item = (answer.items || []).find((other) => docPath(other) === want);
+      if (item) { openDoc(item); return; }
+    }
+    if (EDITS_HERE.has(suffixOf(one.name))) {
+      openNote(placeDoc(state.place, here(one.name), one.label || one.name));
+      return;
+    }
+    notify(one.label || one.name, "No viewer for this kind of file.");
+  };
+
+  const newFolder = el("button", "om-btn", "New folder");
+  newFolder.onclick = async () => {
+    const asked = await askText("New folder", "Untitled", "Make");
+    if (asked === null) return;
+    const answer = await post("/files/folder",
+                              { place: state.place, path: state.path, name: String(asked) });
+    if (!answer?.ok) {
+      notify("Not made", answer?.reason || "It could not be made.");
+      return;
+    }
+    under.delete(branch(state.place, state.path));
+    await readInto(state.place, state.path);
+    drawTree();
+    fill();
+  };
+
+  const docsPathHere = () => {
+    const home = state.place === "docs:documents" ? DOC_DOCUMENTS : DOC_DESKTOP;
+    return state.path ? `${home}/${state.path}` : home;
+  };
+
+  const newNote = el("button", "om-btn om-go", "New note");
+  newNote.onclick = async () => {
+    const answer = await dlPost("/docs/new",
+                                { parent: docsPathHere(), name: NEW_NOTE_NAME })
+      .catch(() => null);
+    if (!answer?.ok) {
+      notify("Not made", answer?.reason || "It could not be made.");
+      return;
+    }
+    fill();
+    openDoc(answer.item);
+  };
+
+  panel.tools.appendChild(newNote);
+  panel.tools.appendChild(newFolder);
+
+  const drawTools = () => {
+    newFolder.hidden = !state.writable;
+    newNote.hidden = !(state.writable && state.place.startsWith("docs:"));
+  };
+
+  const pickTarget = (title) => new Promise((settle) => {
+    const backdrop = el("div", "om-backdrop");
+    const box = el("div", "om-note om-note-wide om-save");
+    box.appendChild(el("div", "om-note-title", title));
+    const trail = el("div", "om-save-trail");
+    const list = el("div", "om-fold-list om-save-list");
+    const foot = el("div", "om-note-foot");
+    const cancel = el("button", "om-btn", "Cancel");
+    const choose = el("button", "om-btn om-go", "Choose this folder");
+    foot.appendChild(cancel);
+    foot.appendChild(choose);
+    box.appendChild(trail);
+    box.appendChild(list);
+    box.appendChild(foot);
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+
+    let atPlace = "";
+    let atPath = "";
+
+    const done = (answer) => { backdrop.remove(); settle(answer); };
+    cancel.onclick = () => done(null);
+    choose.onclick = () => done(atPlace ? { place: atPlace, path: atPath } : null);
+    closeOn(backdrop, () => done(null));
+
+    const step = (label, fn, last) => {
+      const crumb = el("button", `gal-step${last ? " gal-step-here" : ""}`, label);
+      crumb.onclick = fn;
+      trail.appendChild(crumb);
+    };
+
+    const show = async () => {
+      trail.replaceChildren();
+      list.replaceChildren();
+      choose.disabled = !atPlace;
+      if (!atPlace) {
+        step("Everywhere", () => {}, true);
+        let group = "";
+        for (const one of state.places) {
+          if (one.group !== group) {
+            group = one.group;
+            list.appendChild(el("div", "om-files-group", group));
+          }
+          const row = el("div", "om-fold-row");
+          row.appendChild(omIcon({ kind: "mask", url: ICON_FOLDER },
+                                 { name: one.label, cls: "om-fold-art", img: "om-fold-img" }));
+          row.appendChild(el("span", "om-fold-name", one.label));
+          if (one.note) row.appendChild(el("span", "om-files-where", one.note));
+          row.onclick = () => { atPlace = one.id; atPath = ""; void show(); };
+          list.appendChild(row);
+        }
+        return;
+      }
+      const place = state.places.find((one) => one.id === atPlace);
+      step("Everywhere", () => { atPlace = ""; atPath = ""; void show(); }, false);
+      trail.appendChild(el("span", "gal-sep", "›"));
+      const parts = atPath ? atPath.split("/") : [];
+      step(place?.label || atPlace, () => { atPath = ""; void show(); }, !parts.length);
+      let walked = "";
+      parts.forEach((part, at) => {
+        walked = walked ? `${walked}/${part}` : part;
+        const to = walked;
+        trail.appendChild(el("span", "gal-sep", "›"));
+        step(shownName(part), () => { atPath = to; void show(); }, at === parts.length - 1);
+      });
+      const answer = await ask(atPlace, atPath);
+      if (!backdrop.isConnected) return;
+      const folders = answer?.ok ? (answer.folders || []) : [];
+      if (!folders.length) {
+        list.replaceChildren(el("div", "om-fold-empty", "No folders in here."));
+        return;
+      }
+      list.replaceChildren();
+      for (const one of folders) {
+        const row = el("div", "om-fold-row");
+        row.appendChild(omIcon({ kind: "mask", url: ICON_FOLDER },
+                               { name: one.name, cls: "om-fold-art", img: "om-fold-img" }));
+        row.appendChild(el("span", "om-fold-name", one.label || one.name));
+        row.onclick = () => {
+          atPath = atPath ? `${atPath}/${one.name}` : one.name;
+          void show();
+        };
+        list.appendChild(row);
+      }
+    };
+    void show();
+  });
+
+  const sendTo = async (name, keep) => {
+    const wanted = await pickTarget(keep ? "Copy to" : "Move to");
+    if (!wanted) return;
+    const answer = await post(keep ? "/files/copy" : "/files/move", {
+      place: state.place, path: here(name), into: wanted.path, intoPlace: wanted.place,
+    });
+    if (!answer?.ok) {
+      notify(keep ? "Not copied" : "Not moved", answer?.reason || "It could not be sent there.");
+      return;
+    }
+    under.delete(branch(wanted.place, wanted.path));
+    drawTree();
+    fill();
+    if (String(wanted.place).startsWith("docs:") || state.place.startsWith("docs:")) {
+      refreshDocs();
+    }
+    toast(keep ? `Copied ${name}` : `Moved ${name}`);
+  };
+
+  const rowMenu = (name, folder) => {
+    const path = here(name);
+    const items = [
+      folder
+        ? { label: "Open", fn: () => go(state.place, path) }
+        : { label: "Open", fn: () => {
+            const one = state.items.find((other) => other.name === name);
+            if (one) void openFileAt(one);
+          } },
+      folder
+        ? { label: "Shortcut on the desktop",
+            fn: () => makeFolderShortcut(state.place, path, name) }
+        : null,
+    ];
+    if (state.writable) {
+      items.push({ label: "Move to...", fn: () => sendTo(name, false) });
+      items.push({ label: "Copy to...", fn: () => sendTo(name, true) });
+      items.push({ label: "Rename", fn: async () => {
+        const asked = await askText("Rename", name, "Rename");
+        if (asked === null) return;
+        const answer = await post("/files/rename",
+                                  { place: state.place, path, name: String(asked) });
+        if (!answer?.ok) {
+          notify("Not renamed", answer?.reason || "It could not be renamed.");
+          return;
+        }
+        fill();
+      } });
+      if (folder) {
+        items.push({ label: "Colour...", fn: () => tintFolder(path) });
+        items.push({ label: "Icon...", fn: () => iconFolder(path) });
+        if (markOf(state.place, path)) {
+          items.push({ label: "Plain folder", fn: async () => {
+            await post("/marks/clear", { place: state.place, path });
+            await readMarks();
+            drawTree();
+            fill();
+          } });
+        }
+      }
+      items.push({ label: "Delete", danger: true, fn: async () => {
+        if (state.place.startsWith("docs:")) {
+          await removeDoc({ name, path: docsPathOf(state.place, path),
+                            kind: docKindOf(name, folder) }, fill);
+          return;
+        }
+        const sure = await confirmAction(`Delete ${name}?`,
+          state.heavy
+            ? "It is deleted from disk, not moved to the Trash. Getting it back means "
+              + "downloading it again."
+            : "It is deleted from disk, not moved to the Trash.",
+          "Delete", true);
+        if (!sure) return;
+        const answer = await post("/files/remove", { place: state.place, path });
+        if (!answer?.ok) {
+          notify("Not deleted", answer?.reason || "It could not be deleted.");
+          return;
+        }
+        fill();
+      } });
+    }
+    return items.filter(Boolean);
+  };
+
+  const drawList = () => {
+    list.replaceChildren();
+    if (!state.folders.length && !state.items.length) {
+      list.appendChild(el("div", "om-fold-empty", "Nothing here."));
+      return;
+    }
+    for (const one of state.folders) {
+      const row = el("div", "om-files-row om-files-folder");
+      row.dataset.omName = one.name;
+      row.onclick = () => mark(one.name);
+      row.appendChild(markArt(state.place, here(one.name), one.name));
+      row.appendChild(el("span", "om-fold-name", one.label || one.name));
+      row.appendChild(el("span", "om-fold-meta", "Folder"));
+      row.ondblclick = () => go(state.place, here(one.name));
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        mark(one.name);
+        openRowMenu(row, { items: rowMenu(one.name, true), align: "left" });
+      });
+      if (state.writable) dropFileInto(row, () => here(one.name));
+      if (state.writable) dragFileFrom(row, one.name, true);
+      list.appendChild(row);
+    }
+    for (const one of state.items) {
+      const row = el("div", "om-files-row");
+      row.dataset.omName = one.name;
+      row.onclick = () => mark(one.name);
+      row.appendChild(el("span", "om-files-kind", FILE_WORDS[one.kind] || "File"));
+      row.appendChild(el("span", "om-fold-name", one.label || one.name));
+      row.appendChild(el("span", "om-fold-meta", bytesText(one.size)));
+      row.ondblclick = () => { void openFileAt(one); };
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        mark(one.name);
+        openRowMenu(row, { items: rowMenu(one.name, false), align: "left" });
+      });
+      if (state.writable) dragFileFrom(row, one.name);
+      list.appendChild(row);
+    }
+  };
+
+  const dragFileFrom = (row, name, folder) => {
+    row.draggable = true;
+    row.dataset.omDrag = "1";
+    row.addEventListener("dragstart", (event) => {
+      event.dataTransfer.setData(FILE_MOVE_TYPE, JSON.stringify({
+        place: state.place, path: here(name), name, kind: docKindOf(name, folder),
+      }));
+      event.dataTransfer.effectAllowed = "copyMove";
+    });
+  };
+
+  const dropFileInto = (node, into, place = null, unless = null) => {
+    node.addEventListener("dragover", (event) => {
+      if (unless?.(event)) return;
+      if (![...(event.dataTransfer?.types || [])].includes(FILE_MOVE_TYPE)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = event.ctrlKey ? "copy" : "move";
+      node.classList.add("om-fold-over");
+    });
+    node.addEventListener("dragleave", () => node.classList.remove("om-fold-over"));
+    node.addEventListener("drop", async (event) => {
+      node.classList.remove("om-fold-over");
+      if (unless?.(event)) return;
+      if (![...(event.dataTransfer?.types || [])].includes(FILE_MOVE_TYPE)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      let sent = null;
+      try { sent = JSON.parse(event.dataTransfer.getData(FILE_MOVE_TYPE)); } catch { return; }
+      if (!sent?.path) return;
+      const wanted = (typeof place === "function" ? place() : place) || state.place;
+      const keep = event.ctrlKey;
+      const target = into();
+      if (sent.place === wanted
+          && (sent.path === target || parentOf(sent.path) === target)) return;
+      const answer = await post(keep ? "/files/copy" : "/files/move",
+                                { place: sent.place, path: sent.path,
+                                  into: target, intoPlace: wanted });
+      if (!answer?.ok) {
+        notify(keep ? "Not copied" : "Not moved",
+               answer?.reason || (keep ? "It could not be copied." : "It could not be moved."));
+        return;
+      }
+      under.delete(branch(wanted, target));
+      if (!keep) under.delete(branch(sent.place, parentOf(sent.path)));
+      drawTree();
+      fill();
+      if (String(wanted).startsWith("docs:")
+          || (!keep && String(sent.place || "").startsWith("docs:"))) refreshDocs();
+    });
+  };
+
+  dropFileInto(list, () => state.path, null,
+               (event) => !state.writable || !!event.target?.closest?.(".om-files-folder"));
+
+  const opened = new Set();
+  const under = new Map();
+
+  const branch = (place, path) => `${place}|${path || ""}`;
+
+  const readInto = async (place, path) => {
+    const key = branch(place, path);
+    if (under.has(key)) return under.get(key);
+    const answer = await ask(place, path);
+    const found = answer?.ok ? (answer.folders || []) : [];
+    under.set(key, found);
+    return found;
+  };
+
+  const openTo = async (place, path) => {
+    opened.add(branch(place, ""));
+    await readInto(place, "");
+    const parts = String(path || "").split("/").filter(Boolean);
+    let walked = "";
+    for (const part of parts) {
+      opened.add(branch(place, walked));
+      await readInto(place, walked);
+      walked = walked ? `${walked}/${part}` : part;
+    }
+    drawTree();
+  };
+
+  const treeRow = (place, path, label, depth, whole, note = "") => {
+    const key = branch(place, path);
+    const here = place === state.place && (path || "") === (state.path || "");
+    const row = el("div", `om-files-node${here ? " om-files-node-on" : ""}`);
+    row.style.paddingLeft = `${4 + depth * 13}px`;
+    const twist = el("button", "om-files-twist", opened.has(key) ? "▼" : "▶");
+    twist.title = opened.has(key) ? "Collapse" : "Expand";
+    twist.onclick = async (event) => {
+      event.stopPropagation();
+      if (opened.has(key)) {
+        opened.delete(key);
+        drawTree();
+        return;
+      }
+      opened.add(key);
+      await readInto(place, path);
+      drawTree();
+    };
+    const art = markArt(place, path, label);
+    const name = el("button", "om-files-place", label);
+    name.title = whole || label;
+    name.onclick = async () => {
+      if (!opened.has(key)) {
+        opened.add(key);
+        await readInto(place, path);
+      }
+      go(place, path);
+    };
+    if (placeWritable(place)) dropFileInto(row, () => path, place);
+    row.appendChild(twist);
+    row.appendChild(art);
+    row.appendChild(name);
+    if (note) {
+      const where = el("span", "om-files-where", note);
+      where.title = whole || note;
+      row.appendChild(where);
+    }
+    return row;
+  };
+
+  const growTree = (place, path, depth, into) => {
+    if (!opened.has(branch(place, path))) return;
+    for (const one of under.get(branch(place, path)) || []) {
+      const below = path ? `${path}/${one.name}` : one.name;
+      into.appendChild(treeRow(place, below, one.label || one.name, depth, below));
+      growTree(place, below, depth + 1, into);
+    }
+  };
+
+  list.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") { event.preventDefault(); step(1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); step(-1); }
+    else if (event.key === "Home") { event.preventDefault(); mark(order[0] || "", { scroll: true }); }
+    else if (event.key === "End") {
+      event.preventDefault();
+      mark(order[order.length - 1] || "", { scroll: true });
+    } else if (event.key === "Enter" && chosen) {
+      event.preventDefault();
+      if (state.folders.some((one) => one.name === chosen)) { go(state.place, here(chosen)); return; }
+      const one = state.items.find((other) => other.name === chosen);
+      if (one) void openFileAt(one);
+    } else if (event.key === "Escape") {
+      mark("");
+    }
+  });
+
+  const GROUPS_KEY = "om-files-shut-groups";
+
+  const readShut = () => {
+    try {
+      const held = JSON.parse(localStorage.getItem(GROUPS_KEY) || "[]");
+      return new Set(Array.isArray(held) ? held.filter((one) => typeof one === "string") : []);
+    } catch {
+      return new Set();
+    }
+  };
+
+  let shutGroups = readShut();
+
+  const keepShut = () => {
+    try {
+      localStorage.setItem(GROUPS_KEY, JSON.stringify([...shutGroups]));
+    } catch {
+    }
+  };
+
+  const groupRow = (name, count) => {
+    const shut = shutGroups.has(name);
+    const row = el("button", `om-files-group${shut ? " om-files-group-shut" : ""}`);
+    row.type = "button";
+    row.setAttribute("aria-expanded", shut ? "false" : "true");
+    row.appendChild(el("span", "om-files-group-mark", shut ? "▶" : "▼"));
+    row.appendChild(el("span", "om-files-group-name", name));
+    if (shut) row.appendChild(el("span", "om-files-group-count", String(count)));
+    row.onclick = () => {
+      if (shutGroups.has(name)) shutGroups.delete(name);
+      else shutGroups.add(name);
+      keepShut();
+      drawTree();
+    };
+    return row;
+  };
+
+  const drawTree = () => {
+    tree.replaceChildren();
+    const order = [];
+    const byGroup = new Map();
+    for (const one of state.places) {
+      if (!byGroup.has(one.group)) { byGroup.set(one.group, []); order.push(one.group); }
+      byGroup.get(one.group).push(one);
+    }
+    for (const name of order) {
+      const held = byGroup.get(name) || [];
+      tree.appendChild(groupRow(name, held.length));
+      if (shutGroups.has(name)) continue;
+      for (const one of held) {
+        tree.appendChild(treeRow(one.id, "", one.label, 0, one.path, one.note));
+        growTree(one.id, "", 1, tree);
+      }
+    }
+  };
+
+  const fill = async () => {
+    const answer = await ask(state.place, state.path);
+    if (!panel.el.isConnected) return;
+    if (!answer.ok) {
+      state.folders = [];
+      state.items = [];
+      state.writable = false;
+      drawTrail();
+      list.replaceChildren(el("div", "om-fold-empty",
+                              answer.reason || "That could not be read."));
+      return;
+    }
+    state.folders = answer.folders || [];
+    state.items = answer.items || [];
+    state.writable = !!answer.writable;
+    drawTools();
+    state.heavy = !!answer.heavy;
+    panel.setBadge(countNote(state.items.length, "file"));
+    drawTrail();
+    drawList();
+    order = [...state.folders.map((one) => one.name),
+             ...state.items.map((one) => one.name)];
+    mark(order.includes(chosen) ? chosen : "");
+  };
+
+  const go = (place, path) => {
+    state.place = place;
+    state.path = String(path || "");
+    drawTree();
+    fill();
+    void openTo(place, state.path);
+  };
+
+  (async () => {
+    let answer = null;
+    await readMarks();
+    try {
+      answer = await (await api.fetchApi(`${API}/files/places`)).json();
+    } catch {
+      answer = null;
+    }
+    if (!panel.el.isConnected) return;
+    if (!answer?.ok) {
+      wrap.replaceChildren(el("div", "om-fold-empty",
+        answer?.reason || "The file browser is not available."));
+      return;
+    }
+    state.places = answer.places || [];
+    go(state.place || state.places[0]?.id || "", state.path);
+  })();
+
+  panel._omFill = fill;
+  panel._omAt = () => `${state.place}|${state.path || ""}`;
+  return panel;
+}
+
+const FILE_MOVE_TYPE = "application/x-om-hostfile";
+
+function makeFolderShortcut(place, path, name) {
+  pinDesk(filePinKey(place, path));
+  toast(`Shortcut to ${name} added.`, { kind: "ok" });
+}
+
+const FILE_PIN = "files:";
+
+function filePinKey(place, path) {
+  return `${FILE_PIN}${encodeURIComponent(`${place}|${path || ""}`)}`;
+}
+
+function filePinParts(key) {
+  if (!key.startsWith(FILE_PIN)) return null;
+  let text = "";
+  try {
+    text = decodeURIComponent(key.slice(FILE_PIN.length));
+  } catch {
+    return null;
+  }
+  const at = text.lastIndexOf("|");
+  if (at < 0) return null;
+  return { place: text.slice(0, at), path: text.slice(at + 1) };
+}
+
+function filesSwitch() {
+  const row = el("label", "om-deskset-row om-deskset-switch");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = panelSetting("openManager.fileBrowser", false) === true;
+  box.onchange = async () => {
+    try {
+      await app.extensionManager.setting.set("openManager.fileBrowser", box.checked);
+    } catch {}
+    remountTopbar();
+    if (deskLayer) paintDeskIcons();
+  };
+  row.appendChild(box);
+  row.appendChild(el("span", null, "ComfyUI file browser"));
+  const note = el("span", "om-deskset-by",
+    deskGates.writes ? "writing allowed" : "read-only");
+  row.appendChild(note);
+  return row;
+}
+
+function deskChoice(key, label, choices, fallback, after = null) {
+  const row = el("div", "om-deskset-row");
+  row.appendChild(el("label", null, label));
+  const pick = el("select", "om-side-select");
+  for (const one of choices) {
+    const option = el("option", null, one[0].toUpperCase() + one.slice(1));
+    option.value = one;
+    pick.appendChild(option);
+  }
+  const held = panelSetting(key, fallback);
+  pick.value = choices.includes(held) ? held : fallback;
+  pick.addEventListener("change", async () => {
+    try {
+      await app.extensionManager.setting.set(key, pick.value);
+    } catch {}
+    after?.(pick.value);
+  });
+  row.appendChild(pick);
+  return row;
+}
+
+function deskSwitch(key, label, { fallback = false, after = null } = {}) {
+  const row = el("label", "om-deskset-row om-deskset-switch");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = panelSetting(key, fallback) === true;
+  box.onchange = async () => {
+    try {
+      await app.extensionManager.setting.set(key, box.checked);
+    } catch {}
+    after?.(box.checked);
+  };
+  row.appendChild(box);
+  row.appendChild(el("span", null, label));
+  return row;
+}
+
+function aeroSwitch() {
+  const row = el("label", "om-deskset-row om-deskset-switch");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = panelSetting("openManager.aero", false) === true;
+  box.onchange = async () => {
+    try {
+      await app.extensionManager.setting.set("openManager.aero", box.checked);
+    } catch {}
+    applyWindowLook();
+  };
+  row.appendChild(box);
+  row.appendChild(el("span", null, "Aero window headers"));
+  return row;
+}
+
+function manySwitch() {
+  const row = el("label", "om-deskset-row om-deskset-switch");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = panelSetting("openManager.programWindows", false) === true;
+  box.onchange = async () => {
+    try {
+      await app.extensionManager.setting.set("openManager.programWindows", box.checked);
+    } catch {}
+  };
+  row.appendChild(box);
+  row.appendChild(el("span", null, "Open a window each time, for programs that allow it"));
+  return row;
+}
+
+function openDesktopSettings() {
+  const held = floatingPanel("desktop");
+  if (held) { held.present(); return held; }
+  const panel = createFloatingPanel({
+    key: "desktop", title: "Desktop Settings", ...windowSize("desktop"), modal: false,
+  });
+  panel.setMaskIcon(ICON_DESKTOP);
+
+  const body = el("div", "om-deskset");
+  const screen = el("div", "om-deskset-screen");
+  body.appendChild(screen);
+  body.appendChild(el("div", "om-deskset-stand"));
+
+  const redraw = () => { applyDeskLook(); applyWindowLook(); deskSetPreview(screen); };
+  slideWallpaper(screen, () => redraw());
+  panel.el.addEventListener("om-float-resize", () => deskSetPreview(screen));
+  window.addEventListener("resize", () => {
+    if (panel.el.isConnected) deskSetPreview(screen);
+  });
+
+  body.appendChild(deskHeading("Wallpaper"));
+
+  const fitRow = el("div", "om-deskset-row");
+  fitRow.appendChild(el("label", null, "Wallpaper fit"));
+  const fit = el("select", "om-side-select");
+  for (const [value, label] of [["cover", "Cover"], ["contain", "Contain"],
+                                ["centre", "Centre"], ["tile", "Tile"]]) {
+    const option = el("option", null, label);
+    option.value = value;
+    fit.appendChild(option);
+  }
+  fit.value = String(panelSetting("openManager.desktopFit", "cover"));
+  fit.onchange = async () => {
+    await app.extensionManager.setting.set("openManager.desktopFit", fit.value);
+    redraw();
+  };
+  fitRow.appendChild(fit);
+  body.appendChild(fitRow);
+
+  const slider = (label, key, low, high, fallback, unit = "px") => {
+    const row = el("div", "om-deskset-row");
+    row.appendChild(el("label", null, label));
+    const range = el("input", null);
+    range.type = "range";
+    range.min = String(low);
+    range.max = String(high);
+    range.step = "1";
+    range.value = String(deskNumber(key, fallback, low, high));
+    const figure = el("span", "om-deskset-figure", `${range.value}${unit}`);
+    range.oninput = () => { figure.textContent = `${range.value}${unit}`; };
+    range.onchange = async () => {
+      await app.extensionManager.setting.set(key, Number(range.value));
+      redraw();
+    };
+    row.appendChild(range);
+    row.appendChild(figure);
+    return row;
+  };
+  body.appendChild(slider("Wallpaper across", "openManager.desktopFocusX", 0, 100, 50, "%"));
+  body.appendChild(slider("Wallpaper down", "openManager.desktopFocusY", 0, 100, 50, "%"));
+
+  const papers = el("div", "om-deskset-papers");
+  body.appendChild(papers);
+  deskSetPapers(papers, screen);
+
+  const tools = el("div", "om-deskset-row");
+  const add = el("button", "om-btn om-go", "Add a wallpaper");
+  const file = el("input", null);
+  file.type = "file";
+  file.accept = Object.keys({ ".png": 1, ".jpg": 1, ".jpeg": 1, ".webp": 1, ".gif": 1 })
+    .join(",");
+  file.style.display = "none";
+  file.onchange = async () => {
+    const chosen = file.files?.[0];
+    file.value = "";
+    if (!chosen) return;
+    const name = chosen.name.replace(/[^A-Za-z0-9._ -]+/g, "-").slice(-120);
+    const payload = await chosen.arrayBuffer();
+    let answer = null;
+    try {
+      answer = await (await api.fetchApi(
+        `${API}/wallpaper/save?name=${encodeURIComponent(name)}`,
+        { method: "POST", body: payload },
+      )).json();
+    } catch {
+      answer = null;
+    }
+    if (!answer?.ok) {
+      notify("Not kept", answer?.reason || "That image could not be kept.");
+      return;
+    }
+    await app.extensionManager.setting.set("openManager.desktopWallpaper", answer.name);
+    redraw();
+    deskSetPapers(papers, screen);
+    toast(`${answer.name} is now the wallpaper.`, { kind: "ok" });
+  };
+  add.onclick = () => file.click();
+  const clear = el("button", "om-btn", "No wallpaper");
+  clear.onclick = async () => {
+    await app.extensionManager.setting.set("openManager.desktopWallpaper", "");
+    redraw();
+    deskSetPapers(papers, screen);
+  };
+  tools.appendChild(add);
+  tools.appendChild(clear);
+  tools.appendChild(file);
+  body.appendChild(tools);
+
+  body.appendChild(deskHeading("Icons"));
+  body.appendChild(slider("Icon size", "openManager.desktopIconSize", 28, 96, 44));
+  body.appendChild(slider("Label size", "openManager.desktopLabelSize", 9, 18, 12));
+
+  body.appendChild(deskHeading("Windows"));
+  body.appendChild(windowPalette());
+  body.appendChild(colourSwitch());
+  body.appendChild(aeroSwitch());
+  body.appendChild(slider("Aero opacity", "openManager.aeroAlpha", 10, 100, 55, "%"));
+  body.appendChild(slider("Aero darkening", "openManager.aeroDark", 0, 70, 18, "%"));
+  body.appendChild(slider("Aero blur", "openManager.aeroBlur", 0, 40, 12));
+  body.appendChild(deskSwitch("openManager.blurInactive", "Blur inactive windows",
+                              { after: () => applyWindowLook() }));
+  body.appendChild(slider("Inactive blur", "openManager.blurAmount", 1, 12, 3));
+  body.appendChild(deskSwitch("openManager.windowShadow", "Drop shadow",
+                              { fallback: true, after: () => applyWindowLook() }));
+  body.appendChild(deskSwitch("openManager.windowIcons", "Show an icon in each window title",
+                              { fallback: true }));
+  body.appendChild(slider("Title text size", "openManager.windowTitleSize", 10, 28, 15));
+  body.appendChild(slider("Content text size", "openManager.windowTextSize", 10, 22, 13));
+  body.appendChild(slider("Header height", "openManager.panelHeaders", 30, 64, 44));
+  body.appendChild(deskChoice("openManager.windowSize", "Default window size",
+                              ["compact", "standard", "large"], "large"));
+
+  body.appendChild(deskHeading("Taskbar"));
+  body.appendChild(deskSwitch("openManager.taskbar", "Show the taskbar",
+                              { fallback: true, after: () => taskbarSync() }));
+  body.appendChild(deskSwitch("openManager.taskbarGroups",
+                              "Group windows of the same kind",
+                              { after: () => taskbarSync() }));
+  body.appendChild(deskSwitch("openManager.taskbarHide",
+                              "Hide it until the pointer nears the bottom",
+                              { after: (on) => { taskbarSync(); taskbarShow(!on); } }));
+  body.appendChild(deskSwitch("openManager.startLabel", "Write Start on the Start button",
+                              { after: () => taskbarSync() }));
+
+  if (deskGates.files !== false) {
+    body.appendChild(deskHeading("Files"));
+    body.appendChild(filesSwitch());
+  }
+
+  body.appendChild(deskHeading("Programs"));
+  body.appendChild(manySwitch());
+  const manage = el("div", "om-deskset-row");
+  const go = el("button", "om-btn", "Manage programs");
+  go.onclick = () => openManagePrograms();
+  manage.appendChild(go);
+  body.appendChild(manage);
+
+
+  panel.body.appendChild(body);
+  deskSetPreview(screen);
+  return panel;
+}
+
+function openMemoryPanel() {
+  const shown = floatingPanel("memory");
+  if (shown?.isMinimised?.()) { shown.present(); return shown; }
+  if (shown) { closeFloatingPanel("memory"); return null; }
+
   let latest = null;
   const panel = createFloatingPanel({
     key: "memory", title: "Memory", ...windowSize("memory"),
     modal: !asWindow("memory"),
-    onClose: () => {
-      clearInterval(panel._tick);
-      clearInterval(panel._heat);
-      watching.disconnect();
-      dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
-    },
+    onClose: () => shutDown(),
   });
+  panel.setMaskIcon(ICON_MEMORY, { bar: false });
   const summary = el("div", "om-dl-summary", "");
   panel.bar.querySelector(".om-float-badge").appendChild(summary);
 
-  // The light sits at the right of the bar, just inside the close button.
   const orb = buildActivityOrb();
-  panel.bar.insertBefore(orb, panel.bar.querySelector(".om-float-close"));
+  orb.classList.add("om-orb-mark");
+  panel.bar.insertBefore(orb, panel.bar.querySelector(".om-float-title"));
 
-  // Freeing memory is ComfyUI's own operation, handed to the thread that owns the models.
-  // Always asked about, because it does not check what is using the memory first: there is
-  // no version of this that is safe to fire by accident, and a button that usually asks is
-  // a button whose confirmation stops being read.
   const freeing = async (what) => {
     const running = latest?.activity?.state && latest.activity.state !== "idle";
     const facts = [...what.facts];
@@ -10874,8 +16412,6 @@ function openMemoryPanel() {
     setTimeout(() => loadModels(), 1200);
   };
 
-  // Anchored under the header rather than in it: these two act on the machine, and they
-  // belong with the figures they act on rather than beside the close button.
   const tools = panel.tools;
   const clearVram = el("button", "om-btn om-dl-btn", "Clear VRAM");
   clearVram.title = "Unload every model on the card. They load again when a prompt needs them.";
@@ -10893,8 +16429,7 @@ function openMemoryPanel() {
   tools.appendChild(clearVram);
 
   const clearRam = el("button", "om-btn om-dl-btn", "Clear RAM");
-  clearRam.title = "Clear the cached results of the last run. ComfyUI unloads the models "
-    + "with them, because the cached results hold on to them.";
+  clearRam.title = "Clear the cached results of the last run and unload every model.";
   clearRam.onclick = () => freeing({
     ask: "Clear RAM?",
     warning: "This clears RAM regardless of what is using it, and takes the models with it.",
@@ -10902,13 +16437,41 @@ function openMemoryPanel() {
     body: { ram: true },
     facts: [
       ["Clears", "The cached results of the last run, in use or not"],
-      ["Also unloads", "Every model. ComfyUI frees the two together, in that direction"],
+      ["Also unloads", "Every model"],
       ["A run in progress", "May fail, or repeat work it had kept"],
     ],
   });
   tools.appendChild(clearRam);
 
   const body = el("div", "om-dl-body om-mem-body");
+
+  const linkRow = buildLinkRow(() => relink());
+  body.appendChild(linkRow);
+
+  const relink = async () => {
+    linkRow.working("Asking the server...");
+    dropMonitorCalls();
+    let answer = null;
+    try {
+      answer = await monPost("/monitor",
+        { client: MEMORY_CLIENT, interval: 1, watch: true }, LINK_DEADLINE);
+    } catch {
+      answer = null;
+    }
+    if (answer) {
+      linkLeased(answer);
+      if (answer.reading) takeReading(answer.reading);
+      loadModels();
+    }
+    if (answer && !pushStale()) {
+      linkRow.settled("Reconnected.", false);
+      return;
+    }
+    reviveSocket(true);
+    linkRow.free();
+    paint();
+  };
+
   const graphs = [
     buildGraphBlock("cpu", "CPU", "#58a6ff"),
     buildGraphBlock("ram", "System memory", "#3fb950"),
@@ -10921,6 +16484,16 @@ function openMemoryPanel() {
   body.appendChild(modelList);
   panel.body.appendChild(body);
 
+  const showEmpty = () => {
+    if (modelList._got) return;
+    const say = LINK_SAY[linkState()];
+    const line = say ? say.line : "Reading what is in memory";
+    if (modelList._line === line) return;
+    modelList._line = line;
+    modelList.replaceChildren(el("div", "om-mem-empty", line));
+  };
+  showEmpty();
+
   const paint = () => {
     if (!panel.el.isConnected) return;
     for (const one of graphs) {
@@ -10928,12 +16501,17 @@ function openMemoryPanel() {
       if (!one.folded()) drawGraph(one.canvas, series, one.colour);
       one.value.textContent = series.length ? `${Math.round(series[series.length - 1])}%` : "-";
     }
+    const state = linkState();
+    linkRow.tell(state);
+    showEmpty();
     const quietFor = readingQuiet() ? readingAge() : 0;
     body.classList.toggle("om-mem-quiet", !!quietFor);
     if (quietFor) {
-      orb.tell(latest?.activity, quietFor);
-      graphs[0].detail.textContent =
-        `${quietText(quietFor)}. The figures above are the last that arrived.`;
+      orb.tell(latest?.activity, quietFor, state);
+      const say = LINK_SAY[state];
+      graphs[0].detail.textContent = say
+        ? `${quietText(quietFor)}: ${say.short}`
+        : quietText(quietFor);
       return;
     }
     if (!latest) return;
@@ -10942,10 +16520,12 @@ function openMemoryPanel() {
         `${bytesText(latest.ram.used)} of ${bytesText(latest.ram.total)} · ${bytesText(latest.ram.free)} free`;
     }
     if (latest.vram?.total) {
-      const busy = typeof latest.vram.util === "number" ? ` · ${latest.vram.util}% busy` : "";
+      const busy = typeof latest.vram.util === "number"
+        ? ` · ${latest.vram.util}% busy`
+          + (typeof latest.vram.mem_util === "number"
+            ? `, ${latest.vram.mem_util}% memory traffic` : "")
+        : "";
       const hot = typeof latest.vram.temp === "number" ? ` · ${latest.vram.temp}°C` : "";
-      // The graph follows the first device; the rest are named rather than left out, so a
-      // machine with four cards does not look like a machine with one.
       const others = (latest.devices || []).slice(1)
         .map((one) => `GPU${one.index} ${meterText(one.used, one.total)}`
                       + (typeof one.temp === "number" ? ` ${one.temp}°` : ""))
@@ -10955,7 +16535,6 @@ function openMemoryPanel() {
         + (others ? `. Also ${others}` : "");
     }
     orb.tell(latest.activity);
-    // A line worth reading, which also means every graph block is the same height.
     const cores = latest.cores?.length;
     const hottest = (latest.cpu_temps || [])[0];
     graphs[0].detail.textContent = [
@@ -10967,49 +16546,53 @@ function openMemoryPanel() {
 
   panel.el.addEventListener("om-float-resize", () => { paint(); repaintBlockMaps(panel.el); });
 
-  // Readings arrive on the same channel the strip listens to, so the panel just watches.
-  const onReading = (event) => {
-    latest = event.detail || {};
-    recordReading(latest);
+  const onReading = (reading) => {
+    latest = reading;
     paint();
   };
-  api.addEventListener("open_manager.monitor", onReading);
+  readingHooks.add(onReading);
 
   async function loadModels() {
-    if (!panel.el.isConnected || document.hidden) return;
+    if (!panel.el.isConnected || panel._loading) return;
+    panel._loading = true;
     let found;
     try {
-      found = await (await api.fetchApi(`${API}/monitor/models`)).json();
+      found = await monGet("/monitor/models", LINK_DEADLINE);
     } catch {
+      if (panel.el.isConnected) showEmpty();
       return;
+    } finally {
+      panel._loading = false;
     }
     if (!panel.el.isConnected) return;
-    const rows = found.models || [];
-    const totals = found.totals || {};
-    summary.textContent = rows.length
-      ? `${rows.length} held · ${bytesText(totals.resident || 0)} resident of ${bytesText(totals.total || 0)}`
-      : "";
-    if (!rows.length) {
-      modelList._shape = "";
-      const empty = el("div", "om-mem-empty", "No managed models in memory");
-      empty.title = "ComfyUI loads a model when a prompt needs it and keeps it until the "
-        + "memory is wanted for something else.";
-      modelList.replaceChildren(empty);
-      return;
-    }
-    // Rebuilt only when the set of models changes; otherwise every row is told the new
-    // figures and keeps its own elements.
-    const shape = rows.map((one) => one.name).join("|");
-    if (modelList._shape !== shape) {
-      modelList._shape = shape;
-      const built = rows.map((one, position) =>
-        buildMemoryModelRow({ ...one, index: position }, loadModels));
-      for (const row of built) watchRow(row);
-      modelList.replaceChildren(...built, ...releasedRows(rows));
-    } else {
-      const built = [...modelList.children].filter((node) => !node._released);
-      rows.forEach((one, position) =>
-        built[position]?._update?.({ ...one, index: position }));
+    try {
+      const rows = found.models || [];
+      const totals = found.totals || {};
+      modelList._got = true;
+      summary.textContent = rows.length
+        ? `${rows.length} held · ${bytesText(totals.resident || 0)} resident of ${bytesText(totals.total || 0)}`
+        : "";
+      if (!rows.length) {
+        modelList._shape = "";
+        modelList.replaceChildren(el("div", "om-mem-empty", "No managed models in memory"));
+        return;
+      }
+      const shape = rows.map((one) => one.name).join("|");
+      if (modelList._shape !== shape) {
+        modelList._shape = shape;
+        const built = rows.map((one, position) =>
+          buildMemoryModelRow({ ...one, index: position }, loadModels));
+        for (const row of built) watchRow(row);
+        modelList.replaceChildren(...built, ...releasedRows(rows));
+      } else {
+        const built = [...modelList.children].filter((node) => !node._released);
+        rows.forEach((one, position) =>
+          built[position]?._update?.({ ...one, index: position }));
+      }
+    } catch {
+      modelList._got = true;
+      modelList.replaceChildren(
+        el("div", "om-dl-note om-dl-bad", "Could not draw the models held."));
     }
   }
 
@@ -11041,58 +16624,78 @@ function openMemoryPanel() {
     for (const entry of entries) entry.target._inView = entry.isIntersecting;
   }, { root: modelList, rootMargin: "40px" });
   const watchRow = (row) => { row._inView = true; watching.observe(row); };
+  const asleep = () => document.hidden || panel.isMinimised?.() === true;
+
   const heatTick = () => {
-    if (!panel.el.isConnected || document.hidden) return;
+    if (!panel.el.isConnected || asleep()) return;
     for (const row of modelList.children) {
       if (row._released || !row._inView) continue;
       if (row._streaming || row._busy) row._blocks?.();
     }
   };
 
-  // Its own lease, asked for faster than the strip so the graphs move smoothly. The server
-  // samples at whichever of the two is quicker and stops when both are gone.
-  // A hidden tab is not being read. The lease is given up rather than left to lapse, so the
-  // server's loop stops on the spot instead of measuring for three more intervals.
   const renew = () => {
     if (!panel.el.isConnected) return;
-    if (document.hidden) {
+    if (asleep()) {
       if (!panel._asleep) {
         panel._asleep = true;
-        dlPost("/monitor", { client: MEMORY_CLIENT, release: true }).catch(() => {});
+        monRelease(MEMORY_CLIENT);
       }
       return;
     }
     panel._asleep = false;
-    dlPost("/monitor", { client: MEMORY_CLIENT, interval: 1, watch: true })
-      .then((answer) => { if (answer?.reading) { latest = answer.reading; recordReading(latest); paint(); } })
-      .catch(() => {});
+    if (panel._renewing || !linkMayPost()) return;
+    panel._renewing = true;
+    monPost("/monitor", { client: MEMORY_CLIENT, interval: 1, watch: true }, LINK_DEADLINE)
+      .then((answer) => {
+        linkLeased(answer);
+        if (answer?.reading) takeReading(answer.reading);
+      })
+      .catch(() => { paint(); })
+      .finally(() => { panel._renewing = false; linkTick(); });
   };
-  panel._tick = setInterval(() => { renew(); loadModels(); paint(); }, 3000);
+  panel._tick = setInterval(() => {
+    renew();
+    if (!asleep()) loadModels();
+    paint();
+  }, 3000);
   panel._heat = setInterval(heatTick, 1000);
-  const wake = () => { if (!document.hidden) { renew(); loadModels(); } };
+  const wake = () => {
+    if (asleep()) return;
+    renew();
+    loadModels();
+    paint();
+  };
   document.addEventListener("visibilitychange", wake);
+  panel.el.addEventListener("om-win:minimise", () => renew());
+  panel.el.addEventListener("om-win:restore", () => {
+    wake();
+    repaintBlockMaps(panel.el);
+  });
   renew();
   loadModels();
   paint();
 
-  // The listener outlives nothing: when the panel goes, so does it.
+  const shutDown = () => {
+    readingHooks.delete(onReading);
+    document.removeEventListener("visibilitychange", wake);
+    clearInterval(panel._tick);
+    clearInterval(panel._heat);
+    clearInterval(watcher);
+    watching.disconnect();
+    monRelease(MEMORY_CLIENT);
+  };
   const stopWatching = () => {
     if (panel.el.isConnected) return;
-    api.removeEventListener("open_manager.monitor", onReading);
-    document.removeEventListener("visibilitychange", wake);
-    clearInterval(watcher);
+    shutDown();
   };
   const watcher = setInterval(stopWatching, 2000);
   return panel;
 }
 
-// --- model library ---------------------------------------------------------------------------
 
-//: Rows built at once. A library of tens of thousands is a real shape, and a panel that
-//: tries to draw all of it stops responding.
 const LIB_MAX_ROWS = 300;
 
-//: Read once per panel session. Walking is cheap; asking for it on a timer is not.
 let libIndex = null;
 let libRefs = null;
 let libDupes = null;
@@ -11111,8 +16714,6 @@ async function libPost(path, body) {
   return answer.json();
 }
 
-//: What the library shows. Each tab answers a different question of the same files, so a file
-//: can appear under more than one.
 const LIB_TABS = [
   { key: "all", title: "All",
     empty: "No model files found in the registered folders." },
@@ -11130,7 +16731,6 @@ function libFolderOf(path) {
   return dirOf(path);
 }
 
-// One file on disk.
 function buildLibraryRow(file, refresh, { note = "" } = {}) {
   const row = el("div", "om-lib-row");
 
@@ -11164,13 +16764,6 @@ function buildLibraryRow(file, refresh, { note = "" } = {}) {
   return row;
 }
 
-// What one file on disk offers. Deletion is per file and confirmed; there is no action here
-// that acts on more than the row it was opened from.
-// Whether the library may read a file's contents. Off, it still describes what is on disk --
-// names, sizes, folders, what no workflow references -- and never opens one. On a library
-// that lives on a network share or a metered disk, an invitation to read 891 GB is not a
-// convenience, so the invitation is what goes away rather than the answer being refused
-// after it is accepted.
 function mayHash() {
   return panelSetting("openManager.hashOnDemand", true) !== false;
 }
@@ -11216,7 +16809,6 @@ function libraryMenu(file, digest, refresh) {
   ];
 }
 
-// Deleting one model, asked for the same way whichever menu it was reached from.
 async function confirmLibraryDelete(file, refresh) {
   const go = await chooseAction(`Delete ${file.name}?`, "",
     [{ key: "go", label: "Delete file", primary: true }],
@@ -11232,9 +16824,6 @@ async function confirmLibraryDelete(file, refresh) {
   else notify("Not deleted", answer.reason || "The file could not be deleted.");
 }
 
-// What is recorded about one model: the download that wrote it, a hash if one has been
-// taken, and the workflows naming it. A model copied in by hand has none of that, and saying
-// so is the useful answer -- it is how you tell a file you fetched from one you inherited.
 async function showProvenance(file) {
   const note = toast("Looking...", { sticky: true });
   let found;
@@ -11261,9 +16850,9 @@ async function showProvenance(file) {
     if (from.source) facts.push(["Added", from.source]);
     if (from.hash) facts.push([`Expected ${(from.hash_type || "sha256").toUpperCase()}`, from.hash]);
   } else {
-    facts.push(["Downloaded", "Not by Open Manager. Nothing here fetched this file."]);
+    facts.push(["Downloaded", "Not by Open Manager"]);
   }
-  facts.push(["SHA256", found.sha256 || "Not taken yet - use Hash on this row"]);
+  facts.push(["SHA256", found.sha256 || "Not hashed"]);
   const used = found.workflows || [];
   facts.push([
     "Used by",
@@ -11273,9 +16862,6 @@ async function showProvenance(file) {
   await chooseAction(`Where ${found.name} came from`, "", [], { wide: true, facts });
 }
 
-// What the saved workflows ask for, cannot find, and recorded a source for. Selectable and
-// queueable in one go, through the same trust prompt, disk check and queue a download from
-// anywhere else goes through -- there is no second path to the network here.
 function buildWantedSection(entries, refresh) {
   const parts = [];
   const workflows = new Set(entries.flatMap((one) => one.workflows));
@@ -11283,7 +16869,7 @@ function buildWantedSection(entries, refresh) {
   lead.textContent =
     `${entries.length} model${entries.length === 1 ? "" : "s"} that `
     + `${workflows.size === 1 ? "a saved workflow asks" : `${workflows.size} saved workflows ask`}`
-    + " for and cannot find. Each one records where it came from, so it can be fetched.";
+    + " for and cannot find.";
   parts.push(lead);
 
   const boxes = new Map();
@@ -11336,8 +16922,6 @@ function buildWantedSection(entries, refresh) {
     meta.appendChild(el("span", null, entry.model.directory || "?"));
     if (entry.model.owner) meta.appendChild(el("span", "om-dl-owner", entry.model.owner));
     text.appendChild(meta);
-    // Which workflows are waiting on it. The names are the answer to "why do I need this",
-    // so the first few are shown rather than only a count.
     const asked = el("div", "om-dl-note",
       `Wanted by ${entry.workflows.slice(0, 3).join(", ")}`
       + (entry.workflows.length > 3 ? ` and ${entry.workflows.length - 3} more` : ""));
@@ -11351,9 +16935,6 @@ function buildWantedSection(entries, refresh) {
   return parts;
 }
 
-// Queue what was selected: one trust question per account, one disk question for the batch,
-// then the queue. The same three steps the workflow picker takes, because they are the same
-// three questions however the model was found.
 async function fetchWanted(entries, refresh) {
   const answered = new Map();
   const perOwner = new Map();
@@ -11379,9 +16960,6 @@ async function fetchWanted(entries, refresh) {
       owner, hash: entry.model.hash, hash_type: entry.model.hash_type,
     });
   }
-  // Trust is per account, so declining one leaves the rest of a mixed batch going ahead.
-  // That is the intent, but it is a surprise if nothing says so: the dialog that was just
-  // refused named one account, not the batch.
   if (skipped.length) {
     toast(`Skipped ${skipped.length} model${skipped.length === 1 ? "" : "s"} from `
           + `${[...new Set(entries.filter((one) => skipped.includes(one.model.name))
@@ -11403,7 +16981,6 @@ async function fetchWanted(entries, refresh) {
   refresh?.(false);
 }
 
-// A set of files that are the same bytes in more than one place.
 function buildDuplicateGroup(group, refresh) {
   const box = el("div", "om-lib-group");
   const head = el("div", "om-lib-group-head");
@@ -11422,8 +16999,7 @@ function buildDuplicateGroup(group, refresh) {
       + "searches its folders, so a workflow naming this file may not get the one you mean."));
   } else if (group.state === "similar") {
     box.appendChild(el("div", "om-dl-note",
-      "Start and end match. That rules out a name clash but cannot prove the middle matches, "
-      + "so these are not confirmed identical yet."));
+      "Start and end match. Not yet confirmed identical."));
   } else {
     box.appendChild(el("div", "om-dl-note",
       "Same name and size. Nothing has been read yet."));
@@ -11434,15 +17010,10 @@ function buildDuplicateGroup(group, refresh) {
   return box;
 }
 
-// One registered path, what it holds, and what is left on the drive it lives on.
-//
-// The drive figure is shown per root rather than summed: several roots frequently share a
-// drive, and adding their free space together would report a machine as having far more room
-// than it has.
 function buildStorageRoot(root) {
   const row = el("div", "om-lib-row");
   const top = el("div", "om-dl-top");
-  top.appendChild(el("span", "om-dl-name", dirOf(root.root) ? root.root : root.root));
+  top.appendChild(el("span", "om-dl-name", root.root));
   top.appendChild(el("span", "om-lib-size", bytesText(root.bytes)));
   row.appendChild(top);
 
@@ -11475,7 +17046,6 @@ function buildStorageView(report, refresh) {
     + `${report.roots.length} registered path${report.roots.length === 1 ? "" : "s"}.`;
   parts.push(lead);
 
-  // What could be given back, said only where there is something to give.
   const reclaim = [];
   if (report.duplicate_bytes) {
     reclaim.push(`${bytesText(report.duplicate_bytes)} in files sharing a name and size`);
@@ -11485,8 +17055,7 @@ function buildStorageView(report, refresh) {
   }
   if (reclaim.length) {
     const note = el("div", "om-lib-lead");
-    note.textContent = `Possibly reclaimable: ${reclaim.join(" · ")}. `
-      + "Check the Duplicates tab before acting on the first.";
+    note.textContent = `Possibly reclaimable: ${reclaim.join(" · ")}.`;
     parts.push(note);
   }
 
@@ -11501,8 +17070,7 @@ function buildStorageView(report, refresh) {
     top.appendChild(el("span", "om-lib-size", bytesText(report.partial_bytes)));
     head.appendChild(top);
     head.appendChild(el("div", "om-dl-note",
-      "Part files left by downloads that stopped. A paused download will reuse its own; these "
-      + "are the ones no entry in the Download Manager is waiting on."));
+      "Part files of unfinished downloads, including any still in the Download Manager."));
     const foot = el("div", "om-dl-foot");
     foot.appendChild(el("span", "om-dl-size", ""));
     const acts = el("span", "om-dl-acts");
@@ -11544,14 +17112,16 @@ function buildStorageView(report, refresh) {
   return parts;
 }
 
-// The library: what is on disk, what is there twice, and what nothing appears to use.
 function openModelLibrary() {
-  if (floatingPanel("library")) { closeFloatingPanel("library"); return null; }
+  const shown = floatingPanel("library");
+  if (shown?.isMinimised?.()) { shown.present(); return shown; }
+  if (shown) { closeFloatingPanel("library"); return null; }
 
   const panel = createFloatingPanel({
     key: "library", title: "Model Library", ...windowSize("library"),
     modal: !asWindow("library"),
   });
+  panel.setMaskIcon(ICON_LIBRARY);
   const summary = el("div", "om-dl-summary", "Reading...");
   panel.bar.querySelector(".om-float-badge").appendChild(summary);
 
@@ -11572,9 +17142,6 @@ function openModelLibrary() {
   rescan.onclick = () => refresh(true);
   panel.tools.appendChild(rescan);
 
-  // Two steps, because they cost very different amounts. The quick one reads two megabytes
-  // per file and settles only whether a group is a name clash; the full one reads everything
-  // and is the only thing that can call a group identical.
   const check = el("button", "om-btn", "Quick check");
   check.title = "Reads the start and end of each candidate. Fast, and rules out name clashes.";
   check.style.display = "none";
@@ -11657,12 +17224,9 @@ function openModelLibrary() {
     confirm.style.display = reading && onDupes && level !== "full" ? "" : "none";
     if (onDupes && libDupes) {
       confirm.textContent = `Verify fully (${bytesText(libDupes.candidate_bytes || 0)})`;
-      confirm.title = "Reads every candidate in full. Only this can confirm two files are "
-        + "the same, and only confirmed groups are safe to reclaim.";
+      confirm.title = "Reads every candidate in full to confirm which files are identical.";
     }
 
-    // Building every row of a large library at once is what makes a panel feel broken. The
-    // list is capped and says so; the filter is how the rest is reached.
     const wanted = filter.value.trim().toLowerCase();
     const matches = (one) => !wanted
       || one.name.toLowerCase().includes(wanted)
@@ -11671,7 +17235,7 @@ function openModelLibrary() {
     const capped = (rows) => {
       if (rows.length <= LIB_MAX_ROWS) return rows.map((one) => buildLibraryRow(one, refresh));
       const head = el("div", "om-lib-lead",
-        `Showing the ${LIB_MAX_ROWS} largest of ${rows.length}. Filter to narrow it.`);
+        `Showing the ${LIB_MAX_ROWS} largest of ${rows.length}.`);
       return [head, ...rows.slice(0, LIB_MAX_ROWS).map((one) => buildLibraryRow(one, refresh))];
     };
 
@@ -11684,21 +17248,19 @@ function openModelLibrary() {
       if (libDupes?.groups?.length || clashes.length) {
         const head = el("div", "om-lib-lead");
         head.textContent = level === "full"
-          ? `${bytesText(libDupes.reclaimable)} confirmed identical and safe to reclaim.`
+          ? `${bytesText(libDupes.reclaimable)} reclaimable from confirmed identical copies.`
           : level === "quick"
-            ? `${bytesText(libDupes.candidate_bytes)} in candidates. Start and end checked; `
-              + "nothing is confirmed identical until it is read in full."
+            ? `${bytesText(libDupes.candidate_bytes)} in candidates. Start and end checked, `
+              + "not yet confirmed identical."
             : `${bytesText(libDupes.candidate_bytes)} in files sharing a name and size. `
               + (mayHash()
                  ? "Nothing has been read."
-                 : "Nothing has been read, and reading is switched off in settings, so these "
-                   + "cannot be confirmed identical here.");
+                 : "Nothing has been read. Reading file contents is off in settings.");
         parts.push(head);
         if (clashes.length) {
           const warn = el("div", "om-lib-lead om-dl-bad");
           warn.textContent = `${clashes.length} filename${clashes.length === 1 ? "" : "s"} `
-            + "used by files that are not the same. These are not duplicates and deleting "
-            + "one would lose something.";
+            + "used by files that are not the same. These are not duplicates.";
           parts.push(warn, ...clashes.map((one) => buildDuplicateGroup(one, refresh)));
         }
         parts.push(...(libDupes.groups || []).map((one) => buildDuplicateGroup(one, refresh)));
@@ -11712,15 +17274,10 @@ function openModelLibrary() {
         const head = el("div", "om-lib-lead");
         head.textContent =
           `No mention of these in ${libRefs?.workflows ?? 0} saved workflows. `
-          + "A workflow saved in API form, or a reference built while it runs, would not be "
-          + "seen here, so treat this as what was found rather than as what is unused.";
+          + "Filenames built at run time are not seen.";
         parts.push(head, ...capped(mine.sort((a, b) => b.size - a.size)));
       }
     } else {
-      // Two different questions wear the same name on this tab. A workflow that recorded
-      // where a model came from can have it fetched; a workflow that only names a file
-      // cannot, because a filename is not a source. The ones that can be acted on go first,
-      // and the rest are still worth listing -- knowing what is missing is the point.
       const have = new Set(files.map((one) => one.name.toLowerCase()));
       const byName = new Map();
       for (const entry of libRefs?.declared || []) {
@@ -11733,7 +17290,6 @@ function openModelLibrary() {
           if (!slot.workflows.includes(entry.workflow)) slot.workflows.push(entry.workflow);
         }
       }
-      // Most wanted first: a model three workflows are waiting on is the one to fetch.
       const fetchable = [...byName.values()].sort((a, b) =>
         b.workflows.length - a.workflows.length
         || (a.model.name || "").localeCompare(b.model.name || ""));
@@ -11745,14 +17301,13 @@ function openModelLibrary() {
       if (named.length) {
         const head = el("div", "om-lib-lead");
         head.textContent = fetchable.length
-          ? "Named by a workflow that did not record where it came from. A filename is not a "
-            + "source, so these cannot be fetched from here."
+          ? "Named by a workflow that records no source for them. These cannot be fetched from here."
           : "Asked for by a workflow, not found in any model folder.";
         parts.push(head, ...named.map((name) => {
           const row = el("div", "om-lib-row om-dl-gone");
           row.appendChild(el("div", "om-dl-name", name));
           row.appendChild(el("div", "om-dl-note",
-            "Not on disk. Add it from the Download Manager."));
+            "Not on disk."));
           return row;
         }));
       }
@@ -11775,7 +17330,6 @@ function openModelLibrary() {
       if (!panel.el.isConnected) return;
       libRefs = await libGet("/library/references");
       if (!panel.el.isConnected) return;
-      // The cheap pass only. Reading every candidate is an explicit action.
       libDupes = await libGet("/library/duplicates?level=names");
       if (!panel.el.isConnected) return;
       libStorage = await libGet("/library/storage");
@@ -11804,8 +17358,6 @@ app.registerExtension({
   name: "openmanager.browser",
   settings: [
     {
-      // Not shown: it records that the one-time link render mode repair has run, so that it
-      // runs once per reader rather than once per browser or once per load.
       id: "openManager.linkModeRepair",
       name: "Link render mode repair",
       category: ["Open Manager", "Internal", "linkModeRepair"],
@@ -11818,10 +17370,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowManager"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "The Registry, Installed, GitHub and Missing browser. As a window it is movable, stays put while you build, and a click on "
-        + "the canvas does not shut it. As a modal it opens centred in front of everything "
-        + "and closes when you click away or press Escape. Confirmations are always modal: "
-        + "they are asking you a question.",
+      tooltip: "The Registry, Installed, GitHub and Missing browser. On, it opens as a movable window that stays "
+        + "open while you work. Off, it opens centred and closes on a click away or "
+        + "Escape.",
     },
     {
       id: "openManager.windowPacks",
@@ -11829,10 +17380,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowPacks"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "A pack's own page: its versions, README, nodes and gallery. One window per pack, so several can sit side by side. As a window it is movable, stays put while you build, and a click on "
-        + "the canvas does not shut it. As a modal it opens centred in front of everything "
-        + "and closes when you click away or press Escape. Confirmations are always modal: "
-        + "they are asking you a question.",
+      tooltip: "A pack's own page: its versions, README, nodes and gallery. One window per pack. On, it opens as a movable window that stays "
+        + "open while you work. Off, it opens centred and closes on a click away or "
+        + "Escape.",
     },
     {
       id: "openManager.windowDownloads",
@@ -11840,10 +17390,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowDownloads"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "The download queue. As a window it is movable, stays put while you build, and a click on "
-        + "the canvas does not shut it. As a modal it opens centred in front of everything "
-        + "and closes when you click away or press Escape. Confirmations are always modal: "
-        + "they are asking you a question.",
+      tooltip: "The download queue. On, it opens as a movable window that stays "
+        + "open while you work. Off, it opens centred and closes on a click away or "
+        + "Escape.",
     },
     {
       id: "openManager.windowLibrary",
@@ -11851,10 +17400,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowLibrary"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "What is on disk: duplicates, unreferenced files and storage. As a window it is movable, stays put while you build, and a click on "
-        + "the canvas does not shut it. As a modal it opens centred in front of everything "
-        + "and closes when you click away or press Escape. Confirmations are always modal: "
-        + "they are asking you a question.",
+      tooltip: "What is on disk: duplicates, unreferenced files and storage. On, it opens as a movable window that stays "
+        + "open while you work. Off, it opens centred and closes on a click away or "
+        + "Escape.",
     },
     {
       id: "openManager.windowMemory",
@@ -11862,10 +17410,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowMemory"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "What is loaded and what it weighs. As a window it is movable, stays put while you build, and a click on "
-        + "the canvas does not shut it. As a modal it opens centred in front of everything "
-        + "and closes when you click away or press Escape. Confirmations are always modal: "
-        + "they are asking you a question.",
+      tooltip: "What is loaded and what it weighs. On, it opens as a movable window that stays "
+        + "open while you work. Off, it opens centred and closes on a click away or "
+        + "Escape.",
     },
     {
       id: "openManager.windowSize",
@@ -11874,12 +17421,8 @@ app.registerExtension({
       type: "combo",
       options: ["compact", "standard", "large"],
       defaultValue: "large",
-      tooltip: "How large a window opens before you have sized it yourself. Sizes are taken "
-        + "as a share of the browser window rather than a fixed number of pixels, so they suit "
-        + "a laptop and a large monitor alike, with floors and ceilings so neither extreme "
-        + "becomes unusable. Each window has its own share, so the Memory panel stays smaller "
-        + "than a pack page. A window you have resized keeps the size you gave it, and this "
-        + "does not override it.",
+      tooltip: "The size a window opens at until you resize it, as a share of the browser "
+        + "window.",
     },
     {
       id: "openManager.themeNodeArt",
@@ -11888,11 +17431,8 @@ app.registerExtension({
       type: "boolean",
       defaultValue: true,
       onChange: () => refreshExtras(),
-      tooltip: "A theme may paint a texture behind every node body. It is the one effect here "
-        + "that costs work for every node on every frame, so this is also the answer on a large "
-        + "graph. Off decodes and paints nothing and leaves the theme's colours, gradients, "
-        + "icons and glow alone. The image sits under a node's widgets and is hidden entirely "
-        + "behind text boxes and image previews, which are real elements above the canvas.",
+      tooltip: "A theme may paint a texture behind every node body. Off paints nothing and "
+        + "leaves the theme's colours, gradients, icons and glow alone.",
     },
     {
       id: "openManager.themeNodeArtOpacity",
@@ -11902,10 +17442,8 @@ app.registerExtension({
       attrs: { min: 0, max: 1, step: 0.05 },
       defaultValue: 1,
       onChange: () => refreshExtras(),
-      tooltip: "Multiplies what the theme asked for, so 1 is what its author designed and lower "
-        + "quietens it. A theme cannot make its image louder than it declared. The opacity of a "
-        + "node's body colour is ComfyUI's own Appearance setting and Open Manager never writes "
-        + "it.",
+      tooltip: "Multiplies the image strength the theme declares: 1 is as declared, lower is "
+        + "fainter.",
     },
     {
       id: "openManager.themeTitleIcons",
@@ -11915,9 +17453,8 @@ app.registerExtension({
       defaultValue: true,
       onChange: () => refreshExtras(),
       tooltip: "A theme may replace the dot at the left of a node's title with an icon. Off "
-        + "restores the dot exactly. Three things always win over the theme: a subgraph keeps "
-        + "its own marker, a node whose dot colour you set keeps your colour, and nothing is "
-        + "drawn when zoomed too far out to read it.",
+        + "restores the dot. A subgraph keeps its own marker, a node whose dot colour you set "
+        + "keeps your colour, and no icon is drawn when zoomed far out.",
     },
     {
       id: "openManager.themeGlow",
@@ -11927,8 +17464,8 @@ app.registerExtension({
       defaultValue: true,
       onChange: () => refreshExtras(),
       tooltip: "A theme may light a selected node with a coloured halo and suppress its drop "
-        + "shadow while it does, so the halo reads as a glow rather than a smudge. Off falls "
-        + "back to ComfyUI's own outline and shadow, both still coloured by the theme.",
+        + "shadow while it does. Off falls back to ComfyUI's own outline and shadow, both "
+        + "coloured by the theme.",
     },
     {
       id: "openManager.themeBackdrop",
@@ -11938,10 +17475,8 @@ app.registerExtension({
       defaultValue: true,
       onChange: () => refreshExtras(),
       tooltip: "A theme may put an image behind the graph in place of ComfyUI's flat canvas "
-        + "colour. It is set on the canvas element, so the browser draws it and the graph "
-        + "itself costs nothing extra to redraw. Off restores the canvas colour the palette "
-        + "asks for. ComfyUI's own dot grid is drawn over the image either way, unless the "
-        + "theme asks for it to be left off.",
+        + "colour. Off restores the palette's canvas colour. ComfyUI's dot grid is drawn over "
+        + "the image unless the theme turns it off or replaces it.",
     },
     {
       id: "openManager.themeNodeOpacity",
@@ -11951,22 +17486,232 @@ app.registerExtension({
       attrs: { min: 0, max: 1, step: 0.05 },
       defaultValue: 1,
       onChange: () => refreshExtras(),
-      tooltip: "How solid a node body is drawn, as the opacity itself rather than a share of "
-        + "anything: 0.6 means a body at 60 percent, whatever the theme asked for. Left at 1 "
-        + "the theme's own value is used, and a theme that asks for nothing stays solid. Only "
-        + "the body is affected. Title bars, widgets and text boxes keep their own colours at "
-        + "every setting, so nothing you need to read gets harder to read.",
+      tooltip: "How solid a node body is drawn: 0.6 is 60 percent, whatever the theme asks "
+        + "for. At 1 the theme's own value is used, or solid if it sets none. Title bars, "
+        + "widgets and text boxes are unaffected.",
+    },
+    {
+      id: "openManager.desktop",
+      onChange: () => {
+        if (desktopOn() && panelSetting("openManager.taskbar", false) !== true) {
+          app.extensionManager.setting.set("openManager.taskbar", true).then(() => {
+            applyTaskbar();
+            toast("Taskbar switched on.", { kind: "ok" });
+          }).catch(() => {});
+        }
+        applyDesktop();
+      },
+      name: "Desktop mode, on a tab of its own",
+      category: ["Open Manager", "Desktop", "desktop"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Adds a desktop tab at the left of the workflow tabs. Switches the "
+        + "taskbar on. Has no effect unless OPEN_MANAGER_ENABLE_DESKTOP is set.",
+    },
+    {
+      id: "openManager.desktopWallpaper",
+      onChange: () => applyDeskLook(),
+      name: "Desktop wallpaper",
+      category: ["Open Manager", "Desktop", "desktopWallpaper"],
+      type: "text",
+      defaultValue: "",
+      tooltip: "The name of an image in your wallpapers directory, or an address beginning "
+        + "http, https or a slash. Empty for a plain desktop.",
+    },
+    {
+      id: "openManager.desktopFit",
+      onChange: () => applyDeskLook(),
+      name: "How the wallpaper fills the desktop",
+      category: ["Open Manager", "Desktop", "desktopFit"],
+      type: "combo",
+      options: ["cover", "contain", "centre", "tile"],
+      defaultValue: "cover",
+      tooltip: "Cover fills the desktop and crops what does not fit. Contain shows the whole "
+        + "image and leaves space around it. Centre shows it at its own size. Tile repeats it "
+        + "from the top left.",
+    },
+    {
+      id: "openManager.desktopFocusX",
+      onChange: () => applyDeskLook(),
+      name: "Wallpaper position across",
+      category: ["Open Manager", "Desktop", "desktopFocusX"],
+      type: "slider",
+      attrs: { min: 0, max: 100, step: 1 },
+      defaultValue: 50,
+      tooltip: "Which part of the wallpaper to show when it is wider than the desktop: 0 is "
+        + "the left edge, 100 the right. No effect where the whole image fits.",
+    },
+    {
+      id: "openManager.desktopFocusY",
+      onChange: () => applyDeskLook(),
+      name: "Wallpaper position down",
+      category: ["Open Manager", "Desktop", "desktopFocusY"],
+      type: "slider",
+      attrs: { min: 0, max: 100, step: 1 },
+      defaultValue: 50,
+      tooltip: "Which part of the wallpaper to show when it is taller than the desktop: 0 is "
+        + "the top edge, 100 the bottom.",
+    },
+    {
+      id: "openManager.windowColour",
+      onChange: () => repaintLooks(),
+      name: "Window colour",
+      category: ["Open Manager", "Desktop", "windowColour"],
+      type: "text",
+      defaultValue: "",
+      tooltip: "A colour for every window bar: accent, green, amber, red, purple, teal, grey "
+        + "or a #rrggbb, or two of these separated by a comma for a gradient. Empty draws "
+        + "the plain theme bar.",
+    },
+    {
+      id: "openManager.programWindows",
+      name: "A window each time",
+      category: ["Open Manager", "Desktop", "programWindows"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Programs that allow several windows, such as the Image Viewer and the Video "
+        + "Player, open a new window each time instead of reusing the one already open.",
+    },
+    {
+      id: "openManager.programColours",
+      onChange: () => repaintLooks(),
+      name: "Program window colours",
+      category: ["Open Manager", "Desktop", "programColours"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "A program may ask for a colour on its own window bar, taken from the theme's "
+        + "palette. Switch this off to draw every window bar the same.",
+    },
+    {
+      id: "openManager.desktopIconSize",
+      onChange: () => applyDeskLook(),
+      name: "Desktop icon size",
+      category: ["Open Manager", "Desktop", "desktopIconSize"],
+      type: "slider",
+      attrs: { min: 28, max: 96, step: 4 },
+      defaultValue: 44,
+      tooltip: "How large a desktop icon is drawn, in pixels.",
+    },
+    {
+      id: "openManager.desktopLabelSize",
+      onChange: () => applyDeskLook(),
+      name: "Desktop label size",
+      category: ["Open Manager", "Desktop", "desktopLabelSize"],
+      type: "slider",
+      attrs: { min: 9, max: 18, step: 1 },
+      defaultValue: 12,
+      tooltip: "The type size of the name under each icon, in pixels.",
+    },
+    {
+      id: "openManager.taskbar",
+      onChange: () => applyTaskbar(),
+      name: "Taskbar along the bottom, and a minimise button",
+      category: ["Open Manager", "Windows", "taskbar"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Lists open windows in a strip at the foot of the screen, and gives every "
+        + "window a minimise button. Switching it off restores anything minimised at the time.",
+    },
+    {
+      id: "openManager.taskbarHide",
+      onChange: () => { taskbarSync(); taskbarShow(true); },
+      name: "Hide the taskbar until the pointer nears it",
+      category: ["Open Manager", "Desktop", "taskbarHide"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "The bar slides away and comes back when the pointer reaches the bottom of "
+        + "the screen. It stays out while its menu is open.",
+    },
+    {
+      id: "openManager.startLabel",
+      onChange: () => taskbarSync(),
+      name: "Write Start on the Start button",
+      category: ["Open Manager", "Desktop", "startLabel"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Off, the button is its mark alone and the width of the Desktop tab.",
+    },
+    {
+      id: "openManager.taskbarGroups",
+      onChange: () => applyTaskbar(),
+      name: "Group windows of the same kind in the taskbar",
+      category: ["Open Manager", "Windows", "taskbarGroups"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "One entry per kind of window, with a list of its windows.",
     },
     {
       id: "openManager.windowIcons",
-      name: "Show a pack's icon in its window title",
+      name: "Show an icon in each window title",
       category: ["Open Manager", "Windows", "windowIcons"],
       type: "boolean",
       defaultValue: true,
       onChange: () => applyWindowLook(),
-      tooltip: "A pack page opened as a window carries the pack's icon before its name, "
-        + "which tells several open windows apart at a glance. Packs that publish no icon "
-        + "show the name alone either way. Turn it off to keep title bars to text.",
+      tooltip: "A window with an icon shows it before its title. Off keeps title bars "
+        + "to text.",
+    },
+    {
+      id: "openManager.fileBrowser",
+      onChange: () => { remountTopbar(); if (deskLayer) paintDeskIcons(); },
+      name: "ComfyUI file browser",
+      category: ["Open Manager", "Desktop", "fileBrowser"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "A window onto ComfyUI's input, output, temp and model directories. Read-only "
+        + "unless OPEN_MANAGER_FILE_WRITES is set. Has no effect unless "
+        + "OPEN_MANAGER_ENABLE_FILES is set.",
+    },
+    {
+      id: "openManager.aero",
+      onChange: () => applyWindowLook(),
+      name: "Aero window headers",
+      category: ["Open Manager", "Windows", "aero"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Draws every window header as glass: the theme's colours, translucent, over a "
+        + "blur of what is behind the window.",
+    },
+    {
+      id: "openManager.aeroAlpha",
+      onChange: () => applyWindowLook(),
+      name: "Aero opacity",
+      category: ["Open Manager", "Windows", "aeroAlpha"],
+      type: "slider",
+      attrs: { min: 10, max: 100, step: 5 },
+      defaultValue: 55,
+      tooltip: "How solid the glass is. Lower shows more of the wallpaper through it.",
+    },
+    {
+      id: "openManager.aeroDark",
+      onChange: () => applyWindowLook(),
+      name: "Aero darkening",
+      category: ["Open Manager", "Windows", "aeroDark"],
+      type: "slider",
+      attrs: { min: 0, max: 70, step: 2 },
+      defaultValue: 18,
+      tooltip: "How far the glass is darkened.",
+    },
+    {
+      id: "openManager.aeroBlur",
+      onChange: () => applyWindowLook(),
+      name: "Aero blur",
+      category: ["Open Manager", "Windows", "aeroBlur"],
+      type: "slider",
+      attrs: { min: 0, max: 40, step: 2 },
+      defaultValue: 12,
+      tooltip: "How far what is behind the window is softened before it is seen through the "
+        + "header.",
+    },
+    {
+      id: "openManager.blurAmount",
+      onChange: () => applyWindowLook(),
+      name: "Inactive blur",
+      category: ["Open Manager", "Windows", "blurAmount"],
+      type: "slider",
+      attrs: { min: 1, max: 12, step: 1 },
+      defaultValue: 3,
+      tooltip: "How much windows not in front are blurred when Blur inactive windows "
+        + "is on.",
     },
     {
       id: "openManager.blurInactive",
@@ -11975,10 +17720,8 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "blurInactive"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Soften the contents of every window except the one in front, so the active "
-        + "one reads first with several open. Off by default: blurring text is a repaint on "
-        + "every change of which window is in front, and with several open on a weak GPU that "
-        + "is felt. A window not in front is dimmed slightly either way.",
+      tooltip: "Blurs the contents of every window except the one in front. Windows not in "
+        + "front are dimmed slightly either way.",
     },
     {
       id: "openManager.windowShadow",
@@ -11987,8 +17730,7 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "windowShadow"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "The shadow that lifts a window off the graph behind it. Turn it off for a "
-        + "flatter interface, or where the blur costs more than it is worth on a weak GPU.",
+      tooltip: "Draws a shadow under each window.",
     },
     {
       id: "openManager.windowTitleSize",
@@ -11998,8 +17740,7 @@ app.registerExtension({
       type: "number",
       defaultValue: 15,
       tooltip: "Size in pixels of the text in a window's title bar and on its section "
-        + "headings. Clamped to 10-28. Independent of the header height, so a taller bar does "
-        + "not have to mean larger text.",
+        + "headings. Clamped to 10-28.",
     },
     {
       id: "openManager.windowTextSize",
@@ -12009,7 +17750,7 @@ app.registerExtension({
       type: "number",
       defaultValue: 13,
       tooltip: "Size in pixels of the body text inside windows: lists, descriptions and "
-        + "READMEs. Clamped to 10-22. Raise it on a large or distant screen.",
+        + "READMEs. Clamped to 10-22.",
     },
     {
       id: "openManager.tabMarks",
@@ -12018,7 +17759,8 @@ app.registerExtension({
       category: ["Open Manager", "Interface", "tabMarks"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Adds Colour and Title to the right-click menu on a workflow tab, for telling four copies of the same workflow apart. Both are written into the workflow itself as om_tab_color and om_custom_title, so they travel with the file, and kept in this browser as well so an unsaved workflow keeps its mark. Setting either marks that workflow as changed, because it is a change to the file.",
+      tooltip: "Adds Colour and Title to the right-click menu on a workflow tab. Both are "
+        + "saved in the workflow, and setting either marks it as changed.",
     },
     {
       id: "openManager.managerEntry",
@@ -12027,11 +17769,9 @@ app.registerExtension({
       type: "combo",
       options: ["auto", "panel", "classic"],
       defaultValue: "auto",
-      tooltip: "'auto' follows ComfyUI: the classic menu of destinations where it was started "
-        + "with --enable-manager-legacy-ui, and the panel otherwise. 'panel' always opens the "
-        + "manager itself. 'classic' always opens the menu, which is the only way in on an "
-        + "interface with no sidebar. Every destination is in both, so this decides the way "
-        + "in rather than what is reachable.",
+      tooltip: "'auto' follows ComfyUI: the classic menu where it was started with "
+        + "--enable-manager-legacy-ui, and the panel otherwise. 'panel' always opens the "
+        + "manager. 'classic' always opens the menu.",
     },
     {
       id: "openManager.trustMode",
@@ -12048,7 +17788,8 @@ app.registerExtension({
       category: ["Open Manager", "Interface", "trustRegistry"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Only registry packs are affected. A GitHub install always asks, because nothing has scanned it, and a model download always asks about the account hosting it; neither is switched off here. Turn this on to be asked for registry packs as well, which are scanned and carry a status. Asked once per author, so several packs by someone already trusted do not ask again. Findings against a pack are shown either way.",
+      tooltip: "GitHub installs and model downloads always ask. On, registry packs ask as "
+        + "well, once per author. Findings against a pack are shown either way.",
     },
     {
       id: "openManager.imageWorkflows",
@@ -12056,7 +17797,8 @@ app.registerExtension({
       category: ["Open Manager", "Interface", "imageWorkflows"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Authors publish screenshots with the workflow written into the file. Right-clicking one offers to load it. Turn this off to keep the browser's own menu on README images.",
+      tooltip: "Right-clicking a README image that carries a workflow offers to load it. "
+        + "Off keeps the browser's own menu on README images.",
     },
     {
       id: "openManager.packLinks",
@@ -12072,7 +17814,9 @@ app.registerExtension({
       category: ["Open Manager", "Registry", "enrichMetadata"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "A pack page reads its README, repository stats and gallery from the repository. Cached until the pack's versions change. Turn it off to keep a pack page to the registry alone and save the traffic.",
+      tooltip: "A pack page reads its README, repository stats and gallery from the "
+        + "repository. Cached until the pack's versions change. Off keeps a pack page to the "
+        + "registry alone.",
     },
     {
       id: "openManager.autoRenew",
@@ -12093,7 +17837,8 @@ app.registerExtension({
       category: ["Open Manager", "Registry", "staleDays"],
       type: "number",
       defaultValue: 7,
-      tooltip: "How old the offline copy of the registry may get before it is treated as out of date. Only consulted by the 'when stale' renewal policy; the other policies ignore it. Nothing is fetched because a catalogue is stale, it is only reported as such until a sync is asked for.",
+      tooltip: "How old the offline copy of the registry may get before the 'When stale' "
+        + "renewal policy refreshes it.",
     },
     {
       id: "openManager.parallelSync",
@@ -12101,7 +17846,7 @@ app.registerExtension({
       category: ["Open Manager", "Registry", "parallelSync"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Read several catalogue pages at once. Much faster on a broadband link; turn it off to read one page at a time.",
+      tooltip: "Read several catalogue pages at once. Off reads one page at a time.",
     },
     {
       id: "openManager.syncConcurrency",
@@ -12109,7 +17854,8 @@ app.registerExtension({
       category: ["Open Manager", "Registry", "syncConcurrency"],
       type: "number",
       defaultValue: 8,
-      tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16; higher is not always faster and risks the registry rate-limiting you.",
+      tooltip: "How many pages a parallel sync keeps in flight. Clamped to 1-16. Higher "
+        + "risks the registry rate-limiting you.",
     },
     {
       id: "openManager.allowBanned",
@@ -12118,13 +17864,7 @@ app.registerExtension({
       type: "boolean",
       defaultValue: false,
       tooltip: "Off, a banned version shows as Blocked and will not install. On, it installs "
-        + "like any other version after a confirmation that names the ban, and the risk is "
-        + "yours: a custom node reads and writes anything the account running ComfyUI can "
-        + "reach, and nothing here has checked whether the ban is right. Worth knowing either "
-        + "way: the registry's automated scanner is currently banning at a rate publishers "
-        + "dispute, with no reason published, no category and no route to contest or clear "
-        + "one, and it has caught working, widely used packs. Scan or read a pack before "
-        + "installing it over a ban.",
+        + "after a confirmation that names the ban.",
     },
     {
       id: "openManager.galleryShow",
@@ -12148,7 +17888,8 @@ app.registerExtension({
       category: ["Open Manager", "Gallery", "galleryExpanded"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Start the gallery open on a pack page rather than collapsed. The images are fetched either way once the section is drawn, so this decides how much of the page you scroll past rather than how much is loaded.",
+      tooltip: "Start the gallery open on a pack page rather than collapsed. The images are "
+        + "fetched either way once the section is drawn.",
     },
     {
       id: "openManager.licenseUseApi",
@@ -12156,7 +17897,10 @@ app.registerExtension({
       category: ["Open Manager", "Licences", "licenseUseApi"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing at filenames. Needs a GitHub token, which is set in Open Manager's own Access keys dialog rather than here: keys are deliberately kept out of ComfyUI's settings. Without one the limit is 60 requests an hour, which a single listing exhausts, after which this stops helping. Falls back to reading files whenever the API cannot answer, so it only ever adds a licence, never removes one.",
+      tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing "
+        + "at filenames. Needs a GitHub token, set under Open Manager > Access keys. Without "
+        + "one the limit is 60 requests an hour, which one listing spends. Falls back to "
+        + "reading files when the API cannot answer.",
     },
     {
       id: "openManager.licenseRace",
@@ -12164,7 +17908,8 @@ app.registerExtension({
       category: ["Open Manager", "Licences", "licenseRace"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Try every candidate licence filename at once rather than one after another. Answers a repository in a single round trip instead of up to fourteen, at the cost of more requests.",
+      tooltip: "Try every candidate licence filename at once rather than one after another. "
+        + "One round trip per repository, at the cost of more requests.",
     },
     {
       id: "openManager.licenseConcurrency",
@@ -12180,7 +17925,10 @@ app.registerExtension({
       category: ["Open Manager", "Scanning", "scanOnInstall"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are installed and before ComfyUI is asked to restart. Needs a VirusTotal key, which is set in Open Manager's own Access keys dialog rather than here: keys are deliberately kept out of ComfyUI's settings. Where the day's allowance is spent you are asked whether to install without scanning.",
+      tooltip: "Check a freshly placed pack against VirusTotal before its requirements are "
+        + "installed and before ComfyUI is asked to restart. Needs a VirusTotal key, set under "
+        + "Open Manager > Access keys. Where the day's allowance is spent you are asked "
+        + "whether to install without scanning.",
     },
     {
       id: "openManager.panelHeaders",
@@ -12189,7 +17937,8 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "panelHeaders"],
       type: "number",
       defaultValue: 44,
-      tooltip: "Height in pixels of the title and section bars in the floating panels, and the size of the text on them. Clamped to 24-80. Raise it on a large or distant screen.",
+      tooltip: "Height in pixels of the title and section bars in the floating panels. "
+        + "Clamped to 24-80.",
     },
     {
       id: "openManager.monitor",
@@ -12198,7 +17947,7 @@ app.registerExtension({
       category: ["Open Manager", "Monitor", "monitor"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "A compact CPU, RAM and VRAM readout beside the workflow tabs. The server samples only while a panel is watching and stops as soon as it is not, so nothing is measured when nobody is looking.",
+      tooltip: "A compact CPU, RAM and VRAM readout.",
     },
     {
       id: "openManager.monitorPlacement",
@@ -12218,12 +17967,10 @@ app.registerExtension({
       type: "combo",
       options: MONITOR_STYLES,
       defaultValue: "mixed",
-      tooltip: "'mixed' draws each figure the way it reads: a share of a total as a bar left "
-        + "to right, a temperature as a column like a thermostat. 'horizontal' and 'vertical' "
-        + "draw everything the one way instead, and the vertical styles write each name down "
-        + "the side of its column, clear of the track. The compact styles drop the separate "
-        + "label and put the text on the bar, or the figure at the foot of the column, which "
-        + "is what pays for a column wide enough to read.",
+      tooltip: "'mixed' draws a share of a total as a bar and a temperature as a column. "
+        + "'horizontal' draws everything as bars, and 'vertical' as columns with each name "
+        + "down the side. The compact styles put the text on the bar, or at the foot of the "
+        + "column; 'vertical-compact' leaves the figure to the hover.",
     },
     {
       id: "openManager.monitorInterval",
@@ -12232,7 +17979,7 @@ app.registerExtension({
       category: ["Open Manager", "Monitor", "monitorInterval"],
       type: "number",
       defaultValue: 2,
-      tooltip: "How often the machine is sampled while the strip is on screen, clamped to 1 to 10 seconds. The Memory panel asks for one a second while it is open, and the server samples at whichever of the two is quicker. Nothing is sampled when neither is open.",
+      tooltip: "How often the machine is sampled while the strip is on screen, clamped to 1 to 10 seconds. Once a second while the Memory panel is open.",
     },
     {
       id: "openManager.monitorCpu",
@@ -12250,7 +17997,7 @@ app.registerExtension({
       category: ["Open Manager", "Monitor", "monitorRam"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "System memory in use, as a share of the total, measured by ComfyUI's own model management rather than separately. Always available.",
+      tooltip: "System memory in use, as a share of the total. Always available.",
     },
     {
       id: "openManager.monitorTemp",
@@ -12276,7 +18023,7 @@ app.registerExtension({
       category: ["Open Manager", "Library", "startupTimes"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "ComfyUI times every pack it imports and writes the result to its log. This reads that back and puts the seconds beside each installed pack, with the total. Read once when the Installed view opens; nothing is measured or run.",
+      tooltip: "The import time ComfyUI logs for each pack, in seconds, shown beside it on the Installed list with the total.",
     },
     {
       id: "openManager.hashOnDemand",
@@ -12284,11 +18031,10 @@ app.registerExtension({
       category: ["Open Manager", "Library", "hashOnDemand"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Hashing and duplicate confirmation read a model from end to end, which on a "
-        + "large library is hundreds of gigabytes. Nothing is ever read without being asked "
-        + "for, so this decides whether the asking is offered at all. Off, the library still "
-        + "reports names, sizes, folders, duplicates by name, and what no workflow "
-        + "references, and never opens a file. A digest already taken is still shown.",
+      tooltip: "On, the library offers hashing and duplicate confirmation, which read each "
+        + "model end to end. Off, the library still reports names, sizes, folders, duplicates "
+        + "by name, and what no workflow references, and never opens a file. A digest already "
+        + "taken is still shown.",
     },
     {
       id: "openManager.floatingPanels",
@@ -12296,13 +18042,9 @@ app.registerExtension({
       category: ["Open Manager", "Windows", "floatingPanels"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Presentation only, and only for surfaces set to open as windows. On, a "
-        + "window can be dragged anywhere and reopens where you left it. Off, it always opens "
-        + "in the middle and cannot be moved, which suits a single screen or anyone who would "
-        + "rather not hunt for a window. Either way, a "
-        + "window too small to move a panel around in presents it centred, because there is "
-        + "nowhere to drag it to and an edge to lose it past. Folding, resizing and closing "
-        + "work the same in every case.",
+      tooltip: "For panels set to open as windows. On, a window can be dragged anywhere and "
+        + "reopens where you left it. Off, it always opens in the middle and cannot be moved. "
+        + "A browser window too small to move a panel around in presents it centred.",
     },
     {
       id: "openManager.modelLibrary",
@@ -12311,7 +18053,7 @@ app.registerExtension({
       category: ["Open Manager", "Library", "modelLibrary"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Adds a Models button that opens the model library: everything on disk across every folder ComfyUI registers, what is held in more than one place, and what no saved workflow appears to reference. Nothing is read until the panel is opened, and nothing is hashed until it is asked for.",
+      tooltip: "Adds a Models button that opens the model library: everything on disk across every folder ComfyUI registers, what is held in more than one place, and what no saved workflow appears to reference.",
     },
     {
       id: "openManager.downloadButton",
@@ -12320,7 +18062,7 @@ app.registerExtension({
       category: ["Open Manager", "Downloads", "downloadButton"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Puts a Downloads button at the right-hand end of the workflow tab strip. Turn it off to reach the Download Manager from the command palette instead.",
+      tooltip: "Adds a Downloads button that opens the Download Manager.",
     },
     {
       id: "openManager.runBar",
@@ -12331,19 +18073,17 @@ app.registerExtension({
       defaultValue: false,
       tooltip: "A strip across the top of the window while a prompt runs: the graph's "
         + "progress as a gradient, and the running node's own progress filling the block "
-        + "that node will occupy. Off by default because it sits where another pack may "
-        + "already have put one; switch that one off before turning this on.",
+        + "that node will occupy.",
     },
     {
       id: "openManager.memoryButton",
       onChange: () => remountTopbar(),
-      name: "Show the Memory button, which opens this panel",
+      name: "Show the Memory button",
       category: ["Open Manager", "Monitor", "memoryButton"],
       type: "boolean",
       defaultValue: true,
       tooltip: "Opens the Memory panel: live graphs, what ComfyUI is holding, and where each "
-        + "model's weights sit. Separate from the resource monitor, so switching the strip "
-        + "off does not leave the panel reachable only from the command palette.",
+        + "model's weights sit.",
     },
     {
       id: "openManager.buttonPlacement",
@@ -12355,8 +18095,8 @@ app.registerExtension({
       defaultValue: "topbar",
       tooltip: "'topbar' puts Downloads, Models and Memory in the workflow tab strip with "
         + "their names. 'control' puts them in ComfyUI's floating control bar as icons, with "
-        + "the name on the hover, which suits a narrow window or a crowded tab strip. Falls "
-        + "back to the tab strip where a build has no control bar.",
+        + "the name on the hover. Falls back to the tab strip where a build has no control "
+        + "bar.",
     },
     {
       id: "openManager.downloadLocation",
@@ -12365,7 +18105,10 @@ app.registerExtension({
       type: "combo",
       options: ["default", "most-free"],
       defaultValue: "default",
-      tooltip: "Which of the paths ComfyUI registers for a model folder a download starts on. 'default' is ComfyUI's own first path, which honours is_default in extra_model_paths.yaml. 'most-free' picks the registered path with the most room, which suits a machine whose default drive is the small one. Either way the location is shown before the download starts and can be changed.",
+      tooltip: "Which of the paths ComfyUI registers for a model folder a download starts "
+        + "on. 'default' is ComfyUI's own first path, which honours is_default in "
+        + "extra_model_paths.yaml. 'most-free' picks the registered path with the most room. "
+        + "The location is shown before the download starts and can be changed.",
     },
     {
       id: "openManager.downloadWorkers",
@@ -12373,7 +18116,8 @@ app.registerExtension({
       category: ["Open Manager", "Downloads", "downloadWorkers"],
       type: "number",
       defaultValue: 2,
-      tooltip: "How many downloads run in parallel. Clamped to 1-8. More is not always faster: past a point the link is the limit and a stalled transfer takes a slot with it.",
+      tooltip: "How many downloads run in parallel. Clamped to 1-8. A stalled transfer holds "
+        + "its slot.",
     },
     {
       id: "openManager.nodeModelMenu",
@@ -12381,7 +18125,9 @@ app.registerExtension({
       category: ["Open Manager", "Downloads", "nodeModelMenu"],
       type: "boolean",
       defaultValue: true,
-      tooltip: "Right-clicking a node offers to download the models it names, and to add a URL to it so a shared graph carries its weights. Added URLs are checked against the same host and format rules as any other download.",
+      tooltip: "Right-clicking a node offers to download the models it names, and to add a "
+        + "URL to it. Added URLs are checked against the same host and format rules as any "
+        + "other download.",
     },
   ],
   commands: [
@@ -12394,6 +18140,67 @@ app.registerExtension({
       id: "openmanager.memory",
       label: "Open Manager: open the Memory panel",
       function: () => openMemoryPanel(),
+    },
+    {
+      id: "openmanager.start",
+      label: "Open Manager: open the Start menu",
+      function: () => {
+        if (!taskbarOn()) {
+          toast("The taskbar is off. Switch it on under Open Manager > Windows.");
+          return;
+        }
+        paintTaskbar();
+        if (startPanel) closeStart(true);
+        else openStart();
+      },
+    },
+    {
+      id: "openmanager.desktop",
+      label: "Open Manager: show or hide the desktop",
+      function: () => {
+        if (deskGates.desktop === false) {
+          toast("Desktop mode is not switched on for this install "
+            + "(OPEN_MANAGER_ENABLE_DESKTOP).");
+          return;
+        }
+        if (!desktopOn()) {
+          toast("Desktop mode is off. Switch it on in the Open Manager settings, under "
+            + "Desktop.");
+          return;
+        }
+        if (deskShowing()) hideDesk();
+        else showDesk();
+      },
+    },
+    {
+      id: "openmanager.desktopsettings",
+      label: "Open Manager: desktop settings",
+      function: () => openDesktopSettings(),
+    },
+    {
+      id: "openmanager.minimise",
+      label: "Open Manager: minimise the window in front",
+      function: () => {
+        if (!taskbarOn()) {
+          toast("The taskbar is off, so windows cannot be minimised.");
+          return;
+        }
+        const front = [...floatPanels.values()].find((one) => one.el.isConnected && !one.modal
+          && !one.isMinimised() && one.el.classList.contains("om-float-active"));
+        if (!front) { toast("No window to minimise."); return; }
+        front.minimise();
+      },
+    },
+    {
+      id: "openmanager.restore",
+      label: "Open Manager: restore the last minimised window",
+      function: () => {
+        const away = [...floatPanels.values()]
+          .filter((one) => one.el.isConnected && one.isMinimised())
+          .sort((a, b) => a.minimisedAt() - b.minimisedAt());
+        if (!away.length) { toast("Nothing is minimised."); return; }
+        away[away.length - 1].present();
+      },
     },
     {
       id: "openmanager.library",
@@ -12409,12 +18216,10 @@ app.registerExtension({
       id: "openmanager.open",
       label: "Open Manager: browse a pack",
       function: async () => {
-        const packId = await askText("Registry pack id", "was-node-suite-comfyui");
+        const packId = await askText("Registry pack id");
         if (packId) await openPack(packId);
       },
     },
-    // The two ids the interface dispatches at a legacy manager. The first is what the
-    // Extensions button sends; the second is its direct route to the pack browser.
     {
       id: "Comfy.Manager.Menu.ToggleVisibility",
       label: "Open Manager: toggle the menu",
@@ -12428,7 +18233,6 @@ app.registerExtension({
       function: () => togglePanelWindow("registry"),
     },
   ],
-  // ComfyUI asks each extension what to add to a node's right-click menu.
   getNodeMenuItems(node) {
     if (panelSetting("openManager.nodeModelMenu", true) === false) return [];
     const items = [null];
@@ -12445,7 +18249,6 @@ app.registerExtension({
     });
     return items;
   },
-  // ComfyUI reports the graph's missing node types here on every workflow load.
   afterConfigureGraph(missingNodeTypes) {
     lastMissingTypes = Array.isArray(missingNodeTypes)
       ? missingNodeTypes.map((m) => (typeof m === "string" ? m : m?.type || m?.name)).filter(Boolean)
@@ -12456,36 +18259,28 @@ app.registerExtension({
     app.extensionManager.registerSidebarTab({
       id: "openmanager",
       icon: "om-tab-icon",
-      title: "Manager",
-      tooltip: "Open Manager: browse the registry",
+      title: "Discovery",
+      tooltip: "Open Manager: Node Discovery",
       type: "custom",
       render: renderSidebar,
     });
-    // The legacy menu has no sidebar, so it gets a button to the same panel.
     addLegacyMenuButton();
-    // The ways in at the right of the workflow tab strip: downloads, the library, the monitor.
     topbarReady = true;
+    wireMonitorLink();
     mountTopbar();
-    // Wired once for the session rather than per mount: a remount that added another set of
-    // listeners would count every node twice, then three times.
     wireRunBar();
 
-    // Which interface ComfyUI is running, before anything asks which way in to offer.
     readLegacyUi().catch(() => {});
     migrateEntryMode();
 
-    // Which keys are held, before anything that might want one runs. The move out of
-    // ComfyUI's settings follows, and happens at most once.
     loadKeys().then(() => migrateKeys()).catch(() => {});
 
-    // What is already on disk, so registry rows can say "Installed" on first paint.
     loadInstalledIndex();
-    // Who the reader trusts, so rows can be badged and filtered without asking per row.
     loadTrustedAuthors();
 
-    // Themes registered beside the built-ins, each carrying its grid background and its light
-    // or dark UI mode.
     applyWindowLook();
+    applyTaskbar();
+    startDesktop();
     registerThemes().catch(() => {});
     watchThemeExtras();
     refreshPackThemes().then((updated) => {
@@ -12493,18 +18288,13 @@ app.registerExtension({
       toast(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} themes`} `
         + "from the installed pack.", { kind: "ok" });
     }).catch(() => {});
-    // One-time, and only for the value an earlier version of this extension wrote.
     repairLinkMode().then((fixed) => {
       if (!fixed) return;
       notify("Link shape put back",
         `An earlier version of Open Manager set ComfyUI's link render mode to ${fixed.from} `
-        + `for every theme, including ComfyUI's own. It has been set back to ${fixed.to}, `
-        + "which is ComfyUI's default. If you did want "
-        + `${fixed.from}, set it under Settings > Lite Graph > Link Render Mode; this will `
-        + "not change it again.");
+        + `for every theme. It has been set back to ${fixed.to}. To keep ${fixed.from}, set `
+        + "it under Settings > Lite Graph > Link Render Mode; this will not change it again.");
     }).catch(() => {});
-    // Renew the offline registry per the configured policy. The backend guards against
-    // running more than once per server session.
     const policy = app.extensionManager.setting.get("openManager.autoRenew") ?? "startup";
     const staleDays = app.extensionManager.setting.get("openManager.staleDays") ?? 7;
     api.fetchApi(`${API}/catalog/auto-sync`, {

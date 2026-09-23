@@ -1,16 +1,4 @@
-"""How Open Manager is installed, and what updating it takes from here.
-
-Open Manager arrives one of two ways and they update differently.
-
-As a custom node it is a directory in ``custom_nodes`` like any other pack, and the ordinary
-update path applies: its page in the installed list, the same button every other pack has.
-
-As a manager replacement it is a package in ``site-packages``, put there by pip. Nothing in a
-running ComfyUI can rewrite that safely, so this offers directions instead: the command for
-the interpreter actually running the server, which on a portable build is not the ``python``
-a terminal finds on PATH. Getting that wrong installs the update into a different environment
-and leaves the reader wondering why nothing changed.
-"""
+"""How Open Manager is installed, and what updating it takes from here."""
 
 from __future__ import annotations
 
@@ -20,26 +8,18 @@ from pathlib import Path
 
 __all__ = ["DIST", "NODE_ID", "behind", "newest", "state"]
 
-#: The distribution name pip knows, and the identifier the registry lists the pack under.
-#: Both come from ``pyproject.toml``'s ``name``.
 DIST = "comfyui-open-manager"
 NODE_ID = "comfyui-open-manager"
 
 REPO_URL = "https://github.com/WASasquatch/open-manager-comfyui"
 
-#: For an install that did not come from an index. A zip of the default branch, because pip
-#: can install one unaided and a portable build usually has no git for the ``git+`` form.
 ARCHIVE_URL = f"{REPO_URL}/archive/refs/heads/main.zip"
 
-#: Where the package is. ``open_manager/`` itself, whichever way it was installed.
 _ROOT = Path(__file__).resolve().parent
 
 
 def _custom_node_dir() -> Path | None:
     """The ``custom_nodes`` pack directory this is running from, or ``None``.
-
-    Every registered ``custom_nodes`` path is checked rather than only the first, because a
-    reader may keep packs on another drive and ComfyUI will load from all of them.
 
     Returns:
         The pack's own directory where this copy lives under a ``custom_nodes`` path,
@@ -51,7 +31,6 @@ def _custom_node_dir() -> Path | None:
         roots = [Path(p).resolve() for p in folder_paths.get_folder_paths("custom_nodes")]
     except Exception:
         roots = []
-    # A fallback for the case where folder_paths is unavailable: the directory name alone.
     parents = list(_ROOT.parents)
     for parent in parents:
         if parent.name == "custom_nodes" and parent not in roots:
@@ -74,8 +53,6 @@ def _environment() -> str:
         One of ``embedded``, ``conda``, ``venv`` or ``system``.
     """
     executable = Path(sys.executable)
-    # A portable build ships its interpreter in a directory of this name, with a ._pth file
-    # beside it that pins where imports come from.
     if executable.parent.name.lower() in {"python_embeded", "python_embedded"}:
         return "embedded"
     if any(executable.parent.glob("python*._pth")):
@@ -92,8 +69,7 @@ def _direct_url() -> dict:
     """What pip recorded about where this distribution was installed from.
 
     Returns:
-        The parsed ``direct_url.json``, or an empty dict where there is none. An install from
-        an index has no such file, which is itself the answer.
+        The parsed ``direct_url.json``, or an empty dict where there is none.
     """
     try:
         import json
@@ -124,7 +100,6 @@ def _source_dir(direct: dict) -> Path | None:
 
         parsed = urlparse(url)
         path = unquote(parsed.path)
-        # A Windows path arrives as /K:/thing; the leading slash is not part of it.
         if len(path) > 2 and path[0] == "/" and path[2] == ":":
             path = path[1:]
         candidate = Path(path)
@@ -140,9 +115,6 @@ def _quote(path: str) -> str:
 
 def version() -> str:
     """The version of the copy that is running.
-
-    Installed metadata is asked first, because that is what pip will compare against. A
-    source checkout has no metadata, so its ``pyproject.toml`` is read instead.
 
     Returns:
         A version string, or ``unknown`` where neither source answers.
@@ -179,9 +151,6 @@ _newest: dict = {"version": "", "at": 0.0}
 
 def newest(force: bool = False) -> str:
     """The newest version published for this distribution.
-
-    The registry carries no version for Open Manager, so the published package is the only
-    place that says whether this copy is behind.
 
     Args:
         force: Ask again even where a recent answer is held.
@@ -288,16 +257,12 @@ def state(check: bool = False) -> dict:
             "note": "Installed as a custom node, so it updates like any other pack.",
         }
 
-    # Package mode. Update from wherever this copy came from, because that is the source the
-    # reader already chose and the one their setup is known to reach.
     prefix, forced = _install_prefix(python)
     source = _source_dir(direct)
     vcs = direct.get("vcs_info") or {}
     from_git = bool(vcs) or (source is not None and (source / ".git").is_dir())
 
     if source is not None and (source / ".git").is_dir():
-        # A clone installed in place. Pulling first means the reinstall has something new to
-        # install; without it pip would rebuild the same commit and report success.
         steps = [
             {"label": "Update your clone",
              "command": f"git -C {_quote(str(source))} pull"},
@@ -305,7 +270,6 @@ def state(check: bool = False) -> dict:
              "command": f"{prefix} --upgrade {_quote(str(source))}"},
         ]
     elif vcs.get("requested_revision") or str(direct.get("url", "")).startswith(("git+", "http")):
-        # Installed straight from the repository. pip is given the same URL again.
         url = str(direct.get("url") or ARCHIVE_URL)
         if vcs:
             revision = vcs.get("requested_revision") or ""
@@ -317,8 +281,6 @@ def state(check: bool = False) -> dict:
              "command": f'{prefix} --upgrade {forced}"{url}"'},
         ]
     else:
-        # No direct_url.json means pip resolved this from an index, so the name is enough.
-        # The archive stays as the answer for an index that does not carry it.
         steps = [
             {"label": "Update from PyPI",
              "command": f"{prefix} --upgrade {DIST}"},

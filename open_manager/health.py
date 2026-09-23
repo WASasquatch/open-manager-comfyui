@@ -1,15 +1,4 @@
-"""What each installed pack costs to load, and switching one off without removing it.
-
-ComfyUI times every pack it imports and writes the result to its log, where nobody sees it.
-On the machine this was written against, thirty-seven packs took 13.3 seconds between them and
-one of them accounted for more than half. That is worth knowing before deciding what to keep
-loaded, so it is read back out and put beside the pack it belongs to.
-
-Switching a pack off is the other half of the same thought. ComfyUI skips a directory whose
-name ends ``.disabled``, and renaming by hand is what people already do; this does the same
-rename, refuses the cases where it would do damage, and leaves the files alone so it can be
-undone by hand as easily as it was done.
-"""
+"""What each installed pack costs to load, and switching one off without removing it."""
 
 from __future__ import annotations
 
@@ -28,33 +17,23 @@ from . import installer, paths
 __all__ = ["collisions", "disable", "enable", "hold", "holds", "is_disabled", "release",
            "startup_times", "toggle"]
 
-#: Suffix ComfyUI treats as "do not load".
 DISABLED = ".disabled"
 
-#: Bytes read from the end of the log. The import block is written at start-up and the log
-#: grows without bound afterwards, so only the tail is worth reading.
 LOG_TAIL = 512 << 10
 
-#: Most packs held at a version at once. Far above any real list; a guard against a
-#: runaway writer rather than a limit anyone should meet.
 HOLD_CAP = 500
 
-#: The name every pack registers its nodes under.
 MAPPING = "NODE_CLASS_MAPPINGS"
 
-#: When this process started, for telling a log of this run from a log of the last one.
-#: Read from the process where that can be asked, and from this module's import otherwise,
-#: which is close enough: it is imported while the server is starting.
 def _process_started() -> float:
     try:
         import psutil
 
         return float(psutil.Process(os.getpid()).create_time())
-    except Exception:  # noqa: BLE001 - the fallback is only seconds out
+    except Exception:  # noqa: BLE001
         return _IMPORTED_AT
 
 
-#: Where a timing line starts.
 _TIMING = re.compile(r"([\d.]+)\s+seconds(\s*\(IMPORT FAILED\))?:\s*(.+)")
 
 
@@ -88,7 +67,6 @@ def _parse(text: str) -> list[dict]:
     for line in block.splitlines():
         found = _TIMING.search(line)
         if not found:
-            # The block runs until the first line that is not a timing.
             if rows:
                 break
             continue
@@ -105,12 +83,8 @@ def _parse(text: str) -> list[dict]:
 def startup_times() -> dict:
     """How long each pack took to import, from ComfyUI's own log.
 
-    A rotated log is read where the current one has no timings yet, which happens while a run
-    is still starting. Where no log can be read the answer says so rather than reporting an
-    empty list as though every pack were free.
-
     Returns:
-        ``{ok, packs, total, failed, source, reason}``, slowest first.
+        ``{ok, packs, total, failed, source, stale, logged_at, reason}``, slowest first.
     """
     started = _process_started()
     for path in _logs():
@@ -118,11 +92,6 @@ def startup_times() -> dict:
         if not rows:
             continue
         rows.sort(key=lambda row: -row["seconds"])
-        # A log that stopped being written before this process began describes a previous
-        # run. ComfyUI's core writes no log file unless asked to with --file-log; the one
-        # usually here is written by ComfyUI-Manager, so replacing that manager leaves this
-        # file frozen. Reporting last week's timings as this run's would be worse than
-        # reporting none.
         try:
             written = path.stat().st_mtime
         except OSError:
@@ -136,10 +105,8 @@ def startup_times() -> dict:
             "source": path.name,
             "stale": stale,
             "logged_at": written,
-            "reason": ("these timings are from an earlier run: nothing has written to "
-                       f"{path.name} since this one started. ComfyUI only writes a log file "
-                       "when launched with --file-log; the file usually here is written by "
-                       "ComfyUI-Manager." if stale else ""),
+            "reason": (f"Read from {path.name}, last written by an earlier run."
+                       if stale else ""),
         }
     return {
         "ok": False,
@@ -152,8 +119,6 @@ def startup_times() -> dict:
         "reason": "no import timings in ComfyUI's log yet",
     }
 
-
-# --- switching a pack off ------------------------------------------------------------------
 
 def is_disabled(directory: Path) -> bool:
     """Whether a directory is one ComfyUI will skip."""
@@ -170,10 +135,6 @@ def _ours(directory: Path) -> bool:
 
 def _checked(name: str) -> tuple[Path | None, str]:
     """The directory a toggle may act on, or why it may not.
-
-    Renaming a directory on someone's behalf earns every one of these checks. The target has
-    to be a real directory, directly inside ``custom_nodes``, still inside it once resolved,
-    and not this pack.
 
     Args:
         name: Directory name as the panel reported it.
@@ -193,11 +154,9 @@ def _checked(name: str) -> tuple[Path | None, str]:
         resolved = target.resolve()
     except OSError:
         return None, "that path could not be read"
-    # Guards a name that climbs out, and a symlink pointing somewhere else entirely.
     if resolved.parent != base:
         return None, "that is not directly inside custom_nodes"
     if not resolved.is_dir():
-        # custom_nodes also holds loose files, which are not packs.
         return None, "that is not a directory"
     if _ours(resolved):
         return None, "Open Manager cannot switch itself off from here"
@@ -223,16 +182,12 @@ def toggle(name: str, off: bool) -> dict:
     else:
         target = directory.with_name(directory.name[: -len(DISABLED)])
 
-    # Never merge into something that is already there: a pack disabled twice under different
-    # names would otherwise lose one of them.
     if target.exists():
         return {"ok": False,
                 "reason": f"{target.name} already exists; rename or remove it first"}
     try:
         directory.rename(target)
     except OSError as error:
-        # Windows holds locks on the binaries of a pack that is loaded, so this can simply
-        # refuse. Say what the system said rather than pretending it worked.
         return {"ok": False,
                 "reason": f"it could not be renamed ({error.strerror or error}). "
                           "A pack already loaded may need ComfyUI restarted first."}
@@ -249,24 +204,8 @@ def enable(name: str) -> dict:
     return toggle(name, False)
 
 
-# --- node names two packs both claim ---------------------------------------------------------
-
 def _attr(obj: object, name: str, default=None):
     """Read an attribute off somebody else's object without running their code.
-
-    ``getattr`` is the wrong tool here twice over. It looks total and is not -- the default
-    only covers ``AttributeError``, while a module may define ``__getattr__`` and raise
-    anything at all from it, as one pack does with ``ImportError("_C_flashattention
-    unavailable")``. Worse, ``getattr`` *calls* that ``__getattr__``, and a module is free to
-    do real work in it: import a heavy optional dependency, probe hardware, warn. Walking
-    ``sys.modules`` and asking every module for a name would run a little of a thousand packs'
-    code on a request that is only meant to be looking.
-
-    So the namespace is read directly. ``__dict__`` holds what a module actually defined and
-    consulting it triggers nothing; a pack that has no such name simply does not have one,
-    which is the answer anyway. ``getattr`` is kept only as a fallback for objects with no
-    readable ``__dict__``, still wrapped, because being unable to look is not a failure worth
-    propagating.
 
     Args:
         obj: Any object, including one from a pack this knows nothing about.
@@ -280,11 +219,11 @@ def _attr(obj: object, name: str, default=None):
         namespace = object.__getattribute__(obj, "__dict__")
         if isinstance(namespace, Mapping):
             return namespace[name] if name in namespace else default
-    except Exception:  # noqa: BLE001 - no readable namespace; fall through and ask politely
+    except Exception:  # noqa: BLE001
         pass
     try:
         return getattr(obj, name, default)
-    except Exception:  # noqa: BLE001 - the point is that anything at all may come out
+    except Exception:  # noqa: BLE001
         return default
 
 
@@ -301,12 +240,7 @@ def _pack_of(module: object, root: Path) -> str:
 
 
 def _defined_in(node_class: object, root: Path, seen: dict) -> str:
-    """Which pack a node class was written in, or empty for anything outside custom_nodes.
-
-    A class does not carry its file, its module does, and a pack registers hundreds of
-    classes from a handful of modules -- so the answer is kept per module and the path is
-    resolved once rather than once per node.
-    """
+    """Which pack a node class was written in, or empty for anything outside custom_nodes."""
     module = _attr(node_class, "__module__", "") or ""
     if module not in seen:
         seen[module] = _pack_of(sys.modules.get(module), root)
@@ -316,32 +250,11 @@ def _defined_in(node_class: object, root: Path, seen: dict) -> str:
 def collisions() -> dict:
     """Node names more than one installed pack registers.
 
-    ComfyUI keeps one mapping of node name to class for the whole install, and a pack that
-    registers a name another pack has already registered simply replaces it. Nothing is said
-    at the time. What follows is a graph that loads the wrong node, or a node that changes
-    behaviour when an unrelated pack is installed, with nothing to connect the two.
-
-    Every claim is read from the packs as they were actually loaded rather than from their
-    source, because the popular packs nearly all build their mappings in a loop and there is
-    nothing in the source to read. Which pack won is read from the merged mapping, so the
-    answer says what is in effect rather than what ought to be.
-
-    A pack is only credited with a name where the class behind it is one of the pack's own.
-    Several packs hold a reference to ComfyUI's merged mapping -- ``from nodes import
-    NODE_CLASS_MAPPINGS`` is a normal thing to write -- and reading that as a claim credits
-    one pack with every node in the install and reports seventeen hundred collisions that do
-    not exist. The cost of the rule is that a pack re-registering a class it did not write is
-    not counted, which is the right way to be wrong: silence rather than a false alarm.
-
-    A pack that failed to import claims nothing, which is correct, since it is not in the
-    mapping either.
-
     Returns:
         ``{ok, groups, packs, names, skipped, reason}``. Each group is ``{node, packs,
         loaded}``, where ``loaded`` is the pack whose class is the one in use, or empty where
-        that cannot be told. ``skipped`` names any module that could not be read, with why:
-        its claims are missing from the answer and saying so is better than a silently short
-        one.
+        that cannot be told. ``skipped`` names each module that could not be read, with the
+        error; its claims are missing from the answer.
     """
     try:
         root = installer.custom_nodes_dir().resolve()
@@ -354,9 +267,6 @@ def collisions() -> dict:
     seen: dict = {}
     skipped: list = []
     for module in list(sys.modules.values()):
-        # Per module rather than around the loop: one unreadable module should cost its own
-        # claims and nothing else's. Reading it is the whole of what can go wrong here, and
-        # what goes wrong belongs to the module, not to the reader.
         try:
             mapping = _attr(module, MAPPING, None)
             if not isinstance(mapping, dict) or not mapping:
@@ -368,7 +278,7 @@ def collisions() -> dict:
                 if isinstance(name, str) and _defined_in(node_class, root, seen) == pack:
                     claims.setdefault(name, set()).add(pack)
                     packs.add(pack)
-        except Exception as error:  # noqa: BLE001 - a pack's module, doing anything at all
+        except Exception as error:  # noqa: BLE001
             named = _attr(module, "__name__", "") or "an unnamed module"
             skipped.append(f"{named}: {type(error).__name__}: {error}")
 
@@ -376,7 +286,7 @@ def collisions() -> dict:
         import nodes
 
         live = _attr(nodes, MAPPING, {}) or {}
-    except Exception:  # noqa: BLE001 - no live mapping only means "cannot say which won"
+    except Exception:  # noqa: BLE001
         live = {}
 
     groups = []
@@ -394,14 +304,8 @@ def collisions() -> dict:
             "skipped": skipped, "reason": ""}
 
 
-# --- holding a pack at the version that works -------------------------------------------------
-
 def holds_path() -> Path:
-    """Where the held versions are written.
-
-    Beside the trusted list, in ComfyUI's user directory, so a hold outlives a browser and a
-    reinstall of this pack both.
-    """
+    """Where the held versions are written."""
     return paths.store_file("held_versions.json")
 
 
@@ -410,8 +314,7 @@ def holds() -> dict:
 
     Returns:
         ``{name: {"version": str, "at": float}}``, empty where nothing is held or the file
-        cannot be read. A hold that cannot be read is treated as no hold: the consequence is
-        an update being offered, which is recoverable, rather than one being hidden.
+        cannot be read.
     """
     try:
         data = json.loads(holds_path().read_text(encoding="utf-8"))
@@ -424,10 +327,6 @@ def holds() -> dict:
 
 def hold(name: str, version: str) -> dict:
     """Hold a pack at the version it is on, so no update is offered for it.
-
-    This changes what is offered, not what is installed. Nothing is renamed, pinned in git, or
-    written into the pack. It is a note that says "this one works, leave it alone", and the
-    only thing it does is keep the pack out of the update count and out of a batch update.
 
     Args:
         name: The pack's directory name.

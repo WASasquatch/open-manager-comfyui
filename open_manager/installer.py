@@ -1,9 +1,4 @@
-"""Install a pack from the registry without the host manager.
-
-A registry artifact is a zip whose files sit at its root. Installing one places those files
-in ``custom_nodes/<node_id>`` and installs any requirements the pack declares. A
-``.tracking`` file beside them lists what was written.
-"""
+"""Install a pack from the registry without the host manager."""
 
 from __future__ import annotations
 
@@ -34,19 +29,14 @@ __all__ = [
     "uninstall",
 ]
 
-#: Marker written into an installed pack, naming the version this installed.
 MARKER = ".open_manager.json"
 
-#: Seconds a download may take.
 DOWNLOAD_TIMEOUT = 300
 
-#: Seconds a requirements install may take.
 PIP_TIMEOUT = 1800
 
-#: Characters a directory name may not carry on either platform.
 _UNSAFE_IN_NAME = re.compile(r"[\\/:*?\"<>|\x00-\x1f]")
 
-#: Windows device names, which cannot be used as a directory name.
 _RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{n}" for n in range(1, 10)}
@@ -68,8 +58,7 @@ class InstallResult:
         pip_output: Captured pip output, trimmed.
         pip_requirements: The requirement lines pip was actually given, after anything held
             back or substituted.
-        pip_errors: The lines of pip's output that say what went wrong, pulled out of the
-            middle where the resolver puts them rather than left for the reader to find.
+        pip_errors: The lines of pip's output that say what went wrong.
         installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
     """
@@ -215,8 +204,6 @@ def resolve_install_dir(node_id: str) -> Path | None:
 def _download(url: str, target: Path) -> None:
     """Download a URL to a file.
 
-    Only ``https``. ``urlopen`` also honours ``file:`` and ``ftp:``, which no real source uses.
-
     Args:
         url: Artifact URL.
         target: File to write.
@@ -292,8 +279,6 @@ def _archive_urls(owner: str, repo: str, ref: str) -> list[tuple[str, str]]:
     ref = (ref or "").strip()
     if not ref:
         return [(name, f"{base}/refs/heads/{name}") for name in ("main", "Main", "master")]
-    # A full or abbreviated sha is fetched directly; anything else is treated as a branch,
-    # with the bare form tried after in case it names a tag.
     if re.fullmatch(r"[0-9a-fA-F]{7,40}", ref):
         return [(ref, f"{base}/{ref}")]
     return [(ref, f"{base}/refs/heads/{ref}"), (ref, f"{base}/{ref}")]
@@ -304,10 +289,11 @@ def inspect_repo(repo_url: str, ref: str = "") -> dict:
 
     Args:
         repo_url: The repository URL.
+        ref: A branch name or commit sha. Empty tries ``main``, ``Main`` and ``master``.
 
     Returns:
-        ``{ok, findings, impact, reason}``. ``findings`` come from the artifact and
-        dependency assessment; ``impact`` is the pip dry-run result.
+        ``{ok, findings, impact, dependencies, reason}``. ``findings`` come from the
+        artifact and dependency assessment; ``impact`` is the pip dry-run result.
     """
     from . import deps as deps_mod
     from . import impact as impact_mod
@@ -392,16 +378,13 @@ def install_repo(
 ) -> InstallResult:
     """Install a pack from its GitHub repository, for packs not on the registry.
 
-    The repository archive is downloaded and extracted with its wrapping directory stripped.
-
     Args:
         repo_url: The repository URL.
         python: Interpreter requirements install into. Defaults to the running one.
         with_deps: Whether to install declared requirements.
-        ref: A branch name or commit sha to install. Empty takes the default branch. The ref
-            is recorded in the pack's marker, so the installed list shows what is in place.
-        overwrite: Whether to replace an existing install rather than refusing. Installing a
-            branch over a release is the ordinary case when testing a change.
+        ref: A branch name or commit sha to install. Empty tries ``main``, ``Main`` and
+            ``master``. The one fetched is recorded in the pack's marker.
+        overwrite: Whether to replace an existing install rather than refusing.
 
     Returns:
         An :class:`InstallResult`.
@@ -494,14 +477,8 @@ def _requirements(directory: Path) -> list[str]:
     ]
 
 
-#: Never installed from a pack's requirements: these carry the build a working ComfyUI was
-#: set up with -- a CUDA wheel, a matching torchvision -- which a generic one would replace.
 PIP_BLACKLIST = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
 
-#: Requirements-file options never passed on to pip, and why. These apply to every package in
-#: the run, not to one of their own, so a pack that sets ``--index-url`` also redirects the
-#: ordinary requirements beneath it. Held back rather than refused, and named in the result.
-#: Options that only make an install stricter (``--hash``, ``--only-binary``) pass through.
 PIP_REDIRECTS = {
     "-i": "changes where every package in this install comes from",
     "--index-url": "changes where every package in this install comes from",
@@ -519,8 +496,6 @@ PIP_REDIRECTS = {
     "--config-settings": "passes arguments to the package's own build",
 }
 
-#: Lines of pip output worth showing first. A dependency resolution failure prints its
-#: explanation well before the end, so a tail alone hides the one sentence that matters.
 _PIP_TROUBLE = (
     "ERROR:",
     "error:",
@@ -535,8 +510,6 @@ _PIP_TROUBLE = (
     "requires Python",
 )
 
-#: How much of pip's output is kept. Enough for a build log's last failure, not so much that
-#: a successful install of forty wheels arrives as a wall of text.
 _PIP_TAIL = 40
 
 
@@ -557,7 +530,6 @@ def pip_trouble(output: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-#: A requirement line's package name: what precedes any extras, specifier or marker.
 _REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -568,9 +540,6 @@ def overrides_path() -> Path:
 
 def pip_overrides() -> dict:
     """Package substitutions the user has configured.
-
-    A mapping of package name to the requirement to install instead, applied before pip
-    runs. The usual case is pointing a desktop build at a headless one, or the reverse.
 
     Returns:
         ``{name: replacement}``, empty where the file is absent or unreadable.
@@ -619,7 +588,6 @@ def requirement_redirect(line: str) -> tuple[str, str]:
     text = line.strip()
     if not text.startswith("-"):
         return "", ""
-    # pip accepts `--index-url URL`, `--index-url=URL` and `-iURL` alike.
     head = text.split("=", 1)[0].split()[0]
     if head in PIP_REDIRECTS:
         return head, PIP_REDIRECTS[head]
@@ -638,11 +606,10 @@ def plan_requirements(
         lines: Requirement lines as the pack wrote them.
 
     Returns:
-        ``(to_install, held_back, substituted, redirects)``. ``held_back`` names requirements
-        dropped because installing them would disturb the running environment; ``redirects``
-        names option lines dropped because they would change where packages come from, each
-        as ``line -- why``; ``substituted`` records each ``before -> after`` the user's
-        overrides applied.
+        ``(to_install, held_back, substituted, redirects)``. ``held_back`` names the
+        :data:`PIP_BLACKLIST` requirements dropped; ``redirects`` names the
+        :data:`PIP_REDIRECTS` option lines dropped, each as ``line (why)``; ``substituted``
+        records each ``before -> after`` the user's overrides applied.
     """
     overrides = pip_overrides()
     keep: list[str] = []
@@ -669,9 +636,6 @@ def plan_requirements(
 def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
     """Install an already-placed pack's requirements.
 
-    Separate from the install itself so the files can be looked at before anything is added
-    to the environment.
-
     Args:
         directory: The installed pack directory.
         python: Interpreter to install into.
@@ -693,10 +657,9 @@ def _pip_install(directory: Path, python: str) -> dict:
         python: Interpreter to install into.
 
     Returns:
-        ``{ok, output, requirements, errors}``. ``output`` names what was held back or
-        substituted, so the result says what was done rather than only that it finished.
-        ``errors`` is what pip said went wrong, which is the part a reader needs and the part
-        a trimmed tail is most likely to lose.
+        ``{ok, output, requirements, errors, installer}``. ``output`` names what was held
+        back or substituted. ``errors`` is what pip said went wrong. ``installer`` is
+        ``pip``, ``uv`` or ``none``.
     """
     keep, held, swapped, redirects = plan_requirements(_requirements(directory))
     notes = []
@@ -704,7 +667,7 @@ def _pip_install(directory: Path, python: str) -> dict:
         notes.append("Held back to protect the running install: " + ", ".join(held))
     if redirects:
         notes.append(
-            "Held back because they change where packages come from, not which ones: "
+            "Options held back: "
             + "; ".join(redirects)
         )
     if swapped:
@@ -714,7 +677,6 @@ def _pip_install(directory: Path, python: str) -> dict:
         return {"ok": True, "output": said, "requirements": [], "errors": [],
                 "installer": piptool.kind(python)}
 
-    # Written out rather than passed as arguments, so pip parses option lines itself.
     filtered = directory / ".open_manager_requirements.txt"
     try:
         filtered.write_text("\n".join(keep) + "\n", encoding="utf-8")
@@ -848,11 +810,6 @@ def list_installed() -> list[dict]:
 def _installed_at(directory: Path) -> float:
     """When a pack arrived, as well as can be told from what is on disk.
 
-    Packs this installed record the moment in their marker, which is the only exact answer.
-    For everything else, a clone or a hand-placed directory, the filesystem is asked. Birth
-    time is preferred where the platform reports one, because a directory's modification time
-    moves every time the pack is updated and would sort a long-installed pack as new.
-
     Args:
         directory: The pack directory.
 
@@ -871,8 +828,6 @@ def _installed_at(directory: Path) -> float:
         info = directory.stat()
     except OSError:
         return 0.0
-    # st_birthtime where the platform has it; on Windows st_ctime is the creation time, while
-    # on Linux it is the inode change time, which is the nearest thing available there.
     for name in ("st_birthtime", "st_ctime"):
         value = getattr(info, name, None)
         if isinstance(value, (int, float)) and value > 0:
@@ -935,8 +890,6 @@ def install(
     except RuntimeError as error:
         return InstallResult(ok=False, reason=str(error))
 
-    # An existing install may sit in a differently-named directory. Find it before deciding
-    # whether this is a fresh install or a replacement.
     existing = resolve_install_dir(node_id)
     if existing is not None:
         if not overwrite:

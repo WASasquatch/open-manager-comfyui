@@ -1,10 +1,6 @@
-// Colour palettes for ComfyUI, spanning light and dark, each with a grid-aligned canvas
-// background, registered into ComfyUI's own palette system.
-
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// Wire colours by socket type, bright enough to read on a dark canvas.
 const SLOTS_DARK = {
   CLIP: "#ffd500", CLIP_VISION: "#a8dadc", CLIP_VISION_OUTPUT: "#ad7452",
   CONDITIONING: "#ffa931", CONTROL_NET: "#6ee7b7", IMAGE: "#64b5f6", LATENT: "#ff9cf9",
@@ -12,7 +8,6 @@ const SLOTS_DARK = {
   PIPE_LINE: "#7737aa", INT: "#29699c", XYPLOT: "#74da5d", SAMPLING: "#60a5fa",
 };
 
-// The same sockets in deeper tones, for a light canvas.
 const SLOTS_LIGHT = {
   CLIP: "#a8780a", CLIP_VISION: "#2f7d8c", CLIP_VISION_OUTPUT: "#7a4a34",
   CONDITIONING: "#c2620a", CONTROL_NET: "#12805a", IMAGE: "#1565c0", LATENT: "#a3229c",
@@ -20,7 +15,6 @@ const SLOTS_LIGHT = {
   PIPE_LINE: "#5a2a80", INT: "#1b4f72", XYPLOT: "#3a8a2a", SAMPLING: "#1565c0",
 };
 
-// Brand sockets for the Comfy themes, drawn from plum, mauve and yellow.
 const SLOTS_BRAND = {
   CLIP: "#f2ff59", CLIP_VISION: "#9d8ad6", CLIP_VISION_OUTPUT: "#b08a6a",
   CONDITIONING: "#e0b83a", CONTROL_NET: "#6fc9a8", IMAGE: "#7aa2f7", LATENT: "#c79be8",
@@ -28,7 +22,6 @@ const SLOTS_BRAND = {
   PIPE_LINE: "#4d3762", INT: "#49378b", XYPLOT: "#8fd18a", SAMPLING: "#a08fd4",
 };
 
-// Brand sockets deepened for a light canvas.
 const SLOTS_BRAND_LIGHT = {
   CLIP: "#8a7a12", CLIP_VISION: "#5a4a9e", CLIP_VISION_OUTPUT: "#7a5a3a",
   CONDITIONING: "#a8770f", CONTROL_NET: "#1f7d63", IMAGE: "#3355b5", LATENT: "#7a3f9e",
@@ -36,10 +29,6 @@ const SLOTS_BRAND_LIGHT = {
   PIPE_LINE: "#4d3762", INT: "#3a2f6a", XYPLOT: "#3f7d3a", SAMPLING: "#49378b",
 };
 
-// A tiling background as an SVG data URI on a 100-unit tile, ten snap-grid cells wide. Fine
-// marks sit every 10 or 20 units and a heavier mark every 100. Interior marks are held
-// clear of the tile edge and lines run flush to it. ``format`` selects the pattern and
-// ``dark`` sets the tone.
 function background(format, dark) {
   const c = dark ? "255,255,255" : "20,22,28";
   const minor = dark ? 0.05 : 0.07;
@@ -88,14 +77,12 @@ function texture(kind, rgb, alpha) {
   return "data:image/svg+xml;base64," + btoa(svg);
 }
 
-// Category hues drawn from the Comfy brand: plum, mauve, yellow, canvas, warm gray.
 const BRAND_HUES = {
   loaders: "#49378b", conditioning: "#f2ff59", sampling: "#6b4fa8", latent: "#9d8ad6",
   image: "#c2bfb9", mask: "#7e7c78", audio: "#d4c85a", video: "#8f6fb5",
   utils: "#5a5760", advanced: "#4d3762", model: "#3a2b6d", api: "#b09ae0",
 };
 
-// Blend two hex colours; ``t`` is how much of ``b`` to take.
 function mix(a, b, t) {
   const cut = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   try {
@@ -108,7 +95,6 @@ function mix(a, b, t) {
   }
 }
 
-// Hex to HSL and back.
 function hexToHsl(hex) {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
@@ -139,27 +125,15 @@ function hslToHex(h, s, l) {
   return `#${to(f(0))}${to(f(8))}${to(f(4))}`;
 }
 
-// How far each category sits from the theme's accent, in degrees.
 const CATEGORY_SPREAD = {
   loaders: -55, conditioning: 35, sampling: 0, latent: 70, image: -25, mask: 110,
   audio: 55, video: 90, utils: 0, advanced: -80, model: -55, api: 70,
 };
 
-// Header colours per category. An explicit hue table is used as given; otherwise each hue is
-// turned around the theme's own accent.
-//: How much lightness ComfyUI adds to every node colour under a palette marked
-//: `light_theme`. It sets `LiteGraph.nodeLightness = 0.5` and the node getter adds that to
-//: the colour's own lightness, clamped at 100. A light palette therefore has to state its
-//: header colours this much darker than it wants them, or everything arrives white.
 const LIGHT_LIFT = 50;
 
-//: Lightness floor for a sunk colour. Zero is black, and black has no hue to lift, so any
-//: colour already darker than the lift collapsed to grey: purple loaders came back at
-//: rgb(142,142,142). A few points above zero keeps the hue and saturation, which the lift
-//: carries through.
 const SINK_FLOOR = 4;
 
-// The colour to state so that a light palette renders the one that was wanted.
 function sink(hex) {
   try {
     const { h, s, l } = hexToHsl(hex);
@@ -169,9 +143,6 @@ function sink(hex) {
   }
 }
 
-// The colour ComfyUI would render a stated one as, which is the stated one under every palette
-// but a light one. Needed wherever this module draws something ComfyUI would otherwise have
-// drawn itself, so the two agree.
 function asRendered(colour) {
   const amount = Number(window.LiteGraph?.nodeLightness);
   if (!Number.isFinite(amount) || amount <= 0) return colour;
@@ -201,12 +172,10 @@ function categoryColours(dark, accent, hues) {
   return out;
 }
 
-// Text that reads on a given background.
 function contrastOn(color) {
   return luminance(color) > 0.55 ? "#141418" : "#ffffff";
 }
 
-// Relative luminance of any CSS colour, 0 to 1.
 function luminance(color) {
   const [r, g, b] = channels(color);
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -221,7 +190,6 @@ function colourReader() {
   return colourPen;
 }
 
-// Any CSS colour as its three channels, for compositing a scrim over a backdrop image.
 function channels(color) {
   const key = String(color);
   const known = colourSeen.get(key);
@@ -250,7 +218,6 @@ function channels(color) {
   return made;
 }
 
-//: Contrast below which ink is treated as unreadable on a surface, as a WCAG-style ratio.
 const INK_MIN_RATIO = 2.5;
 
 function contrastRatio(ink, surface) {
@@ -259,15 +226,6 @@ function contrastRatio(ink, surface) {
   return one > two ? one / two : two / one;
 }
 
-// The colour to leave in `LiteGraph.NODE_TITLE_COLOR` while a theme is active.
-//
-// Nothing in ComfyUI draws a node title from it. Titles come from `canvas.node_title_color`,
-// which this module sets per node, and setting the global to red changed no title and only
-// the execution time badge that comfyui-easy-use draws. That badge fills itself with
-// `NODE_DEFAULT_BGCOLOR` and then writes this colour on top, so a palette with light headers
-// states a dark title colour and the badge arrives black on black. Where the stated colour
-// cannot be read on the node body, the global is pointed at one that can, which is what its
-// only reader is actually compositing against.
 function badgeInk(palette) {
   const stated = palette?.colors?.litegraph_base?.NODE_TITLE_COLOR;
   const body = window.LiteGraph?.NODE_DEFAULT_BGCOLOR;
@@ -275,7 +233,6 @@ function badgeInk(palette) {
   return contrastRatio(stated, body) < INK_MIN_RATIO ? contrastOn(body) : stated;
 }
 
-// Mark a light palette, which the interface reads to leave dark mode.
 function repairLightPalettes(palettes) {
   let repaired = false;
   for (const palette of Object.values(palettes)) {
@@ -289,8 +246,6 @@ function repairLightPalettes(palettes) {
   return repaired;
 }
 
-// A palette from a compact spec. ``title`` colours the node header apart from its body;
-// ``slots`` overrides the socket set.
 function theme({ id, name, dark, format, bg, surface, title, text, subtext, border, accent, neon, widget, link, slots, hues, art, icon, shadow }) {
   const glow = neon || accent;
   const header = title || accent;
@@ -298,12 +253,8 @@ function theme({ id, name, dark, format, bg, surface, title, text, subtext, bord
   return {
     id,
     name,
-    // Bump this whenever anything below changes. `registerThemes` only replaces a reader's
-    // stored copy when the shipped version is higher, so an edit left at the old number
-    // reaches new installs only and silently does nothing for everyone who already has it.
     version: 18,
     ...(dark ? {} : { light_theme: true }),
-    // Read by Open Manager; ComfyUI's own loader ignores it.
     extras: {
       shape: { radius: 10, titleHeight: 28, slotHeight: 20 },
       links: { mode: "spline", border: false },
@@ -364,13 +315,10 @@ function theme({ id, name, dark, format, bg, surface, title, text, subtext, bord
   };
 }
 
-// LiteGraph geometry as it was before a theme touched it.
 let baseShape = null;
 let activeExtras = null;
 let hookInstalled = false;
 
-// Category keys a node answers to, most specific first: the full path, then the bucket below
-// ``model/`` where core nodes nest, then each shorter path.
 const keysSeen = new Map();
 const KEYS_CAP = 600;
 
@@ -390,7 +338,6 @@ function categoryKeys(node) {
   return keys;
 }
 
-// The colour a category table gives a node, or undefined.
 function categoryColour(categories, node) {
   if (!categories) return undefined;
   for (const key of categoryKeys(node)) {
@@ -425,14 +372,8 @@ function categoryGradient(categories, node) {
   return undefined;
 }
 
-//: Link shapes a theme may ask for.
 const LINK_MODES = new Set(["straight", "linear", "spline"]);
 
-// The colour the active palette would give a node, for anything outside the canvas that wants
-// to speak the same language. The precedence is the draw hook's, so a progress bar and the
-// node it is reporting on never disagree: a colour set on the node, then a rule for its
-// class, then its category. Empty where the palette has nothing to say, which is the caller's
-// cue to fall back rather than to paint something grey.
 export function nodeTint(node) {
   if (node?.color) return node.color;
   const extras = activeExtras;
@@ -461,8 +402,6 @@ function sanitiseGradient(raw) {
   return { angle: Number.isFinite(angle) ? ((angle % 360) + 360) % 360 : 0, stops };
 }
 
-// The stop a title has to stay legible against: the lightest, because white text fails there
-// first. A gradient reading as one colour for contrast is the point.
 const anchorSeen = new WeakMap();
 
 function gradientAnchor(grade) {
@@ -478,7 +417,6 @@ function gradientAnchor(grade) {
   return best;
 }
 
-// A CanvasGradient across a node's title bar, cached per width and spec.
 function titleGradient(ctx, node, grade, width, height) {
   const key = `${grade.angle}|${width}|${grade.stops.map((s) => s.join(":")).join(",")}`;
   if (node._omGradientKey === key && node._omGradient) return node._omGradient;
@@ -488,7 +426,7 @@ function titleGradient(ctx, node, grade, width, height) {
   const midY = -height / 2;
   const made = ctx.createLinearGradient(width / 2 - x, midY - y, width / 2 + x, midY + y);
   for (const [at, colour] of grade.stops) {
-    try { made.addColorStop(at, colour); } catch { /* a colour the browser will not take */ }
+    try { made.addColorStop(at, colour); } catch {}
   }
   node._omGradientKey = key;
   node._omGradient = made;
@@ -513,8 +451,6 @@ function paintGradientTitle(node, grade) {
   };
 }
 
-// Reduce a theme's extras to known keys within known bounds. Nothing outside this shape
-// reaches the renderer.
 function sanitiseExtras(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
@@ -534,8 +470,6 @@ function sanitiseExtras(raw) {
 
   if (raw.links && typeof raw.links === "object") {
     const links = {};
-    // A theme may name a link shape. It is applied to the canvas while that theme is in
-    // use and taken back when it is not; the reader's own setting is never written.
     if (LINK_MODES.has(raw.links.mode)) links.mode = raw.links.mode;
     if (typeof raw.links.border === "boolean") links.border = raw.links.border;
     if (Object.keys(links).length) out.links = links;
@@ -555,7 +489,6 @@ function sanitiseExtras(raw) {
       const spot = String(raw.canvas.position || "").trim().toLowerCase();
       if (BACKDROP_SPOTS.has(spot)) surface.position = spot;
     }
-    // `false` hides the ruler, an image replaces it, absent leaves the palette's own.
     if (raw.canvas.grid === false) {
       surface.grid = false;
     } else {
@@ -660,9 +593,6 @@ const BACKDROP_SPOTS = new Set([
 let imageBudget = 0;
 let imageCount = 0;
 
-// Sources already accepted this palette, so the cap counts distinct images rather than
-// references to them. A theme naming one texture across sixty categories spent sixty of the
-// eight it is allowed, and whatever was read last, the graph backdrop included, was refused.
 const imageSeen = new Map();
 
 function themeImage(raw, slot) {
@@ -719,15 +649,13 @@ function artFor(src, slot) {
       } else {
         entry.ready = true;
       }
-      try { app.canvas?.setDirty(true, false); } catch { /* no canvas yet */ }
-      // Vue nodes are not redrawn by the canvas, so they need telling separately: the first
-      // paint of a node happens before its icon has decoded and would otherwise show nothing.
-      try { scheduleVuePaint(); } catch { /* the Vue path is not in use */ }
+      try { app.canvas?.setDirty(true, false); } catch {}
+      try { scheduleVuePaint(); } catch {}
     };
     entry.image.onerror = () => {
       entry.failed = true;
       console.warn(`[Open Manager] theme image could not be loaded: ${src.slice(0, 80)}`);
-      try { scheduleVuePaint(); } catch { /* the Vue path is not in use */ }
+      try { scheduleVuePaint(); } catch {}
     };
     entry.image.src = src;
     artCache.set(src, entry);
@@ -809,13 +737,6 @@ function sanitiseFacet(raw, slot) {
   return kept.image || kept.glyph ? kept : undefined;
 }
 
-// A trailing space in a class prefix carries meaning, so it is kept.
-//
-// WAS Node Suite names many of its classes with spaces, as in `Image Blank` and `Text String`.
-// Trimming turned the prefix `Image ` into `Image`, which then matched 176 registered classes
-// instead of 75, putting the pack's icon on core nodes such as `ImageScale` and `ImageInvert`.
-// Leading whitespace is still dropped, because no class name begins with one, and a prefix
-// that is nothing but whitespace is refused rather than matching everything.
 function sanitisePrefixes(raw) {
   const list = Array.isArray(raw) ? raw : [raw];
   const kept = [];
@@ -860,12 +781,6 @@ function paintTitleIcon(icon, image) {
   };
 }
 
-// The body fill LiteGraph would have drawn, drawn here instead so it can carry alpha.
-//
-// `node.bgcolor` is set to transparent for the draw, because LiteGraph re-emits whatever
-// colour it is given without the alpha channel: an `rgba()` body colour comes out solid. The
-// title bar and the widgets are drawn from their own colours and are left alone, so only the
-// body goes see-through and the readable parts stay readable.
 function paintBodyWash(colour, alpha, next) {
   return function (ctx) {
     if (!this.flags?.collapsed) {
@@ -888,22 +803,22 @@ function paintBodyWash(colour, alpha, next) {
       }
     }
     if (next) {
-      try { next.call(this, ctx); } catch { /* the painter below this one */ }
+      try { next.call(this, ctx); } catch {}
     }
   };
 }
 
 function bodyColour(node) {
   const lg = window.LiteGraph;
-  const stated = node.bgcolor || node.constructor?.bgcolor || lg?.NODE_DEFAULT_BGCOLOR
-    || "#171b16";
+  const own = Object.prototype.hasOwnProperty.call(node, "bgcolor") ? node.bgcolor : "";
+  const stated = own || lg?.NODE_DEFAULT_BGCOLOR || node.constructor?.bgcolor || "#171b16";
   return asRendered(stated);
 }
 
 function paintNodeBody(spec, image, alpha, inherited) {
   return function (ctx) {
     if (inherited) {
-      try { inherited.call(this, ctx); } catch { /* the host's own handler */ }
+      try { inherited.call(this, ctx); } catch {}
     }
     if (this.flags?.collapsed) return;
     const size = this.renderingSize;
@@ -980,8 +895,6 @@ function paintGlow(ctx, node, glow, scale) {
   ctx.restore();
 }
 
-// Wraps node drawing once. The header tint and selection glow are applied for the draw and
-// undone straight after, leaving the saved workflow unchanged.
 function installDrawHook() {
   const proto = window.LGraphCanvas?.prototype;
   if (!proto || hookInstalled || typeof proto.drawNode !== "function") return;
@@ -990,12 +903,6 @@ function installDrawHook() {
     const extras = activeExtras;
     if (!extras) return original.call(this, node, ctx, ...rest);
 
-    // Vue renders the nodes, so none of the per-node drawing below reaches the screen.
-    // Assigning node.color and node.title anyway is not free: both are instrumented, their
-    // setters have no equality guard, and each one rebuilds this node's reactive record and
-    // invalidates the list feeding every node on screen. That was two invalidations per node
-    // per frame buying nothing. The selection glow is the exception: it is drawn on the canvas
-    // under the node elements, so it still lands.
     if (window.LiteGraph?.vueNodesMode) {
       const halo = extras.glow;
       if (halo?.selected && node.selected && !this.low_quality && readerGates().glow) {
@@ -1004,8 +911,6 @@ function installDrawHook() {
       return original.call(this, node, ctx, ...rest);
     }
 
-    // Precedence: a colour set on the node, then a rule for its class, then the category
-    // tint. A rule is a colour, or {color, title} to relabel the class.
     const rule = extras.nodes?.[node.type];
     const ruleColor = typeof rule === "string" ? rule : rule?.color;
     const chosen = node.color ? null : (ruleColor ?? categoryColour(extras.categories, node));
@@ -1019,10 +924,6 @@ function installDrawHook() {
       node.color = tint;
       this.node_title_color = contrastOn(tint);
     } else if (node.color) {
-      // A colour the reader set on a node still wins, but the palette's own title colour is
-      // stated against the palette's header, not against theirs. Under a light-header theme
-      // that is a dark ink, and a node they coloured dark arrived with a title that could not
-      // be read. Their colour is untouched; only the ink over it is answered to.
       this.node_title_color = contrastOn(asRendered(node.color));
     }
     if (grade) node.onDrawTitleBar = paintGradientTitle(node, grade);
@@ -1070,9 +971,6 @@ function installDrawHook() {
       }
     }
 
-    // A see-through body is only drawn for nodes ComfyUI draws normally. A muted or bypassed
-    // node takes its body colour from LiteGraph rather than from the node, and washing it in
-    // the node's own colour would erase the one signal that it is not going to run.
     const solidity = bodySolidity(extras);
     const savedBg = node.bgcolor;
     const hadBg = Object.prototype.hasOwnProperty.call(node, "bgcolor");
@@ -1116,29 +1014,15 @@ function installDrawHook() {
   hookInstalled = true;
 }
 
-//: Bumped only if this ever has to run again for a different reason. A reader who has been
-//: through it carries this number, so it happens once and not on every load.
 const LINK_REPAIR = 1;
 
-//: Where that is recorded. Registered as a hidden setting so it lives with the reader's
-//: account rather than in one browser: repairing again in a second browser would overwrite a
-//: choice they had already put back.
 const LINK_REPAIR_KEY = "openManager.linkModeRepair";
 
-// Put back the link shape an earlier version of this extension took away.
-//
-// That version assigned `LiteGraph.LINK_RENDER_MODE` on every palette load, including
-// ComfyUI's own palettes, and restored it from a snapshot taken when the value was undefined.
-// The result was global and persisted: readers who had never chosen linear were left on it,
-// on every theme, with ComfyUI's setting reporting linear as though they had asked for it.
-// Nothing distinguishes that from a deliberate choice of linear, so this corrects exactly
-// that one value, once, and says so rather than doing it quietly.
-//
-// Returns:
-//   `{from, to}` where a setting was corrected, otherwise null.
 export async function repairLinkMode() {
   const setting = app.extensionManager?.setting;
   if (!setting) return null;
+
+  if (!await settingsReady()) return null;
 
   let done = 0;
   try { done = Number(setting.get(LINK_REPAIR_KEY)) || 0; } catch { return null; }
@@ -1152,8 +1036,6 @@ export async function repairLinkMode() {
       await setting.set("Comfy.LinkRenderMode", fixed);
       corrected = { from: "linear", to: fixed === 2 ? "spline" : String(fixed) };
     }
-    // Recorded either way. A reader who was never affected should not be asked again, and a
-    // reader who was must not be corrected a second time after putting it back.
     await setting.set(LINK_REPAIR_KEY, LINK_REPAIR);
   } catch {
     return null;
@@ -1161,14 +1043,8 @@ export async function repairLinkMode() {
   return corrected;
 }
 
-//: The shapes ComfyUI's own setting offers. A value outside this is not a link mode, and
-//: restoring one would leave the canvas drawing nothing recognisable.
 const LINK_VALUES = new Set([0, 1, 2, 3]);
 
-// What ComfyUI registered as the default for the link shape, which is spline. Read from the
-// setting's own definition rather than assumed, so a future ComfyUI that changes its mind is
-// followed rather than contradicted. The constant is the last resort, for a frontend that
-// keeps its definitions somewhere this does not know to look.
 function defaultLinkMode() {
   try {
     const setting = app.extensionManager?.setting;
@@ -1183,17 +1059,10 @@ function defaultLinkMode() {
       if (LINK_VALUES.has(value)) return value;
     }
   } catch {
-    // Falls through to the constant.
   }
   return window.LiteGraph?.SPLINE_LINK ?? 2;
 }
 
-// The link shape to go back to when no theme is asking for one.
-//
-// The reader's setting comes first: it is the record of what they chose, we never write it,
-// and reading it live means a change made while a theme was overriding is respected rather
-// than undone. Where it holds nothing usable the answer is ComfyUI's own default, because
-// that is what the canvas would draw if Open Manager were not installed.
 let gateCache = {
   nodeArt: true, artStrength: 1, titleIcons: true, glow: true, backdrop: true, bodyOpacity: 1,
 };
@@ -1221,8 +1090,6 @@ function refreshGates() {
   return gateCache;
 }
 
-// How solid a node body is drawn, blending what the theme asks for with how much of that the
-// reader wants. One is fully solid, which is what ComfyUI draws on its own.
 function bodySolidity(extras) {
   const chosen = readerGates().bodyOpacity;
   if (chosen < 1) return chosen;
@@ -1240,30 +1107,14 @@ function readerLinkMode() {
     const chosen = Number(app.extensionManager?.setting?.get("Comfy.LinkRenderMode"));
     if (LINK_VALUES.has(chosen)) return chosen;
   } catch {
-    // Falls through to the default.
   }
   return defaultLinkMode();
 }
 
-//: What this module has actually changed. Restoring something never changed is how a value
-//: the reader chose gets replaced by whatever happened to be set when a theme first loaded.
 let changed = {
   shape: false, border: false, linkMode: false, zoomAlpha: false, backdrop: false, grid: false,
 };
 
-// Put a theme's backdrop behind the graph.
-//
-// The image is set on the canvas element rather than drawn into it, so the browser composites
-// it and nothing has to be redrawn when the graph is. For it to be visible at all the colour
-// LiteGraph clears the canvas to has to go: that fill is opaque and sits over anything behind
-// the element. Everything LiteGraph draws, the dot grid included, still lands on top.
-// The colour the palette being applied clears its canvas to.
-//
-// Read from the palette every time rather than snapshotted at the first override. A snapshot
-// belongs to whichever theme happened to be on when a backdrop first appeared, so putting it
-// back on the way out painted the next theme's canvas in the previous theme's colour: leaving
-// WAS Node Suite, whose canvas is #0d0f0d, turned every plain theme black until a second
-// switch cleared the flag.
 function canvasColour(palette, canvas) {
   const stated = palette?.colors?.litegraph_base?.CLEAR_BACKGROUND_COLOR;
   if (typeof stated === "string" && stated) return stated;
@@ -1301,11 +1152,8 @@ function applyBackdrop(canvas, surface, palette) {
   }
 }
 
-//: How long to wait after the DOM changes before repainting Vue nodes, so a burst of node
-//: mounts costs one pass.
 const VUE_SWEEP = 150;
 
-//: Properties ComfyUI fills from the palette for its Vue node components.
 const VUE_LIFTED = ["--node-component-header-surface", "--component-node-background"];
 
 let vueObserver = null;
@@ -1326,13 +1174,6 @@ function cssGradient(grade) {
   return `linear-gradient(${grade.angle}deg, ${stops.join(", ")})`;
 }
 
-// Correct the node colours ComfyUI hands its Vue components.
-//
-// On the canvas path ComfyUI adds `nodeLightness` to every node colour, so a light palette has
-// to state its colours that much darker to arrive at what it wants. The Vue path copies the
-// stated colour into a CSS custom property verbatim and never applies the lift, so those sunk
-// values arrive raw: a light theme's node bodies came out the near-black they were stated as.
-// This puts the lifted value back, which is the colour the palette was written to produce.
 function liftVueProperties(palette) {
   const root = document.documentElement;
   const lift = Number(window.LiteGraph?.nodeLightness);
@@ -1356,9 +1197,18 @@ function vueBodyOf(root) {
   return root.querySelector("[data-testid^='node-body-']");
 }
 
+function vueInnerOf(root) {
+  return root.querySelector("[data-testid='node-inner-wrapper']");
+}
+
 function stripVueNode(root) {
   root.style.removeProperty("--node-component-header-surface");
   root.style.removeProperty("--component-node-background");
+  const inner = vueInnerOf(root);
+  if (inner) {
+    inner.style.removeProperty("--component-node-background");
+    inner.style.removeProperty("background-color");
+  }
   for (const part of root.querySelectorAll('[class*="footer"]')) {
     part.style.backgroundImage = "";
   }
@@ -1387,13 +1237,10 @@ function stripVueNode(root) {
     body.style.backgroundRepeat = "";
     body.style.backgroundSize = "";
     body.style.backgroundBlendMode = "";
+    body.style.removeProperty("background-color");
   }
 }
 
-// The same header tint, gradient and body art the canvas hook paints, applied to one Vue node.
-//
-// The node is found from `data-node-id` on the element, so the precedence is the one the
-// canvas path uses: a colour the reader set wins, then a rule for the class, then the category.
 function paintVueNode(root, extras) {
   const node = app.graph?.getNodeById?.(Number(root.getAttribute("data-node-id")));
   if (!node) return;
@@ -1401,18 +1248,10 @@ function paintVueNode(root, extras) {
   const ruleColor = typeof rule === "string" ? rule : rule?.color;
   const chosen = node.color ? null : (ruleColor ?? categoryColour(extras.categories, node));
   const grade = node.color ? null : (rule?.gradient ?? categoryGradient(extras.categories, node));
-  // A gradient's stops are stated at the colour they are meant to show, because this module
-  // paints them itself and ComfyUI never lifts them. A flat colour goes the other way: it
-  // reaches the canvas through `node.color`, so a light palette states it sunk and it has to
-  // be lifted here to arrive at the same place. Lifting an anchor taken from the stops instead
-  // pushed every light header to white.
   const shown = grade ? gradientAnchor(grade) : (chosen ? asRendered(chosen) : null);
   const header = vueHeaderOf(root);
   if (shown) {
     root.style.setProperty("--node-component-header-surface", shown);
-    // Scoped to the header. This token also inks input and output slot labels, widget field
-    // labels and the footer tabs, so setting it on the node root gave every label the ink
-    // chosen to read against the header, over a body of a different colour entirely.
     if (header) header.style.setProperty("--node-component-slot-text", contrastOn(shown));
   } else {
     root.style.removeProperty("--node-component-header-surface");
@@ -1420,20 +1259,26 @@ function paintVueNode(root, extras) {
   }
   if (header) header.style.backgroundImage = grade ? cssGradient(grade) : "";
 
-  // A see-through body, which takes two writes rather than one. The body's own colour is easy,
-  // but behind it sits the wrapper painted with the header surface, so an alpha body would
-  // reveal the header colour and never the graph. The wrapper goes transparent too and the
-  // header band is painted on the header element instead, which is otherwise unpainted. A node
-  // the reader gave its own body colour is left alone: the component writes that inline and
-  // would shadow this anyway.
+  const gates = readerGates();
+  const artSpec = gates.nodeArt ? facetFor(extras, node, "body") : undefined;
+  const arted = !!(artSpec && artSpec !== "none" && artSpec.image);
   const solidity = bodySolidity(extras);
-  const washable = solidity < 1 && !node.flags?.collapsed && !node.bgcolor
+  const ownBody = Object.prototype.hasOwnProperty.call(node, "bgcolor")
+    && !!node.bgcolor && node.bgcolor !== "transparent";
+  const washable = (solidity < 1 || arted) && !node.flags?.collapsed && !ownBody
     && (node.mode === undefined || node.mode === 0);
   if (washable) {
     const [red, green, blue] = channels(asRendered(bodyColour(node)));
-    root.style.setProperty("--component-node-background",
-      `rgba(${red},${green},${blue},${solidity})`);
+    const wash = `rgba(${red},${green},${blue},${solidity})`;
+    root.style.setProperty("--component-node-background", wash);
     root.style.setProperty("--node-component-header-surface", "transparent");
+    const inner = vueInnerOf(root);
+    if (inner) {
+      inner.style.setProperty("--component-node-background", wash);
+      inner.style.setProperty("background-color", "transparent", "important");
+    }
+    const painted = vueBodyOf(root);
+    if (painted) painted.style.setProperty("background-color", wash, "important");
     if (header && !header.style.backgroundImage) {
       const flat = shown
         || asRendered(node.color || window.LiteGraph?.NODE_DEFAULT_COLOR || "#333333");
@@ -1445,10 +1290,15 @@ function paintVueNode(root, extras) {
     }
   } else {
     root.style.removeProperty("--component-node-background");
+    const inner = vueInnerOf(root);
+    if (inner) {
+      inner.style.removeProperty("--component-node-background");
+      inner.style.removeProperty("background-color");
+    }
+    const painted = vueBodyOf(root);
+    if (painted) painted.style.removeProperty("background-color");
   }
 
-  // A per-node drop shadow. Inline style beats the element's `drop-shadow-*` utilities, and
-  // the component binds no `filter` of its own, so this is not patched away on the next tick.
   const shade = facetFor(extras, node, "shadow");
   if (typeof shade === "string" && shade !== "none") {
     root.style.filter = `drop-shadow(0 2px 3px ${shade})`;
@@ -1462,13 +1312,10 @@ function paintVueNode(root, extras) {
 
   const body = vueBodyOf(root);
   if (!body) return;
-  const gates = readerGates();
-  const spec = gates.nodeArt ? facetFor(extras, node, "body") : undefined;
-  if (spec && spec !== "none" && spec.image) {
+  const spec = artSpec;
+  if (arted) {
     const tile = spec.fit !== "cover";
     const strength = Math.max(0, Math.min(1, (spec.opacity ?? 0.5) * gates.artStrength));
-    // Quietened with a scrim in the palette's own body colour rather than by fading the
-    // element, which would take the widgets and their text with it.
     const [red, green, blue] = channels(asRendered(bodyColour(node)));
     const wash = `rgba(${red},${green},${blue},${1 - strength})`;
     const scrim = strength < 1 ? `linear-gradient(${wash}, ${wash}), ` : "";
@@ -1484,15 +1331,9 @@ function paintVueNode(root, extras) {
   }
 }
 
-//: Glyph rules injected once each, because `content` cannot be set from an inline style.
-//: One stylesheet for everything the title pseudo-element needs. The icon rule is static and
-//: fed by inline custom properties, so it is written once however many icons a theme carries.
-//: Glyphs still need a rule each, because `content` cannot come from a custom property.
 const VUE_GLYPH_STYLE = "om-vue-title";
 const vueGlyphRules = new Map();
 
-//: The title is a 16px line box. An icon taller than that would grow the header, so this is
-//: the ceiling whatever size a theme asks for.
 const VUE_TITLE_LINE = 16;
 
 function vueSheet() {
@@ -1500,13 +1341,6 @@ function vueSheet() {
   if (sheet) return sheet;
   sheet = document.createElement("style");
   sheet.id = VUE_GLYPH_STYLE;
-  // A real flex item in the title row, rather than a background painted behind the text.
-  // The title is `flex min-w-0 flex-1 items-center gap-2` holding one truncating child, so a
-  // pseudo-element reserves its own width by layout, is centred by `items-center`, and the
-  // text shrinks around it. Overlap stops being two numbers that have to agree. `flex:0 0 auto`
-  // matters because the whole chain is `min-w-0` and a narrow node would otherwise squash it.
-  // The attribute gate matters because an empty `content` is still a flex item, and the row's
-  // gap would indent every title in the graph.
   sheet.textContent = '.lg-node [data-testid="node-title"][data-om-icon]::before{'
     + 'content:"";flex:0 0 auto;width:var(--om-icon-w);height:var(--om-icon-h);'
     + 'background-image:var(--om-icon);background-repeat:no-repeat;'
@@ -1530,11 +1364,6 @@ function artPending(src) {
   return !!entry && !entry.ready && !entry.failed;
 }
 
-// A theme's title icon, beside the title rather than in place of the round box.
-//
-// There is no round box in a Vue node: that position is the collapse button, and the header
-// component offers no slot to sit in. So the icon becomes a pseudo-element at the head of the
-// title row, which is the closest honest equivalent.
 function paintVueIcon(root, extras, node) {
   const title = root.querySelector('[data-testid="node-title"]');
   if (!title) return;
@@ -1552,11 +1381,6 @@ function paintVueIcon(root, extras, node) {
   }
   const size = Math.max(8, Math.min(32, spec.size ?? 13));
   if (spec.image) {
-    // The box is reserved before the image has decoded, and at the same width it will end up
-    // with: fitting inside a square leaves a wide or square icon exactly `cap` across, so only
-    // its height changes when the real proportions arrive and the title text never moves.
-    // Leaving the image unset for that one pass also means an icon this later refuses for
-    // being too large never appears at all.
     const cap = Math.min(size, VUE_TITLE_LINE);
     const art = artFor(spec.image, "icon");
     let boxWide = cap;
@@ -1573,14 +1397,10 @@ function paintVueIcon(root, extras, node) {
     }
     vueSheet();
     root.removeAttribute("data-om-glyph");
-    // Unset while decoding. An invalid `var()` leaves background-image at none, which is what
-    // makes the reservation show as empty space rather than a broken image.
     if (art) title.style.setProperty("--om-icon", `url("${spec.image}")`);
     else title.style.removeProperty("--om-icon");
     title.style.setProperty("--om-icon-w", `${boxWide}px`);
     title.style.setProperty("--om-icon-h", `${boxTall}px`);
-    // The row's own gap is 8px, which is too wide beside a mark this small. The title holds
-    // one other child, so narrowing it affects nothing else.
     title.style.setProperty("column-gap", "4px");
     title.setAttribute("data-om-icon", "");
     return;
@@ -1605,7 +1425,7 @@ function paintVueNodes() {
     try {
       if (activeExtras) paintVueNode(root, activeExtras);
       else stripVueNode(root);
-    } catch { /* one node that would not take a colour */ }
+    } catch {}
   }
 }
 
@@ -1613,24 +1433,16 @@ function scheduleVuePaint() {
   if (vueTimer) return;
   vueTimer = setTimeout(() => {
     vueTimer = 0;
-    try { paintVueNodes(); } catch { /* the DOM moved under us */ }
+    try { paintVueNodes(); } catch {}
   }, VUE_SWEEP);
 }
 
-// Watch for Vue nodes mounting, so a node dragged in is themed like the rest.
 function dropVueObserver() {
   if (vueObserver) vueObserver.disconnect();
   vueObserver = null;
   vuePane = null;
 }
 
-// Watch the pane the node elements live in, so a menu or a toast opening does not schedule a
-// sweep of every node.
-//
-// The pane is destroyed and rebuilt when the renderer is switched, so an observer held from a
-// previous switch is watching an element no longer in the document and will never fire again.
-// Switching Nodes 2.0 off and back on left exactly that: new nodes, a dead observer, and no
-// theme on any of them until something else happened to reload the palette.
 export function watchVueNodes() {
   if (typeof MutationObserver !== "function") return;
   if (!vueNodesOn()) {
@@ -1650,11 +1462,6 @@ export function watchVueNodes() {
   scheduleVuePaint();
 }
 
-// Notice the renderer being switched, and re-apply everything when it is.
-//
-// A repaint of the node elements is not enough on its own: the document level colour
-// corrections, the geometry globals and the per-node styles each belong to one renderer or the
-// other, and none of them are revisited by a palette that has not changed.
 function watchVueMode() {
   const on = vueNodesOn();
   if (vueModeSeen === null) {
@@ -1664,15 +1471,9 @@ function watchVueMode() {
   if (on === vueModeSeen) return;
   vueModeSeen = on;
   dropVueObserver();
-  try { refreshExtras(); } catch { /* no palette to read yet */ }
+  try { refreshExtras(); } catch {}
 }
 
-// Apply a palette's extras: geometry, link border, link shape, and the data the draw hook reads.
-//
-// Everything here is undone when a palette without extras is loaded, so a theme's choices last
-// exactly as long as the theme does. Nothing is written to `Comfy.LinkRenderMode`: that setting
-// is the reader's, and a theme writing over it leaves the settings panel showing one thing and
-// the canvas drawing another, with no hint as to why.
 export function applyExtras(palette) {
   const lg = window.LiteGraph;
   if (!lg) return;
@@ -1688,8 +1489,6 @@ export function applyExtras(palette) {
 
   const shape = extras?.shape;
   if (shape) {
-    // Captured as it is now, at the moment of the first override, so what goes back is what
-    // was actually displaced.
     if (!changed.shape) {
       baseShape = {
         radius: lg.ROUND_RADIUS,
@@ -1698,10 +1497,6 @@ export function applyExtras(palette) {
       };
       changed.shape = true;
     }
-    // Vue nodes round their corners in CSS and size their header from padding, so neither of
-    // the first two is read. NODE_TITLE_HEIGHT is worse than ignored there: it still offsets
-    // the node transform and --node-height, so a theme asking for a shorter header mis-sized
-    // every node without shortening anything.
     if (!window.LiteGraph?.vueNodesMode) {
       lg.ROUND_RADIUS = shape.radius ?? baseShape.radius;
       lg.NODE_TITLE_HEIGHT = shape.titleHeight ?? baseShape.titleHeight;
@@ -1728,12 +1523,6 @@ export function applyExtras(palette) {
       changed.border = false;
     }
 
-    // A theme may choose how links are drawn while it is the theme in use. Two things are
-    // never touched: `Comfy.LinkRenderMode`, which is the reader's own stored preference, and
-    // `LiteGraph.LINK_RENDER_MODE`, which is global. Issue #21 was the global one being
-    // written, so a shape one theme asked for became every theme's shape and outlived the
-    // session. The canvas property is per-canvas and unpersisted, so the choice lasts exactly
-    // as long as the theme does.
     const flat = extras?.canvas?.tileAlpha === "flat";
     if (flat) {
       if (!changed.zoomAlpha) {
@@ -1748,12 +1537,6 @@ export function applyExtras(palette) {
 
     applyBackdrop(canvas, extras?.canvas, palette);
 
-    // The dot grid is LiteGraph's own tiled background image. A theme supplying a backdrop may
-    // ask for it to be left off, which is the one case where hiding it is what was intended.
-    // The ruler is LiteGraph's own tiled background image. A theme may hide it, or replace it
-    // with a file of its own, which the palette's BACKGROUND_IMAGE cannot do because that key
-    // only ever holds an inline data URI. LiteGraph caches the decoded image and its pattern
-    // against the previous value, so both have to be dropped or the old ruler keeps drawing.
     const statedGrid = palette?.colors?.litegraph_base?.BACKGROUND_IMAGE;
     const asked = readerGates().backdrop ? extras?.canvas?.grid : undefined;
     const ownRuler = typeof asked === "string" ? asked : null;
@@ -1776,16 +1559,11 @@ export function applyExtras(palette) {
       changed.linkMode = true;
       canvas.links_render_mode = mode;
     } else if (changed.linkMode) {
-      // Back to what ComfyUI would draw on its own: the reader's setting, or its registered
-      // default where that says nothing usable. Deliberately not the snapshot taken at first
-      // override, which goes stale the moment they change the setting while a theme is on.
       canvas.links_render_mode = readerLinkMode();
       changed.linkMode = false;
     }
   }
 
-  // The hook goes in only for a theme declaring extras. Every other palette is drawn by
-  // ComfyUI untouched.
   if (extras) installDrawHook();
   liftVueProperties(palette);
   watchVueNodes();
@@ -1793,19 +1571,14 @@ export function applyExtras(palette) {
   app.canvas?.setDirty(true, true);
 }
 
-// Re-read the active palette's extras, for when a setting changes.
 export function refreshExtras() {
   try { applyExtras(app.extensionManager?.colorPalette?.getActiveColorPalette?.()); } catch {}
 }
 
-// Keep extras in step with the palette, however it is chosen.
 export function watchThemeExtras() {
   const service = app.extensionManager?.colorPalette;
   if (!service?.loadColorPalette || service.__omExtrasHook) return;
   const original = service.loadColorPalette.bind(service);
-  // The palette asked for, not the one the service reports. `getActiveColorPalette` still
-  // answers with the previous palette when the load resolves, so reading it here applied the
-  // extras of whatever was on screen a moment ago and every switch lagged by one.
   const asked = (args) => {
     const first = args[0];
     const id = typeof first === "string" ? first : first?.id;
@@ -1825,15 +1598,6 @@ export function watchThemeExtras() {
   };
   service.__omExtrasHook = true;
 
-  // The palette is not ready the moment this runs, and a fixed delay meant every node was
-  // drawn in the default header colour until it expired: a second of the brand yellow on
-  // everything, then the category colours arriving all at once. Poll briefly instead and
-  // apply the moment there is something to apply, then redraw so the canvas is not left
-  // showing what it painted before.
-  // Wrapping `loadColorPalette` is not enough. Settings switches the theme by writing
-  // `Comfy.ColorPalette`, and the palette is loaded internally without that method being
-  // called, so a theme picked in the UI left the previous theme's categories on the canvas.
-  // Watching which palette is active catches every route into a change, including startup.
   let waited = 0;
   let applied = null;
   const settle = () => {
@@ -1852,16 +1616,12 @@ export function watchThemeExtras() {
   settle();
 }
 
-//: How often to look for the active palette while the page is starting, how long that close
-//: watch lasts, and the slower interval kept up afterwards for a theme picked in Settings.
 const EXTRAS_POLL = 60;
 const EXTRAS_WAIT = 8000;
 const EXTRAS_IDLE = 400;
 
-// Ids replaced by the themes below, dropped from the palette store on load.
 const RETIRED = ["om_tokyo_night", "om_catppuccin_mocha", "om_catppuccin_latte", "om_rose_pine_dawn"];
 
-// Two dark, two light; warm and vibrant, one background format each.
 export const THEMES = [
   theme({
     id: "om_ember", name: "Ember", dark: true, format: "dots",
@@ -1887,7 +1647,6 @@ export const THEMES = [
     bg: "#f4e2da", surface: "#fceee8", text: "#57332c", subtext: "#8e685e",
     border: "#e0bfb2", accent: "#e0553f", widget: "#eddad1", link: "#2f7f7a",
   }),
-  // ComfyUI brand colours: Ink, Plum, Yellow, Canvas, Warm White, Warm Gray.
   theme({
     id: "om_comfy_dark", name: "Comfy Dark", dark: true, format: "graph", slots: SLOTS_BRAND, hues: BRAND_HUES,
     art: { kind: "weave", alpha: 0.05 }, icon: { image: "comfy-logomark-yellow.svg", size: 13 },
@@ -1902,15 +1661,9 @@ export const THEMES = [
   }),
 ];
 
-// Merge the themes into the palette store. Only palettes named here are written; a changed
-// definition takes effect on the next load.
 const USER_THEME_API = "/open_manager/v1/api/user-themes";
+const SETTINGS_HEALTH_API = "/open_manager/v1/api/settings/health";
 
-// The reader's own themes, from `user/open_manager/themes/*.json`.
-//
-// The file wins over the stored copy every time, because the file is what the reader edits.
-// A palette tweaked in ComfyUI's own editor and also present as a file is therefore replaced
-// on the next load, which is the behaviour a file-backed theme has to have.
 async function userThemes() {
   try {
     const answer = await api.fetchApi(USER_THEME_API);
@@ -1922,15 +1675,61 @@ async function userThemes() {
   }
 }
 
+let diskSettings = null;
+
+async function settingsOnDisk() {
+  if (diskSettings) return diskSettings;
+  try {
+    const held = await (await api.fetchApi("/settings")).json();
+    diskSettings = held && typeof held === "object" ? held : {};
+  } catch {
+    diskSettings = {};
+  }
+  return diskSettings;
+}
+
+let diskHealth = null;
+
+async function settingsHealth() {
+  if (diskHealth) return diskHealth;
+  try {
+    const held = await (await api.fetchApi(SETTINGS_HEALTH_API)).json();
+    diskHealth = held && typeof held === "object" ? held : {};
+  } catch {
+    diskHealth = {};
+  }
+  return diskHealth;
+}
+
+async function settingsReady() {
+  const health = await settingsHealth();
+  if (health.present && health.readable === false) {
+    console.warn("[Open Manager] settings file present but unreadable to ComfyUI; "
+      + "not writing, to leave it recoverable");
+    return false;
+  }
+  const disk = await settingsOnDisk();
+  const keys = Object.keys(disk);
+  if (!keys.length) return true;
+  const setting = app.extensionManager?.setting;
+  if (!setting) return false;
+  const probe = keys.find((one) => disk[one] !== undefined && disk[one] !== null);
+  if (!probe) return true;
+  try {
+    if (setting.get(probe) !== undefined) return true;
+  } catch {
+    return false;
+  }
+  console.warn(`[Open Manager] ${keys.length} settings on disk, none readable in the page yet; `
+    + "not writing");
+  return false;
+}
+
 export async function registerThemes() {
   const setting = app.extensionManager?.setting;
   const service = app.extensionManager?.colorPalette;
   if (!setting) return;
 
-  // Read before written, because writing a store that could not be read would replace
-  // whatever palettes the reader has with only ours. An empty store is not that case: it is
-  // what a fresh ComfyUI holds, and bailing on it meant a new install never received a single
-  // bundled theme. Only a read that actually failed stops this.
   let store = {};
   let readable = false;
   try {
@@ -1940,6 +1739,7 @@ export async function registerThemes() {
     readable = false;
   }
   if (!readable || typeof store !== "object") return;
+  if (!await settingsReady()) return;
 
   const merged = {};
   let changed = false;
@@ -1971,7 +1771,6 @@ export async function registerThemes() {
   if (!changed) return;
 
   try { setting.set("Comfy.CustomColorPalettes", merged); } catch {}
-  // A retired theme is no longer in the store; step onto a built-in.
   const active = service?.getActiveColorPalette?.()?.id;
   if (RETIRED.includes(active)) {
     try { await service.loadColorPalette("dark"); } catch {}

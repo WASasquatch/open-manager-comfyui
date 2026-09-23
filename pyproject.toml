@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "comfyui-open-manager"
-description = "An alternative package manager for ComfyUI. Browse and install custom nodes and custom themes."
-version = "0.1.9"
+description = "A manager for the whole ComfyUI workspace: custom nodes, themes, models, downloads, a resource monitor and a desktop."
+version = "0.2.0"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -39,7 +39,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The Resource Monitor reads these. Without them it reports what it can and says so.
 monitor = ["psutil", "pynvml"]
 
 [project.urls]
@@ -47,18 +46,22 @@ Homepage = "https://github.com/WASasquatch/open-manager-comfyui"
 Repository = "https://github.com/WASasquatch/open-manager-comfyui"
 Issues = "https://github.com/WASasquatch/open-manager-comfyui/issues"
 
-# Two ways to load, one core:
-#   pip install comfyui-open-manager -> provides the `comfyui_manager` import name, which
-#     ComfyUI imports by that exact name under --enable-manager. Taking it is what replaces
-#     the official manager, and is why `comfyui-manager` must be uninstalled first: both
-#     distributions write the same files.
-#   clone into custom_nodes -> loaded by the custom_nodes scan, can live beside the official
-#     ComfyUI Manager.
 [tool.setuptools]
 packages = ["open_manager", "comfyui_manager"]
 
 [tool.setuptools.package-data]
-open_manager = ["web/*.js", "web/*.svg", "themes/*.json"]
+open_manager = [
+    "web/*.js",
+    "web/*.svg",
+    "web/programs/*/manifest.json",
+    "web/programs/*/*.mjs",
+    "web/programs/*/*.html",
+    "web/programs/*/*.svg",
+    "web/programs/*/*.png",
+    "themes/*.json",
+    "wallpapers/*.webp",
+    "wallpapers/CREDITS.md",
+]
 
 [tool.comfy]
 PublisherId = "was"

@@ -1,7 +1,4 @@
-"""Check a pack's declared requirements against ComfyUI and the current environment.
-
-Each requirement is read against what is installed now and against ComfyUI's own pins.
-"""
+"""Check a pack's declared requirements against ComfyUI and the current environment."""
 
 from __future__ import annotations
 
@@ -10,7 +7,6 @@ import re
 
 __all__ = ["check", "comfyui_core"]
 
-#: Packages ComfyUI itself depends on.
 _CORE_NAMES = frozenset({
     "torch", "torchsde", "torchvision", "torchaudio", "numpy", "transformers",
     "tokenizers", "safetensors", "aiohttp", "pillow", "scipy", "einops", "kornia",

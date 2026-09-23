@@ -1,8 +1,4 @@
-"""Classify a licence by how freely a pack under it can be used.
-
-Tiers rank from most permissive to least: permissive, weak copyleft, copyleft, unknown,
-community, non-commercial. Each carries a colour for the panel.
-"""
+"""Classify a licence by how freely a pack under it can be used."""
 
 from __future__ import annotations
 
@@ -10,7 +6,6 @@ import re
 
 __all__ = ["classify", "colour", "detect_text"]
 
-#: Rank per tier, lower is more permissive.
 _RANK = {
     "permissive": 0,
     "weak-copyleft": 1,
@@ -20,11 +15,6 @@ _RANK = {
     "non-commercial": 5,
 }
 
-#: Colour per tier.
-#: Told apart by hue rather than graded from safe to dangerous. A licence is an obligation
-#: to check, not a fault: amber and red read as a warning about the pack itself, which is
-#: not what a copyleft term means. The ordering in :data:`_RANK` carries how freely a pack
-#: can be used, and the panel says so in words on the badge.
 _COLOR = {
     "permissive": "#3fb950",
     "weak-copyleft": "#58a6ff",
@@ -34,38 +24,24 @@ _COLOR = {
     "non-commercial": "#db61a2",
 }
 
-#: Fully permissive families, matched on word boundaries.
 _PERMISSIVE = re.compile(
     r"\b(mit|isc|bsd|apache|unlicense|wtfpl|zlib|cc0|bsl|boost|postgresql|ncsa|psf|python-2)\b"
 )
 
-#: Weak copyleft: file-level, not project-wide.
 _WEAK = re.compile(r"\b(mpl|mozilla|lgpl|epl|cddl)\b|gplv2-lgpl")
 
-#: Copyleft: project-wide, commercial use allowed.
 _COPYLEFT = re.compile(r"\b(gpl|agpl|gplv2|gplv3)\b")
 
-#: Substrings that mark a non-commercial or use-restricted licence.
 _NON_COMMERCIAL = (
     "noncommercial", "non-commercial", "cc-by-nc", "cc by-nc", "-nc-", "-nc-sa",
     "-nc-nd", "research", "openrail", "creativeml", "rail",
 )
 
-#: Substrings that mark a community licence: commercial use up to a revenue threshold.
 _COMMUNITY = ("community", "revenue", "commercial license required")
 
 
-#: Signature phrases that name a licence from its file text, each an all-must-match set.
-#: Ordered most specific first; the first match wins.
-#: Characters of the normalised text treated as the title block. A licence names itself at
-#: the top; what it says about other licences comes later.
 _TITLE_WINDOW = 400
 
-#: ``(name, needles, title_only)``. The GNU licences quote each other by name in their own
-#: bodies -- GPL-3 section 13 permits combining with the Affero licence, LGPL-3 incorporates
-#: GPL-3, and GPL-2 points readers at the Lesser licence -- so a plain substring search over
-#: the whole text reports the licence a file mentions rather than the one it is. Those are
-#: matched against the title alone. The rest have no such habit and are matched anywhere.
 _TEXT_SIGNS = (
     ("AGPL-3.0", ("gnu affero general public license",), True),
     ("LGPL-3.0", ("gnu lesser general public license", "version 3"), True),
@@ -125,11 +101,6 @@ def detect_text(text: str) -> str:
 def _name(value) -> str:
     """A licence name from the registry's licence field.
 
-    PEP 621 writes ``license`` as a table, and the registry stores whatever a pack declared.
-    So this arrives as a plain name, as a JSON object, as the TOML table verbatim, or as the
-    text between its braces. A table naming only a file names no licence: the empty string
-    sends it to the unknown tier, where the repository's licence file is read instead.
-
     Args:
         value: A string, or a ``{"text": ...}`` / ``{"file": ...}`` object.
 
@@ -153,10 +124,8 @@ def _name(value) -> str:
             decoded = None
         if isinstance(decoded, dict):
             return _name(decoded)
-        # Not JSON, so the braces are TOML's or the author's. Read what is inside them.
         text = text[1:-1].strip()
 
-    # ``file = "LICENSE"``, ``text = "MIT"``, ``file: LICENSE`` and the unspaced forms.
     field = re.match(r'^(file|text|spdx_id|type)\s*[=:]\s*(.*)$', text, re.I)
     if field:
         if field.group(1).lower() == "file":

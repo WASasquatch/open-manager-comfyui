@@ -1,0 +1,23 @@
+{
+  "id": "scratch",
+  "name": "Scratch",
+  "hint": "A pad for short notes",
+  "tags": [
+    "notes",
+    "scratch",
+    "text"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "scratch.svg",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "teal"
+  },
+  "capabilities": [
+    "storage"
+  ]
+}

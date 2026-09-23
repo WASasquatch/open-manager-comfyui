@@ -1,26 +1,7 @@
-"""Metadata a pack declares for Open Manager in a ``[tool.open_manager]`` pyproject table.
-
-Read from the pyproject the metadata scrape fetches, and from an installed pack's own
-pyproject. Every field is optional and whitelisted.
-
-    [tool.open_manager]
-    incompatible = ["numpy>=2.0"]
-    source = "github"
-    branch = "main"
-    docs = "https://..."
-    funding = "https://..."
-    release_note = "3.1.0 is flagged for an optional subprocess call."
-    capabilities = ["filesystem", "network", "subprocess"]
-    example_workflows = ["workflows/demo.json"]
-    themes = ["themes/ember-pro.json"]
-    gallery = ["docs/before.png", "https://example.com/after.webp"]
-"""
+"""Metadata a pack declares for Open Manager in a ``[tool.open_manager]`` pyproject table."""
 
 from __future__ import annotations
 
-# tomllib is stdlib from 3.11. On 3.10 the same parser is available as tomli, and where
-# neither is present the table is simply not read: a pack that declares one loses those
-# extras, and everything else in Open Manager carries on.
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -32,22 +13,12 @@ except ModuleNotFoundError:
 __all__ = ["CAPABILITIES", "expand", "from_pyproject", "repository_from_pyproject",
            "resolve_incompatible", "scrub"]
 
-#: String fields kept from the table and shown as text.
 _STR_FIELDS = ("source", "branch", "release_note")
 
-#: String fields the panel turns into links. These are scheme-checked like gallery entries:
-#: the panel opens them, so ``javascript:`` here is script in ComfyUI's own origin.
 _URL_FIELDS = ("docs", "funding")
 
-#: List-of-string fields kept from the table.
 _LIST_FIELDS = ("incompatible", "example_workflows", "themes", "gallery", "capabilities")
 
-#: What a pack may declare it does, as a fixed vocabulary so the panel can label each one and
-#: so a reader comparing two packs is comparing the same words. A pack declaring something
-#: outside this loses that entry rather than passing an arbitrary string to the interface.
-#:
-#: This is the author's own account of their pack. It is not verified, and it is not a
-#: substitute for the archive inspection, which reads what is actually in the box.
 CAPABILITIES = {
     "filesystem": "Filesystem read and write",
     "network": "Network access",
@@ -63,24 +34,15 @@ CAPABILITIES = {
     "hardware": "Direct hardware access",
 }
 
-#: Most refused capabilities reported back, and the longest one shown. A pack listing fifty
-#: invented words does not get fifty lines of complaint on its page.
 _CAPABILITY_REFUSALS = 8
 _CAPABILITY_CHARS = 40
 
-#: Most gallery entries kept. Lower than the general cap: a gallery is a showcase, and every
-#: entry is an image the panel will fetch.
 _GALLERY_CAP = 24
 
-#: Schemes a gallery entry may name. Anything else is a path inside the repository, and
-#: anything that is neither is dropped, so ``javascript:`` and ``data:`` never reach an
-#: ``img`` tag.
 _URL_SCHEMES = ("http://", "https://")
 
-#: Most list entries kept from one field.
 _LIST_CAP = 50
 
-#: Longest string kept from one field.
 _STR_CAP = 600
 
 
@@ -121,7 +83,6 @@ def from_pyproject(text: str) -> dict:
     if not text or tomllib is None:
         return {}
     try:
-        # Both parsers raise a ValueError subclass for malformed input.
         data = tomllib.loads(text)
     except (ValueError, TypeError):
         return {}
@@ -144,16 +105,12 @@ def from_pyproject(text: str) -> dict:
             if key == "capabilities":
                 asked = dict.fromkeys(v.lower().replace("-", "_") for v in items)
                 items = [one for one in asked if one in CAPABILITIES]
-                # What was refused is reported rather than dropped in silence, so an author
-                # who guessed at a word finds out instead of seeing their declaration vanish.
                 refused = [one[:_CAPABILITY_CHARS] for one in asked
                            if one not in CAPABILITIES][:_CAPABILITY_REFUSALS]
                 if refused:
                     out["capabilities_unknown"] = refused
             if items:
                 out[key] = items[:_LIST_CAP]
-    # The official scaffold already carries these, so a pack need not repeat them under
-    # [tool.open_manager]. Only used where the pack did not say otherwise.
     urls = (data.get("project") or {}).get("urls") or {}
     if isinstance(urls, dict):
         for key, names in (("docs", ("Documentation", "documentation", "Docs", "docs")),
@@ -178,10 +135,6 @@ def from_pyproject(text: str) -> dict:
 def scrub(developer: dict) -> dict:
     """Drop link fields that are not safe to open.
 
-    Applied to metadata read back from the cache, which was written before the check in
-    :func:`from_pyproject` existed and is kept until a pack's versions change. Without this
-    a value cached then is served indefinitely.
-
     Args:
         developer: A developer table, from a cache or freshly parsed.
 
@@ -200,10 +153,6 @@ def scrub(developer: dict) -> dict:
 def _link(value: str) -> bool:
     """Whether a value is a URL the panel may open.
 
-    Only absolute ``http`` and ``https`` are allowed. ``javascript:`` passed to the panel's
-    link buttons runs in ComfyUI's origin, which reaches every API the server exposes, so
-    the scheme is checked here rather than trusted.
-
     Args:
         value: The field's value.
 
@@ -219,9 +168,6 @@ def _link(value: str) -> bool:
 def _gallery_entry(entry: str) -> bool:
     """Whether a gallery entry is one the panel will show.
 
-    An entry is either an absolute ``http``/``https`` image URL, or a path inside the
-    repository. A scheme that is neither is refused rather than passed to the browser.
-
     Args:
         entry: One value from the ``gallery`` list.
 
@@ -234,11 +180,9 @@ def _gallery_entry(entry: str) -> bool:
     lowered = text.lower()
     if "://" in lowered or lowered.startswith(("javascript:", "data:", "vbscript:", "file:")):
         return lowered.startswith(_URL_SCHEMES)
-    # A repository path: no traversal, no absolute or Windows-style path.
     return not (".." in text or "\\" in text or text.startswith("/"))
 
 
-#: Fields whose entries may be patterns, and the extensions a bare directory expands to.
 _GLOBBABLE = {
     "example_workflows": (".json",),
     "themes": (".json",),
@@ -246,21 +190,13 @@ _GLOBBABLE = {
                 ".mp4", ".webm", ".mov", ".m4v"),
 }
 
-#: Extensions a workflow's preview image may carry.
 _PREVIEW_SUFFIXES = (".webp", ".png", ".jpg", ".jpeg", ".gif")
 
-#: Where ComfyUI's own convention puts example workflows, used when the field is absent.
-#: https://docs.comfy.org/custom-nodes/workflow_templates
 _WORKFLOW_DIRS = ("workflows", "workflow", "examples", "example", "example_workflows")
 
 
 def expand(table: dict, lister) -> dict:
     """Resolve pattern and directory entries against a pack's actual files.
-
-    An entry containing ``*`` or ``?`` is matched as a glob; one naming a directory takes
-    every file in it with a matching extension. Plain paths are left alone, so a pack that
-    lists its files by hand is unaffected. Where ``example_workflows`` is absent the
-    conventional directories are tried, which is what ComfyUI does for templates.
 
     Args:
         table: A table from :func:`from_pyproject`.
@@ -274,8 +210,6 @@ def expand(table: dict, lister) -> dict:
     import posixpath
 
     out = dict(table or {})
-    # A lister that can see nothing has nothing to say: leave every entry as the pack wrote
-    # it rather than resolving patterns to empty and dropping what it declared.
     if not lister("."):
         return out
     for field, suffixes in _GLOBBABLE.items():
@@ -296,15 +230,10 @@ def expand(table: dict, lister) -> dict:
             elif text.lower().endswith(suffixes):
                 resolved.append(text)
             else:
-                # A bare directory: everything in it this field can use.
                 found = [f for f in lister(text.rstrip("/")) if f.lower().endswith(suffixes)]
                 resolved.extend(sorted(found))
         seen: set[str] = set()
         deduped = [f for f in resolved if not (f in seen or seen.add(f))]
-        # Assigned even when empty. A pattern the lister could not match names nothing, and
-        # keeping it would put a path the pack never had in front of the reader as a button
-        # that cannot work. A lister that sees nothing at all returned above, so an empty
-        # result here means the repository really holds no such file.
         if deduped:
             out[field] = deduped[:_GALLERY_CAP if field == "gallery" else _LIST_CAP]
         else:
@@ -317,9 +246,6 @@ def expand(table: dict, lister) -> dict:
                 out["example_workflows"] = found[:_LIST_CAP]
                 break
 
-    # ComfyUI's template convention pairs a workflow with a preview image beside it, named
-    # for the workflow with an optional index. Where one exists it is offered as a thumbnail.
-    # https://docs.comfy.org/custom-nodes/workflow_templates
     workflows = out.get("example_workflows")
     if isinstance(workflows, list) and workflows:
         previews = {}
@@ -327,11 +253,6 @@ def expand(table: dict, lister) -> dict:
             folder = posixpath.dirname(entry)
             stem = posixpath.splitext(posixpath.basename(entry))[0].lower()
             for candidate in lister(folder or "."):
-                # Beside the workflow, not merely somewhere under it. Both listers recurse, so
-                # matching on the basename alone paired a workflow at the pack root with an
-                # image from any subdirectory: a pack shipping `was-node.json` took
-                # `themes/was-node-suite-dark/was-node-bg.png` as its thumbnail, because that
-                # sorts before its real sibling.
                 if posixpath.dirname(candidate) != folder:
                     continue
                 name = posixpath.basename(candidate).lower()

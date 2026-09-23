@@ -1,19 +1,4 @@
-"""What a published version says it needs, set beside what this install has.
-
-The registry lets a publisher declare, per version, a ComfyUI range, a frontend range, an
-operating system and an accelerator. Roughly one pack in six declares something, and the
-declarations are often wrong in the publisher's favour: ``>=1.0.0`` appears against a ComfyUI
-that has never left ``0.x``, and ``>=0.0.1`` says nothing at all.
-
-So nothing here predicts whether a version will run. It reports two facts side by side, what
-was declared and what this install has, and says whether one satisfies the other. A pack that
-declares a range it does not really need still installs; the reader is told what the pack
-claims and can decide. That is the same rule the rest of Open Manager follows: warn, never
-block.
-
-The OS and accelerator vocabularies are PyPI trove classifier fragments, which is why they
-read as ``Microsoft :: Windows`` rather than ``windows``.
-"""
+"""What a published version says it needs, set beside what this install has."""
 
 from __future__ import annotations
 
@@ -21,10 +6,8 @@ import sys
 
 __all__ = ["check", "host"]
 
-#: Trove classifier fragments that mean "any operating system".
 _ANY_OS = {"os independent", "any"}
 
-#: How ``sys.platform`` maps onto the classifier fragments publishers use.
 _PLATFORMS = {
     "win32": ("Microsoft :: Windows", ("microsoft", "windows")),
     "cygwin": ("Microsoft :: Windows", ("microsoft", "windows")),
@@ -32,7 +15,6 @@ _PLATFORMS = {
     "linux": ("POSIX :: Linux", ("linux", "posix", "unix")),
 }
 
-#: Accelerator fragments, and the torch backend that satisfies each.
 _ACCELERATORS = (
     ("nvidia cuda", "cuda"),
     ("cuda", "cuda"),
@@ -51,8 +33,7 @@ def _accelerator() -> tuple[str, str]:
 
     Returns:
         ``(backend, label)``. ``backend`` is one of ``cuda``, ``rocm``, ``xpu``, ``mps`` or
-        ``cpu``; it is ``unknown`` where torch is not importable, which is not the same as
-        having no accelerator and must not be reported as a mismatch.
+        ``cpu``, or ``unknown`` where torch cannot be imported or queried.
     """
     try:
         import torch
@@ -60,8 +41,6 @@ def _accelerator() -> tuple[str, str]:
         return "unknown", ""
     try:
         if torch.cuda.is_available():
-            # ROCm builds answer is_available() through the CUDA API, so the two are told
-            # apart by the build carrying a HIP version rather than by which call answers.
             if getattr(getattr(torch, "version", None), "hip", None):
                 return "rocm", "AMD ROCm"
             name = ""
@@ -104,9 +83,6 @@ def _frontend_version() -> str:
 
 def host() -> dict:
     """What this install is, in the terms the registry declares against.
-
-    Cached: none of it changes while the server runs, and it is read for every version of
-    every pack page.
 
     Returns:
         ``{comfyui, frontend, platform, os_label, accelerator, accelerator_label}``. Any
@@ -155,8 +131,6 @@ def _version_note(field: str, label: str, declared: str, mine: str) -> dict | No
         note["state"] = "ok" if SpecifierSet(declared).contains(
             Version(mine), prereleases=True) else "differs"
     except Exception:
-        # An unparsable specifier is the publisher's, not the reader's, and saying nothing
-        # is better than calling a version incompatible on the strength of a typo.
         note["state"] = "unknown"
     return note
 
@@ -227,8 +201,6 @@ def check(
     accelerator_note = _list_note(
         "accelerator", "accelerator", supported_accelerators,
         mine["accelerator_label"] or "",
-        # An unreadable torch is unknown, not unsatisfied: a reader with a working GPU and no
-        # importable torch must not be told their card is the wrong one.
         lambda one: backend == "unknown" or any(
             key in one and backend == want for key, want in _ACCELERATORS),
     )

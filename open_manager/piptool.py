@@ -1,8 +1,4 @@
-"""Whichever installer the running environment actually has.
-
-A ``uv venv`` ships no ``pip``, so ``python -m pip`` answers "No module named pip" and every
-install, listing and preview fails. uv installs into that environment through ``uv pip``.
-"""
+"""Whichever installer the running environment actually has."""
 
 from __future__ import annotations
 

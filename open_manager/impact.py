@@ -1,17 +1,4 @@
-"""What installing a version would do to the packages already present.
-
-The resolve runs the environment's own installer in dry-run mode, which reports what a
-requirement set would add and what it would replace. Nothing here installs. A ``uv``
-environment has no pip at all, so :mod:`.piptool` decides what is actually run.
-
-``--dry-run`` alone does not mean nothing runs. To learn what a source distribution requires
-pip executes its build backend, and for a ``git+`` or URL requirement it clones or downloads
-first and then does the same. That is the pack's own code, running before the reader has
-agreed to install anything, which is the opposite of what this module is for. So the resolve
-is restricted to built wheels, and only plain named requirements are handed to pip: options
-such as ``--index-url`` and anything naming a URL or a path are set aside unresolved and
-reported. ``--only-binary`` alone is not enough, because it does not cover direct references.
-"""
+"""What installing a version would do to the packages already present."""
 
 from __future__ import annotations
 
@@ -29,14 +16,10 @@ from . import piptool
 
 __all__ = ["CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from"]
 
-#: Seconds a resolve may take before it is abandoned.
 TIMEOUT = 180
 
-#: Held back whichever way they would move, mirroring ``installer.PIP_BLACKLIST``: these
-#: carry the build a working ComfyUI was set up with.
 HELD_BACK = frozenset({"torch", "torchaudio", "torchsde", "torchvision"})
 
-#: Packages a running ComfyUI depends on, where a replacement is reported prominently.
 CORE_PACKAGES = frozenset(
     {
         "torch", "torchaudio", "torchvision", "torchsde", "transformers", "safetensors",
@@ -138,20 +121,15 @@ def _parse_version(text: str) -> tuple:
     return tuple(parts) if parts else (text,)
 
 
-#: A requirement naming a package and nothing else: name, extras, specifier, marker. An
-#: allowlist, because the forms that make pip fetch and build are too varied to list.
 _NAMED_REQUIREMENT = re.compile(
-    r"^[A-Za-z0-9][A-Za-z0-9._-]*"        # name
-    r"(\[[A-Za-z0-9._,\s-]+\])?"          # extras
-    r"\s*(?:[<>=!~][^;]*)?"               # version specifier
-    r"\s*(?:;.*)?$"                       # environment marker
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*"
+    r"(\[[A-Za-z0-9._,\s-]+\])?"
+    r"\s*(?:[<>=!~][^;]*)?"
+    r"\s*(?:;.*)?$"
 )
 
-#: Archive suffixes. A package name may contain dots, so ``evil.tar.gz`` matches the form
-#: above while pip would read it as a file.
 _ARCHIVE_SUFFIXES = (".whl", ".zip", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".egg")
 
-#: Packages whose major version is an ABI boundary.
 _ABI_SENSITIVE = frozenset({"numpy"})
 
 
@@ -267,10 +245,6 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
 
 def _resolvable(requirements: Sequence[str]) -> tuple[list[str], list[str]]:
     """Split requirement lines into the ones pip may resolve and the ones it may not.
-
-    A line is only handed to pip where it names a package. An option line can redirect the
-    index the resolve draws from, and a URL, VCS or path reference is fetched and built to
-    be read, which runs the code being assessed.
 
     Args:
         requirements: Requirement lines the version declares.
@@ -400,9 +374,8 @@ def findings_from(impact: Impact) -> list[dict]:
                 "severity": "caution",
                 "title": f"{len(impact.unresolved)} requirement(s) not assessed",
                 "detail": "These name a URL, a repository or a path, or set a pip option. "
-                          "Reading what they require means fetching and building them, "
-                          "which runs their code, so they were left out of this estimate. "
-                          "They are installed as written if you continue.",
+                          "They are installed as written if you continue, apart from any "
+                          "option Open Manager holds back.",
                 "evidence": tuple(impact.unresolved[:8]),
             }
         )
@@ -441,9 +414,7 @@ def findings_from(impact: Impact) -> list[dict]:
             {
                 "severity": "caution",
                 "title": f"{len(skipped)} requirement(s) held back, not installed",
-                "detail": "These carry the build ComfyUI is running on, so they are kept as "
-                          "they are. The pack arrives without a dependency it asked for, "
-                          "which it may or may not mind.",
+                "detail": "The pack is installed without the versions it asks for.",
                 "evidence": tuple(
                     f"{entry.name}: asks for {entry.want}, keeping {entry.have}"
                     for entry in skipped
@@ -457,8 +428,7 @@ def findings_from(impact: Impact) -> list[dict]:
             {
                 "severity": "critical",
                 "title": f"Replaces {len(core)} package(s) ComfyUI depends on",
-                "detail": "Installing this version moves packages the running ComfyUI uses. "
-                          "This is the change most likely to break an install.",
+                "detail": "",
                 "evidence": tuple(
                     f"{entry.name}: {entry.have} -> {entry.want} ({entry.direction})"
                     for entry in core
@@ -487,7 +457,7 @@ def findings_from(impact: Impact) -> list[dict]:
             {
                 "severity": "note",
                 "title": f"Adds {len(impact.additions)} new package(s)",
-                "detail": "Nothing already installed is touched by these.",
+                "detail": "",
                 "evidence": tuple(impact.additions[:12]),
             }
         )

@@ -1,17 +1,4 @@
-"""What is actually on disk, across every model folder ComfyUI knows.
-
-ComfyUI can be pointed at several drives at once through ``extra_model_paths.yaml``, and once
-it is, nothing tells the reader what they have. The same weights end up on two drives, a file
-is deleted and a workflow stops loading, and a folder fills with models nothing references.
-
-So this walks the registered folders and answers three questions: what is there, what is there
-twice, and what nothing appears to use.
-
-Two costs are deliberately kept apart. Walking is cheap and happens when asked. Hashing is not
--- a single model runs to twenty gigabytes -- so it happens only for the files a question is
-actually being asked about, and the answer is cached against the file's size and modification
-time so it is not paid twice.
-"""
+"""What is actually on disk, across every model folder ComfyUI knows."""
 
 from __future__ import annotations
 
@@ -36,25 +23,16 @@ __all__ = [
     "hash_of",
 ]
 
-#: Most files indexed. A model folder holding more than this is not a model folder.
 MAX_FILES = 50_000
 
-#: Most workflows read when looking for references.
 MAX_WORKFLOWS = 5_000
 
-#: Largest workflow read, in bytes. Past this it is not a graph, it is an accident.
 MAX_WORKFLOW_BYTES = 32 << 20
 
-#: Models read from one workflow. A graph declaring more than this does not need
-#: enumerating exactly for the reader to see what it is asking for.
 MAX_DECLARED = 500
 
-#: Registered folders the library does not describe. The same set the deletion gate refuses,
-#: kept in one place so a folder can never be listed here and deletable there.
 SKIP_FOLDERS = models.NON_MODEL_FOLDERS
 
-#: Extensions counted as model files, whatever the policy currently allows to be downloaded.
-#: The library reports what is there, including formats a download would refuse.
 KNOWN_FORMATS = frozenset({
     ".safetensors", ".sft", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".onnx", ".engine",
     ".pkl", ".npz", ".yaml", ".msgpack",
@@ -87,8 +65,6 @@ def _key(path: str) -> str:
     return str(path).replace("\\", "/").rstrip("/").lower()
 
 
-# --- hashes -------------------------------------------------------------------------------
-
 def _hashes() -> dict:
     """Every digest already taken, keyed by path."""
     found = _read("model_hashes.json", {})
@@ -97,9 +73,6 @@ def _hashes() -> dict:
 
 def hash_of(where: str, force: bool = False) -> str:
     """The sha256 of one file, taken now or remembered from before.
-
-    A cached digest is only trusted while the file's size and modification time are unchanged,
-    so a file replaced in place is hashed again rather than reported as what it used to be.
 
     Args:
         where: Path to the file.
@@ -132,8 +105,6 @@ def hash_of(where: str, force: bool = False) -> str:
     return digest
 
 
-# --- the index ----------------------------------------------------------------------------
-
 def _roots() -> list[dict]:
     """Every registered folder and the paths behind it, without descending yet."""
     found = []
@@ -146,12 +117,7 @@ def _roots() -> list[dict]:
 
 
 def _unavailable(root: str) -> bool:
-    """Whether a root is missing because the place it lives is missing.
-
-    A registered folder that simply has not been created yet is ordinary and not worth
-    reporting -- ComfyUI registers dozens of them. A root on a drive that is not mounted is
-    worth reporting, because its contents are absent from the answer.
-    """
+    """Whether a root is missing because the place it lives is missing."""
     try:
         anchor = Path(root).anchor
         return bool(anchor) and not Path(anchor).exists()
@@ -166,10 +132,8 @@ def index(refresh: bool = False) -> dict:
         refresh: Walk again rather than answering from the last walk.
 
     Returns:
-        ``{files, roots, skipped, scanned_at, truncated}``. ``skipped`` names roots whose
-        drive is not mounted, so their absence from the answer is stated rather than silent.
-        A folder that merely has not been created is not reported: ComfyUI registers dozens
-        of those and they mean nothing.
+        ``{files, partials, roots, skipped, scanned_at, truncated}``. ``skipped`` names roots
+        whose drive is not mounted.
     """
     if not refresh:
         held = _read("model_index.json", None)
@@ -184,8 +148,6 @@ def index(refresh: bool = False) -> dict:
 
     for entry in _roots():
         root = entry["root"]
-        # A registered root can point at a drive that is not mounted. Checked before
-        # descending so an absent one is reported rather than silently contributing nothing.
         try:
             if not Path(root).is_dir():
                 if _unavailable(root):
@@ -198,9 +160,6 @@ def index(refresh: bool = False) -> dict:
         for where, _dirs, names in os.walk(root):
             for name in names:
                 suffix = os.path.splitext(name)[1].lower()
-                # A part file is a download in flight, not a model. It is noted rather than
-                # ignored: one left behind by a download that never finished is wasted space
-                # nothing will ever claim.
                 if suffix == ".part":
                     full = os.path.join(where, name)
                     try:
@@ -214,7 +173,6 @@ def index(refresh: bool = False) -> dict:
                     continue
                 full = os.path.join(where, name)
                 folded = _key(full)
-                # A file can sit under two registered roots where one nests inside the other.
                 if folded in seen:
                     continue
                 try:
@@ -251,15 +209,8 @@ def index(refresh: bool = False) -> dict:
     return answer
 
 
-# --- duplicates ---------------------------------------------------------------------------
-
 def fingerprint(where: str, size: int) -> str:
     """A cheap signature of a file: its size, its first megabyte and its last.
-
-    This can disprove a match and can never prove one. Two files whose signatures differ are
-    certainly different; two whose signatures agree may still differ somewhere in the middle,
-    and for a model file that middle is nearly all of it. So this is used to rule candidates
-    out quickly and never to call anything identical.
 
     Args:
         where: Path to the file.
@@ -286,25 +237,6 @@ def fingerprint(where: str, size: int) -> str:
 
 def duplicates(level: str = "names") -> dict:
     """Files held in more than one place, checked as far as the caller asked.
-
-    Sharing a name and a size is not being the same file, and being the same file is the only
-    thing that makes one copy safe to delete. So the answer is reached in stages, and says
-    which stage it stopped at rather than presenting a guess as a finding.
-
-    ``names``
-        Same name, same size. Free, no file is opened. A list of candidates.
-
-    ``quick``
-        Adds :func:`fingerprint`. Reads two megabytes per file, so it is effectively instant,
-        and it settles the negative case: a group whose signatures differ is *not* duplicated,
-        it is a name collision, which is worth knowing in its own right.
-
-    ``full``
-        Reads every candidate in full. The only level that can call a group identical, and the
-        only one whose reclaimable figure means anything.
-
-    Nothing is deleted here. Duplication is frequently deliberate -- a copy on the fast drive
-    and a copy on the archive -- so this reports and leaves the decision alone.
 
     Args:
         level: ``names``, ``quick`` or ``full``.
@@ -360,33 +292,25 @@ def duplicates(level: str = "names") -> dict:
     return {
         "groups": groups,
         "collisions": collisions,
-        # Only a full read can say what deleting would actually recover.
         "reclaimable": sum(row["wasted"] for row in groups) if level == "full" else 0,
         "candidate_bytes": sum(row["wasted"] for row in groups),
         "level": level,
     }
 
 
-# --- storage -------------------------------------------------------------------------------
-
 def storage(largest: int = 15) -> dict:
     """What is taking up the drives, and what could be given back.
-
-    Everything here is read off the index rather than measured again, so this costs a walk
-    only when the index itself is out of date.
 
     Args:
         largest: How many of the biggest files to name.
 
     Returns:
-        ``{roots, largest, partials, reclaimable, total}``.
+        ``{ok, roots, largest, partials, partial_bytes, duplicate_bytes, total, files}``.
     """
     found = index()
     files = found.get("files") or []
     partials = found.get("partials") or []
 
-    # Free space is a property of the drive, so roots on the same one report the same figure
-    # and it must not be added up across them.
     space: dict[str, dict] = {}
     for directory in sorted(models.folders()):
         if directory in SKIP_FOLDERS:
@@ -432,11 +356,6 @@ def storage(largest: int = 15) -> dict:
 def sweep_partials(paths: list | None = None) -> dict:
     """Delete leftover part files.
 
-    A part file is ours: a download writes one and renames it away when it finishes, so one
-    still sitting there belongs to a transfer that did not. It is still checked against the
-    index rather than deleted on the strength of its name, so nothing outside a registered
-    model folder can be named here.
-
     Args:
         paths: Which to remove, or ``None`` for every one the index found.
 
@@ -470,8 +389,6 @@ def sweep_partials(paths: list | None = None) -> dict:
     return {"removed": removed, "bytes": freed, "refused": refused}
 
 
-# --- references ---------------------------------------------------------------------------
-
 def _workflow_dir() -> Path | None:
     """Where ComfyUI keeps saved workflows."""
     root = paths.user_root()
@@ -492,22 +409,12 @@ def _names_in(node, found: set, depth: int = 0) -> None:
         for value in node:
             _names_in(value, found, depth + 1)
     elif isinstance(node, str) and 3 < len(node) < 256:
-        # Widget values carry a bare filename, sometimes with a subfolder in front of it.
         if os.path.splitext(node)[1].lower() in KNOWN_FORMATS:
             found.add(node.replace("\\", "/").rsplit("/", 1)[-1].lower())
 
 
 def declared_models(document: object, limit: int = MAX_DECLARED) -> list[dict]:
     """Every model a workflow document declares on its nodes.
-
-    ComfyUI records these as ``properties.models``, which is the only place a workflow says
-    where a model came from rather than merely naming it. They sit wherever the node sits,
-    and with subgraphs that is not the top-level ``nodes`` list, so the whole document is
-    walked instead.
-
-    Nothing here is judged. Whether a URL may be fetched, and whether the file is already on
-    disk, are questions for the caller, which is why the picker and the library can share
-    this and answer them differently.
 
     Args:
         document: A parsed workflow, or any part of one.
@@ -558,15 +465,6 @@ def declared_models(document: object, limit: int = MAX_DECLARED) -> list[dict]:
 def references() -> dict:
     """Every model filename the saved workflows appear to ask for.
 
-    This is a search, not an inventory. A workflow saved in API form, a widget shape not
-    recognised here, a path built at run time, or anything referring to a model from outside
-    ComfyUI will not appear. So the result says how far it looked, and callers are expected to
-    present it as what was found rather than as what exists.
-
-    A filename is all a widget value gives, so that is all ``names`` can hold. Where a
-    workflow also declares where a model came from, that is carried separately in
-    ``declared``: the two answer different questions, and only the second can be acted on.
-
     Returns:
         ``{names, declared, workflows, unreadable, searched_at}``, where ``declared`` is
         ``{workflow, models}`` for each workflow that declares any.
@@ -607,10 +505,6 @@ def references() -> dict:
 def referrers(name: str) -> dict:
     """Which saved workflows ask for a model by this filename.
 
-    The same search :func:`references` runs, narrowed to one name so the answer can say where
-    a particular file is used rather than only that something uses it. The same limits apply:
-    a workflow saved in API form, or one that builds its paths at run time, will not appear.
-
     Args:
         name: A model's filename, without any path.
 
@@ -645,15 +539,6 @@ def referrers(name: str) -> dict:
 
 def provenance(where: str) -> dict:
     """Everything recorded about one model on disk.
-
-    Three separate records meet here and not one of them is guaranteed: the download that
-    fetched it, a hash taken of it, and the workflows naming it. A model copied in by hand has
-    none of them, which is worth saying plainly rather than leaving the reader to infer it
-    from an empty panel.
-
-    A held hash is reported only while it still describes the file: the size and modification
-    time have to agree, or it is the digest of what used to be there. Nothing is hashed here.
-    Reading twenty gigabytes because a menu was opened is not a thing to do quietly.
 
     Args:
         where: A file inside one of ComfyUI's registered model folders.
@@ -697,14 +582,9 @@ def provenance(where: str) -> dict:
         "searched": used["searched"],
     }
 
-# --- deleting -----------------------------------------------------------------------------
 
 def delete(where: str) -> dict:
     """Delete one model file.
-
-    Refused for anything :func:`models.owned_path` will not vouch for, which means a path
-    outside the registered folders, a path that is not a file, and a symlink leading out of
-    them. One file at a time, never a sweep.
 
     Returns:
         ``{ok, reason, path}``.

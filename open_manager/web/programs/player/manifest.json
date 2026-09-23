@@ -1,0 +1,24 @@
+{
+  "id": "player",
+  "name": "Video Player",
+  "hint": "A player for video and audio",
+  "tags": [
+    "video",
+    "audio",
+    "play",
+    "media"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "surfaces": {
+    "desktop": false,
+    "start": false
+  },
+  "multiple": true,
+  "look": {
+    "tint": "grey"
+  },
+  "capabilities": [
+    "assets"
+  ]
+}

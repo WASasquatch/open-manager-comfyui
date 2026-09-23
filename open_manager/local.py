@@ -1,15 +1,4 @@
-"""What can be read about a pack from the copy on disk.
-
-Not every installed pack is in the registry. Some never were, some were pulled and some were
-put there by hand, and until now a pack the registry had never heard of had no page at all --
-opening it got an error about an entry that does not exist, which says nothing about the pack
-sitting in ``custom_nodes`` doing its job.
-
-Everything here is read from files the pack already ships: its pyproject, its README, its
-requirements, and the git metadata of a clone. Nothing is fetched and nothing is guessed. A
-field that cannot be read is left out rather than filled in with a plausible value, because a
-page that invents a licence is worse than one that admits it does not know.
-"""
+"""What can be read about a pack from the copy on disk."""
 
 from __future__ import annotations
 
@@ -19,17 +8,14 @@ from pathlib import Path
 
 __all__ = ["describe"]
 
-#: README names tried, in order. The first that exists is the one shown.
 _READMES = ("README.md", "README.MD", "Readme.md", "readme.md", "README.rst", "README.txt",
             "README")
 
-#: How much of a README travels. The panel renders it; a repository that ships a book does not
-#: get to decide how much memory that takes.
 _README_LIMIT = 400_000
 
 try:
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10
+except ModuleNotFoundError:  # pragma: no cover
     try:
         import tomli as tomllib  # type: ignore
     except ModuleNotFoundError:
@@ -78,9 +64,6 @@ def _pyproject(directory: Path) -> dict:
 def _git(directory: Path) -> dict:
     """Where a clone came from and what it is sitting on.
 
-    Read from the files git keeps rather than by running git, which may not be installed and
-    would be a subprocess per pack page either way.
-
     Args:
         directory: The pack directory.
 
@@ -91,7 +74,6 @@ def _git(directory: Path) -> dict:
     git = directory / ".git"
     if not git.exists():
         return {}
-    # A worktree or submodule keeps a file pointing at the real directory.
     if git.is_file():
         pointer = _read(git, 4096).strip()
         if pointer.startswith("gitdir:"):
@@ -118,7 +100,6 @@ def _git(directory: Path) -> dict:
         out["branch"] = ref.rsplit("/", 1)[-1]
         commit = _read(git / ref, 4096).strip()
         if not commit:
-            # A repository that has been packed keeps its refs in one file instead.
             for line in _read(git / "packed-refs", 2_000_000).splitlines():
                 if line.endswith(f" {ref}"):
                     commit = line.split(" ", 1)[0]
@@ -142,10 +123,6 @@ def _readme(directory: Path) -> dict:
 
 def _node_classes(directory: Path) -> list[str]:
     """Node names this pack registered, as ComfyUI currently has them.
-
-    Read from the live mappings rather than the source, so what is listed is what the pack
-    actually contributed to this session. A pack that failed to import contributes nothing and
-    gets an empty list, which is itself worth seeing.
 
     Args:
         directory: The pack directory.

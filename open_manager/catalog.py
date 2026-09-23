@@ -1,9 +1,4 @@
-"""A cached copy of the registry catalogue.
-
-The catalogue is fetched page by page and written to disk with each pack's licence already
-classified. Browsing, searching and sorting run against the cached copy. The network is
-reached for a first sync, an explicit update, and an install.
-"""
+"""A cached copy of the registry catalogue."""
 
 from __future__ import annotations
 
@@ -20,37 +15,26 @@ from . import license_files, licenses, log, metadata
 __all__ = [
     "is_self","load", "should_auto_sync", "state", "sync"]
 
-#: Registry catalogue endpoint. The server caps the page size at 100.
 BASE = "https://api.comfy.org/nodes"
 
-#: Nodes fetched per page.
 PAGE_LIMIT = 100
 
-#: Seconds one page request may take.
 TIMEOUT = 30
 
-#: Page requests in flight at once. The pages after the first are independent, so they are
-#: read together rather than one after another.
 CONCURRENCY = 8
 
-#: Most page requests a caller may ask for at once. A preference above this is clamped, so a
-#: mistyped setting cannot turn the sync into a flood.
 MAX_CONCURRENCY = 16
 
-#: Attempts made per page before the sync gives up.
 ATTEMPTS = 3
 
-#: Seconds waited before retrying a page, doubled for each attempt after.
 RETRY_BACKOFF = 0.5
 
-#: Statuses worth another attempt: the registry rate limiting, or a transient server fault.
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
 logger = log.get_logger("catalog")
 
 _state = {"syncing": False, "done": 0, "total": 0, "error": ""}
 
-#: Whether a sync has run since this server process started. Reset on restart.
 _session = {"synced": False}
 
 
@@ -94,41 +78,67 @@ def state() -> dict:
         "error": _state["error"],
     }
     if path.is_file():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+        held = _parsed(path)
+        if held["key"] is not None:
             info["cached"] = True
-            info["count"] = len(data.get("nodes", []))
-            info["fetched_at"] = float(data.get("fetched_at") or 0.0)
-        except (OSError, ValueError):
-            pass
+            info["count"] = len(held["nodes"])
+            info["fetched_at"] = held["fetched_at"]
     return info
 
 
-#: A licence field that arrived as a pyproject table field rather than a name.
 _LICENCE_FIELD = re.compile(r"^(file|text|spdx_id|type)\s*[=:]", re.I)
 
-#: Owner and repository from a GitHub URL.
 _REPO_URL = re.compile(r"github\.com[:/]+([^/]+)/([^/#?]+)", re.I)
 
 
-def load() -> list[dict]:
-    """The cached catalogue entries, empty where nothing is cached.
+_HELD: dict = {"key": None, "nodes": [], "fetched_at": 0.0}
 
-    Corrections are applied here as well as at sync, so a cache written before one was
-    noticed is fixed on read rather than only after the next sync.
-    """
+
+def _stamp(path: Path):
+    """What the cache file is now, or ``None`` where it is not there."""
     try:
-        nodes = json.loads(_path().read_text(encoding="utf-8")).get("nodes", [])
+        stat = path.stat()
+    except OSError:
+        return None
+    return (str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _parsed(path: Path) -> dict:
+    """The cache file's contents, read again only when the file itself has changed."""
+    key = _stamp(path)
+    if key is None:
+        _HELD["key"] = None
+        _HELD["nodes"] = []
+        _HELD["fetched_at"] = 0.0
+        return _HELD
+    if _HELD["key"] == key:
+        return _HELD
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        _HELD["key"] = None
+        _HELD["nodes"] = []
+        _HELD["fetched_at"] = 0.0
+        return _HELD
+    nodes = data.get("nodes", [])
+    _correct(nodes if isinstance(nodes, list) else [])
+    _HELD["key"] = key
+    _HELD["nodes"] = nodes if isinstance(nodes, list) else []
+    _HELD["fetched_at"] = float(data.get("fetched_at") or 0.0)
+    return _HELD
+
+
+def load() -> list[dict]:
+    """The cached catalogue entries, empty where nothing is cached."""
+    return _parsed(_path())["nodes"]
+
+
+def _correct(nodes: list) -> list[dict]:
+    """Correct borrowed star counts and licence fields of catalogue entries in place."""
     for node in nodes:
         if node.get("stars") and _borrowed(node.get("repository", "")):
             node["stars"] = 0
             node["borrowed"] = True
-        # A licence stored as a pyproject table rather than a name, classified before that
-        # was read properly. Anything still carrying a brace or a key is classified again.
-        # The colour is derived from the tier, so a change to the palette reaches entries
-        # cached under the old one instead of waiting for the next sync.
         tier = node.get("license_tier")
         if tier:
             node["license_color"] = licenses.colour(tier)
@@ -142,7 +152,6 @@ def load() -> list[dict]:
     return nodes
 
 
-#: Open Manager's own repository. It cannot install itself, so it is not offered.
 SELF_REPO = ("wasasquatch", "open-manager-comfyui")
 
 
@@ -155,17 +164,7 @@ def _pair(repository: str) -> tuple[str, str] | None:
 
 
 def hidden(repository: str) -> bool:
-    """Whether a pack belongs in the browsable listing.
-
-    Another manager is a decision about the installation rather than a pack to browse, and
-    reaching one through this one is a category error. It stays installable from the GitHub
-    tab and stays in :func:`load`, so an installed copy keeps its icon, version and update
-    path.
-
-    Open Manager itself is not hidden. It was, and the result was that searching for it in
-    its own listing found nothing, which reads as a broken search rather than as a policy.
-    It is marked instead, and the listing offers no Install for it: being unable to install a
-    manager through itself is a reason to withhold the button, not the entry.
+    """Whether a pack is kept out of the browsable listing.
 
     Args:
         repository: The repository URL the registry gives.
@@ -185,11 +184,7 @@ def is_self(repository: str) -> bool:
 
 
 def browsable() -> list[dict]:
-    """The catalogue as the registry browser shows it, other managers removed.
-
-    Open Manager's own entry carries ``is_self``, so the listing can show it and decline to
-    offer an install of the thing doing the offering.
-    """
+    """The catalogue as the registry browser shows it, other managers removed."""
     out = []
     for entry in load():
         repository = entry.get("repository", "")
@@ -203,9 +198,6 @@ def browsable() -> list[dict]:
 
 def _borrowed(repository: str) -> bool:
     """Whether a listing's repository is another project's rather than the pack's.
-
-    A registry entry may point at ComfyUI itself. Everything the listing would show about it
-    then describes that project, not the pack.
 
     Args:
         repository: The repository URL the registry gives.
@@ -221,10 +213,6 @@ def _borrowed(repository: str) -> bool:
 
 def _stars(raw, repository: str) -> int:
     """A pack's stars, dropped where they belong to a project it merely points at.
-
-    ``lth_extended_prompting_nodes`` names ``comfyanonymous/ComfyUI`` as its repository and
-    so reports that project's six-figure star count, which puts it top of a sort by stars.
-    The count is not the pack's to show, so it is not shown.
 
     Args:
         raw: ``github_stars`` as the registry gives it.
@@ -317,10 +305,6 @@ async def _page(session: aiohttp.ClientSession, number: int) -> dict:
 async def sync(concurrency: int | None = None) -> None:
     """Fetch the whole catalogue and write it to the cache.
 
-    The first page is read on its own, because it reports how many pages there are; the rest
-    are read several at a time. Runs one at a time, reports progress through :func:`state`,
-    and leaves any existing cache in place on failure.
-
     Args:
         concurrency: Page requests to keep in flight, clamped to ``1..MAX_CONCURRENCY``.
             One reads the pages one after another. ``None`` uses :data:`CONCURRENCY`.
@@ -335,8 +319,6 @@ async def sync(concurrency: int | None = None) -> None:
             total_pages = max(1, int(first.get("totalPages") or 1))
             _state.update(total=total_pages, done=1)
 
-            # Pages finish out of order, so each keeps its own slot and they are joined in
-            # page order once every read has come back.
             pages: list[list[dict]] = [[] for _ in range(total_pages)]
             pages[0] = [_entry(node) for node in first.get("nodes", [])]
             gate = asyncio.Semaphore(_limit(concurrency))
@@ -347,9 +329,6 @@ async def sync(concurrency: int | None = None) -> None:
                 pages[number - 1] = [_entry(node) for node in data.get("nodes", [])]
                 _state["done"] += 1
 
-            # A page that fails every attempt abandons the sync, so a partial catalogue is
-            # never written over a complete one. The reads still running are cancelled and
-            # drained first, so none of them outlive the session they were issued on.
             reads = [asyncio.ensure_future(read(number)) for number in range(2, total_pages + 1)]
             try:
                 await asyncio.gather(*reads)

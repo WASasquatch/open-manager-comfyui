@@ -1,8 +1,4 @@
-"""Themes a reader keeps in their own directory, rather than in a pack.
-
-``user/open_manager/themes/*.json``. The file is the source of truth: it is read at startup
-and again on request, and nothing here writes to it.
-"""
+"""Themes a reader keeps in their own directory, rather than in a pack."""
 
 from __future__ import annotations
 
@@ -121,7 +117,6 @@ def listing() -> dict:
     return {"folder": str(base), "themes": themes, "problems": problems}
 
 
-#: Image kinds a theme may load from its own directory, and what to serve them as.
 ASSET_TYPES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -131,7 +126,6 @@ ASSET_TYPES = {
     ".svg": "image/svg+xml",
 }
 
-#: Largest asset served, in bytes.
 ASSET_LIMIT = 1_000_000
 
 _ASSET_PART = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -139,9 +133,6 @@ _ASSET_PART = re.compile(r"^[A-Za-z0-9._-]+$")
 
 def asset_parts(relative: str) -> tuple[list[str], str, str]:
     """A requested asset path split into segments, refused unless every one is a plain name.
-
-    Shared by the reader's own themes directory and by the copy a pack ships, so both answer
-    the same path to the same request.
 
     Args:
         relative: Path below the directory the asset lives in.

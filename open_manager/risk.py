@@ -1,9 +1,4 @@
-"""Findings about an install, ordered by severity.
-
-``critical`` is a documented compromise carrying a reference, ``caution`` is a material
-change to the environment, and ``note`` is context. No function here grants or withholds
-permission.
-"""
+"""Findings about an install, ordered by severity."""
 
 from __future__ import annotations
 
@@ -24,7 +19,6 @@ __all__ = [
     "SEVERITY_ORDER",
 ]
 
-#: Severities, most serious first.
 SEVERITY_ORDER = ("critical", "caution", "note")
 
 _RANK = {name: index for index, name in enumerate(SEVERITY_ORDER)}
@@ -78,8 +72,6 @@ def _ordered(findings: Iterable[Finding]) -> tuple[Finding, ...]:
     return tuple(sorted(findings, key=lambda item: _RANK.get(item.severity, len(SEVERITY_ORDER))))
 
 
-#: ComfyUI itself and its tooling, as lowercased owner/repo pairs. A registry entry can
-#: name one of these as its own, and installing it puts a second ComfyUI in ``custom_nodes``.
 CORE_REPOS = frozenset({
     ("comfyanonymous", "comfyui"),
     ("comfy-org", "comfyui"),
@@ -88,7 +80,6 @@ CORE_REPOS = frozenset({
     ("comfy-org", "comfyui-desktop"),
 })
 
-#: Other package managers. Ordinary custom nodes that install fine, so this is context.
 MANAGER_REPOS = frozenset({
     ("ltdrdata", "comfyui-manager"),
     ("comfy-org", "comfyui-manager"),
@@ -122,44 +113,32 @@ def repository_findings(owner: str, repo: str) -> list[Finding]:
             Finding(
                 severity="note",
                 title="This is another package manager",
-                detail="It installs and runs normally. Two managers can be loaded at once, "
-                       "and each keeps its own record of what it installed.",
+                detail="Each manager keeps its own record of what it installed.",
                 evidence=(f"repository: {pair[0]}/{pair[1]}",),
             )
         ]
     return []
 
 
-#: Title of the finding a ban raises. Named because the acknowledgement has to tell a ban
-#: apart from a documented compromise: both are critical and they do not mean the same thing.
 _BANNED_TITLE = "Withdrawn by the registry"
 
-#: Provisional, and written to be replaced. On 2026-09-13 a sample of 400 registry packs
-#: found 50 -- one in eight -- with a banned version, widely used packs among them, and no
-#: reason published for any of them. That is the state of the registry's automated scanner as
-#: this was written rather than a permanent property of it; when it publishes its reasoning,
-#: or a route to contest a ban exists, this paragraph should go.
 _SCANNER_NOTE = (
-    "Weigh the ban rather than read it as a finding. The registry's automated scanner is "
-    "currently producing detections that many publishers say are false, with no reason "
-    "given, no category and no route to contest or clear one, and it has caught packs that "
-    "were working and widely used. A ban here is a claim by that scanner, not a confirmed "
-    "compromise -- and equally, not an all-clear."
+    "The registry's automated scanner also issues bans, and a ban is not a confirmed "
+    "compromise."
 )
 
 _STATUS_TEXT = {
     "flagged": (
         "caution",
         "Flagged by the registry's automated scan",
-        "The registry marked this version flagged. It publishes no reason, no category and "
-        "no report, so what the scan objected to is not knowable from the registry.",
+        "The registry marked this version flagged and publishes no reason, category or "
+        "report for it.",
     ),
     "banned": (
         "critical",
         _BANNED_TITLE,
-        "The registry banned this version, so it is withheld from install unless the reader "
-        "turns bans off. A ban is meant for versions believed harmful. No reason, category "
-        "or report is published with one, so what it is for is not knowable from here.\n\n"
+        "The registry banned this version. Bans are meant for harmful versions and carry no "
+        "published reason, category or report.\n\n"
         + _SCANNER_NOTE,
     ),
     "deleted": (
@@ -226,8 +205,7 @@ def assess_version(
             Finding(
                 severity="caution",
                 title=f"Unrecognised registry status: {status}",
-                detail="The registry reported a status this client does not know. It is "
-                       "shown rather than hidden.",
+                detail="The registry reported a status Open Manager does not recognise.",
                 evidence=(f"registry status: {status}",),
             )
         )
@@ -244,18 +222,14 @@ def assess_version(
                 )
             )
         text = requirement.strip()
-        # The installer drops these. Still reported: it is a fact about the pack, and an
-        # install done some other way will honour them.
         option, why = installer.requirement_redirect(text)
         if option:
             findings.append(
                 Finding(
                     severity="caution",
                     title=f"Requirements file carries {option}, which {why}",
-                    detail="The option applies to every package in the install, not to one "
-                           "of them, so ordinary requirements beneath it are fetched from "
-                           "wherever it points. Open Manager holds it back and installs the "
-                           "packages without it.",
+                    detail="Open Manager holds it back and installs the packages "
+                           "without it.",
                     evidence=(f"requirement: {text}",),
                 )
             )
@@ -271,10 +245,6 @@ def assess_version(
                 )
             )
 
-    # Stated, not predicted. Publishers declare these loosely, and a pack asking for
-    # "ComfyUI >=1.0.0" against a ComfyUI that has never left 0.x is a typo, not an
-    # incompatibility. So this says what was declared and what is installed, at note
-    # severity, and leaves the reader to weigh it.
     for note in (compatibility or {}).get("notes", ()):
         if note.get("state") != "differs":
             continue
@@ -283,9 +253,7 @@ def assess_version(
                 severity="note",
                 title=f"Declared {note['label']} does not match this install",
                 detail=f"The publisher declared {note['declared']} for this version. "
-                       f"This install reports {note['yours']}. Publishers often declare a "
-                       "range wider or narrower than a pack really needs, so this is worth "
-                       "knowing rather than conclusive.",
+                       f"This install reports {note['yours']}.",
                 evidence=(f"declared: {note['declared']}", f"installed: {note['yours']}"),
             )
         )
@@ -350,60 +318,38 @@ def _acknowledgement(findings: tuple[Finding, ...]) -> str:
     if not findings:
         return ""
     if findings[0].severity == "critical":
-        # A ban and a documented compromise are both critical and do not read the same. An
-        # advisory names a real incident with a reference; a ban is the registry's scanner
-        # saying so, and it says so wrongly often enough that the two cannot share a sentence.
         if findings[0].title == _BANNED_TITLE:
             return (
-                "Installing a banned version is your decision and your risk. Nothing here "
-                "has checked whether the ban is right, and nothing here can undo what the "
-                "code does once it runs -- a custom node reads and writes anything the "
-                "account running ComfyUI can reach. Scan it, or read what it installs, first."
+                "Open Manager has not checked whether the ban is right and cannot undo what "
+                "the code does once it runs. A custom node reads and writes anything the "
+                "account running ComfyUI can reach."
             )
         return (
             "This install is recorded as harmful. Installing it can compromise credentials "
-            "and files reachable by the account ComfyUI runs under. Continue only if the "
-            "reason is understood."
+            "and files reachable by the account ComfyUI runs under."
         )
     if findings[0].severity == "caution":
         return (
-            "A custom node runs with the same privileges as ComfyUI itself, so it can read "
-            "and write any file that account can reach. Continue if the source is trusted."
+            "A custom node runs with ComfyUI's privileges and can read and write any file "
+            "the account running ComfyUI can reach."
         )
-    # Findings that are merely worth knowing are shown as themselves. Saying "nothing here
-    # blocks the install" adds nothing, and the confirmation gives that sentence the same
-    # alarmed treatment it gives a real warning -- so a clean pack reads as a dangerous one.
     return ""
 
 
-#: Archive members that mean code runs at install or import time.
 _EXECUTES_ON_INSTALL = ("install.py", "prestartup_script.py")
 
-#: Extensions that hold pickled objects. Reading one runs whatever it was built to run,
-#: because unpickling calls back into the interpreter; this is a property of the format, not
-#: a claim about any particular file.
 _PICKLE_FORMATS = (".pkl", ".pickle", ".pt", ".pth", ".ckpt", ".joblib", ".dill")
 
-#: Extensions holding compiled native code. It executes with the interpreter's privileges
-#: and cannot be read before it does.
 _NATIVE_FORMATS = (".pyd", ".so", ".dylib", ".dll")
 
-#: The weights format that carries no code, named as the alternative when a pickle one turns
-#: up. Never itself reported.
 _SAFE_WEIGHTS = ".safetensors"
 
-#: A prebuilt Python package carried in the repository rather than fetched from an index.
 _WHEEL = ".whl"
 
-#: Compatibility tags named before the rest are summarised. A pack shipping a wheel per
-#: platform would otherwise fill the block it is meant to fit in.
 _TAG_CAP = 4
 
 def _detected(paths: list[str]) -> tuple[str, ...]:
     """Evidence as a tally of what turned up rather than a list of where.
-
-    The reader is deciding whether the kind of thing is expected, not auditing paths, and a
-    long pack would otherwise print a directory listing into the dialog.
 
     Args:
         paths: Archive members that matched.
@@ -425,9 +371,6 @@ def _detected(paths: list[str]) -> tuple[str, ...]:
 def _sourceless_bytecode(names: list[str]) -> list[str]:
     """Compiled Python in the archive with no matching source beside it.
 
-    ``__pycache__`` beside its own sources is ordinary build residue. Bytecode whose source
-    is absent is not: it is Python that cannot be read.
-
     Args:
         names: Every member path in the archive.
 
@@ -441,7 +384,6 @@ def _sourceless_bytecode(names: list[str]) -> list[str]:
             continue
         stem = posixpath.basename(name).split(".")[0]
         parent = posixpath.dirname(name)
-        # __pycache__/x.cpython-311.pyc belongs to ../x.py
         if posixpath.basename(parent) == "__pycache__":
             parent = posixpath.dirname(parent)
         expected = posixpath.join(parent, f"{stem}.py") if parent else f"{stem}.py"
@@ -452,10 +394,6 @@ def _sourceless_bytecode(names: list[str]) -> list[str]:
 
 def _wheel_tags(paths: list[str]) -> tuple[str, ...]:
     """The compatibility tags the bundled wheels are built for.
-
-    A wheel filename ends in ``python-abi-platform``, which is what decides whether it fits
-    the interpreter it is being installed into. Surfacing it lets the reader answer that
-    without unpacking anything.
 
     Args:
         paths: Archive members ending in ``.whl``.
@@ -477,11 +415,6 @@ def _wheel_tags(paths: list[str]) -> tuple[str, ...]:
 
 def _uncommon_payloads(names: list[str]) -> list[Finding]:
     """Findings for files a custom node does not usually carry.
-
-    A custom node is ordinarily Python and web assets. Compiled binaries, pickle-format data
-    and compiled Python without its source each run or conceal code that cannot be read
-    beforehand. None of this proves ill intent, and plenty of honest packs ship a model
-    file; it is reported so the decision is an informed one rather than a blind one.
 
     Args:
         names: Every member path in the archive.
@@ -523,8 +456,7 @@ def _uncommon_payloads(names: list[str]) -> list[Finding]:
             Finding(
                 severity="note",
                 title="Bundles a Python wheel",
-                detail="A prebuilt package, not fetched from an index. Check the tags fit "
-                       "this machine and that you trust the author. False positives possible.",
+                detail="A prebuilt package, not fetched from an index.",
                 evidence=_detected(wheels) + (f"built for: {', '.join(tags)}",),
             )
         )
@@ -535,8 +467,7 @@ def _uncommon_payloads(names: list[str]) -> list[Finding]:
             Finding(
                 severity="caution",
                 title="Ships compiled Python without its source",
-                detail="Bytecode with no matching .py, so it cannot be read. Often just a "
-                       "careless build. False positives possible.",
+                detail="Bytecode with no matching .py, so it cannot be read.",
                 evidence=_detected(orphans),
             )
         )

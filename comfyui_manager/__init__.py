@@ -1,14 +1,10 @@
-"""Open Manager loaded through ComfyUI's ``--enable-manager`` hook.
-
-ComfyUI enables a manager by importing the module named ``comfyui_manager`` and calling a
-fixed set of functions on it. Taking that name loads Open Manager in place of the official
-manager. A clone into ``custom_nodes`` runs the same core through the top-level entry point.
-"""
+"""Open Manager loaded through ComfyUI's ``--enable-manager`` hook."""
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from aiohttp import web
@@ -22,20 +18,16 @@ __all__ = [
     "start",
 ]
 
-#: The log file, and the names its older copies take. ComfyUI writes no log of its own unless
-#: launched with ``--file-log``; the file usually in ``user/`` is written by ComfyUI-Manager.
-#: Taking that manager's place and not writing it would quietly remove something the reader
-#: had, including the import timings this pack reads back for "what each pack costs to load".
 LOG_NAME = "comfyui.log"
 LOG_ROTATIONS = ("comfyui.prev.log", "comfyui.prev2.log")
 
-#: Set to anything to leave the log alone. For a setup that collects its own, or one that
-#: would rather this wrote nothing.
 LOG_OFF = "OPEN_MANAGER_NO_LOG"
+
+_SETTINGS_PATH = re.compile(r"^(?:/api)?/settings(?:/.*)?$")
 
 
 def _rotate(folder) -> None:
-    """Shift the previous logs down one, so a run does not overwrite the last one's record."""
+    """Shift the previous logs down one."""
     names = (LOG_NAME, *LOG_ROTATIONS)
     for older, newer in zip(reversed(names[1:]), reversed(names[:-1]), strict=True):
         source, target = folder / newer, folder / older
@@ -44,16 +36,11 @@ def _rotate(folder) -> None:
                 target.unlink(missing_ok=True)
                 source.rename(target)
         except OSError as error:
-            logger.debug("could not rotate %s (%s)", newer, error)
+            logger.debug("rotate failed: %s (%s)", newer, error)
 
 
 def _start_logging() -> None:
-    """Write ComfyUI's output to the file the manager used to write.
-
-    Added to the root logger, in the format the previous file used, so anything that read it
-    keeps reading it. Failure here is reported and otherwise ignored: a missing log is not a
-    reason to stop a server from starting.
-    """
+    """Write ComfyUI's output to ``comfyui.log`` in ComfyUI's user directory."""
     if os.environ.get(LOG_OFF):
         return
     try:
@@ -61,14 +48,12 @@ def _start_logging() -> None:
 
         folder = Path(folder_paths.get_user_directory())
         folder.mkdir(parents=True, exist_ok=True)
-    except Exception as error:  # noqa: BLE001 - no user directory, so no log
-        logger.debug("no user directory for the log (%s: %s)", type(error).__name__, error)
+    except Exception as error:  # noqa: BLE001
+        logger.debug("no user directory (%s: %s)", type(error).__name__, error)
         return
 
     root = logging.getLogger()
     target = folder / LOG_NAME
-    # Nothing else is writing it: a second handler on the same file interleaves two copies
-    # of every line.
     for handler in root.handlers:
         existing = getattr(handler, "baseFilename", "")
         if existing and Path(existing) == target.resolve():
@@ -78,31 +63,24 @@ def _start_logging() -> None:
     try:
         handler = logging.FileHandler(target, mode="w", encoding="utf-8")
     except OSError as error:
-        logger.warning("the log could not be opened (%s)", error.strerror or error)
+        logger.warning("log not opened (%s)", error.strerror or error)
         return
     formatter = logging.Formatter("[%(asctime)s] %(message)s")
-    # A dot rather than a comma before the milliseconds, matching what was there before.
     formatter.default_msec_format = "%s.%03d"
     handler.setFormatter(formatter)
     handler.setLevel(logging.INFO)
     root.addHandler(handler)
     if root.level > logging.INFO or root.level == logging.NOTSET:
         root.setLevel(logging.INFO)
-    logging.info("[Open Manager] writing %s, as the manager it replaced did. Set %s to stop.",
+    logging.info("[Open Manager] log: %s (%s to disable)",
                  target, LOG_OFF)
 
 
 def _warn_if_shared() -> None:
-    """Say so when the official manager is installed alongside this one.
-
-    Both distributions own the ``comfyui_manager`` import name, because ComfyUI imports a
-    manager by that exact name and offers no other way in. pip will install either over the
-    other without complaint, and uninstalling one then takes files the other still lists. The
-    copy on disk is this one; the point is that it will not survive reinstalling the other.
-    """
+    """Say so when the official manager is installed alongside this one."""
     try:
         from importlib.metadata import PackageNotFoundError, distribution
-    except Exception:  # noqa: BLE001 - not worth failing a startup over
+    except Exception:  # noqa: BLE001
         return
     try:
         distribution("comfyui-manager")
@@ -111,21 +89,27 @@ def _warn_if_shared() -> None:
     except Exception:  # noqa: BLE001
         return
     logger.warning(
-        "[Open Manager] the comfyui-manager distribution is also installed. Both provide the "
-        "comfyui_manager module, so reinstalling or updating either replaces these files. Run "
-        "`pip uninstall comfyui-manager` to leave only this one."
+        "[Open Manager] comfyui-manager is also installed and provides the same module. "
+        "Run: pip uninstall comfyui-manager"
     )
 
 
 def prestartup() -> None:
-    """Called before custom nodes load.
-
-    The log is opened here rather than in :func:`start`, because the import timings worth
-    keeping are written while the custom nodes load, which is after this and before that.
-    """
+    """Called before custom nodes load."""
     _start_logging()
     _warn_if_shared()
+    _repair_settings()
     logging.info("[Open Manager] enabled in place of ComfyUI-Manager")
+
+
+def _repair_settings() -> None:
+    """Restore ComfyUI's settings file where something has left it unreadable to ComfyUI."""
+    try:
+        from open_manager import settingsfile
+
+        settingsfile.repair()
+    except Exception as error:
+        logger.warning("settings check skipped (%s: %s)", type(error).__name__, error)
 
 
 def should_be_disabled(fullpath: str) -> bool:
@@ -135,7 +119,7 @@ def should_be_disabled(fullpath: str) -> bool:
         fullpath: Directory ComfyUI is about to load.
 
     Returns:
-        True for a directory-based manager install, so two managers do not run at once.
+        True for a directory-based manager install.
     """
     return "comfyui-manager" in os.path.basename(fullpath).lower()
 
@@ -147,28 +131,16 @@ def start() -> None:
     try:
         routes.register_routes()
     except Exception as error:
-        logger.warning(
-            "the registry routes could not be registered (%s: %s)",
-            type(error).__name__, error,
-        )
+        logger.warning("registry routes not registered (%s: %s)", type(error).__name__, error)
     _mount_web()
     _declare_manager_kind()
 
 
 def _declare_manager_kind() -> None:
-    """Tell the interface which kind of manager is answering.
-
-    Core claims ``extension.manager.supports_v4`` for every manager, which the interface
-    reads as a promise to serve ComfyUI-Manager's v4 endpoints. Open Manager serves its own
-    panel, so the claim is withdrawn and the interface treats this as a legacy manager,
-    keeping the Extensions button and dispatching ``Comfy.Manager.Menu.ToggleVisibility``.
-    Left alone it finds v4 promised and ``supports_csrf_post`` missing, calls the manager
-    incompatible, hides the button and warns on every load.
-    """
+    """Tell the interface which kind of manager is answering."""
     try:
         from comfy_api import feature_flags
     except ImportError:
-        # Older core without feature flags. The button is governed by version strings there.
         return
     try:
         manager = feature_flags.SERVER_FEATURE_FLAGS.setdefault("extension", {}).setdefault(
@@ -176,19 +148,11 @@ def _declare_manager_kind() -> None:
         )
         manager["supports_v4"] = False
     except Exception as error:
-        logger.warning(
-            "the manager kind could not be declared, so the Extensions button may be hidden "
-            "(%s: %s)",
-            type(error).__name__, error,
-        )
+        logger.warning("manager kind not declared (%s: %s)", type(error).__name__, error)
 
 
 def _mount_web() -> None:
-    """Serve the panel's assets as a web extension.
-
-    A pip install has no ``custom_nodes`` directory to carry the panel, so its directory is
-    registered directly.
-    """
+    """Serve the panel's assets as a web extension."""
     try:
         import nodes
 
@@ -196,18 +160,32 @@ def _mount_web() -> None:
 
         nodes.EXTENSION_WEB_DIRS["open_manager"] = web_directory()
     except Exception as error:
-        logger.warning("the panel assets could not be mounted (%s: %s)", type(error).__name__, error)
+        logger.warning("panel assets not mounted (%s: %s)", type(error).__name__, error)
 
 
 def create_middleware():
     """An aiohttp middleware ComfyUI adds to the server.
 
     Returns:
-        A pass-through middleware.
+        A middleware that repairs unreadable settings files before each settings request.
     """
 
     @web.middleware
     async def open_manager_middleware(request: web.Request, handler):
+        if _SETTINGS_PATH.match(request.path):
+            await _settings_readable()
         return await handler(request)
 
     return open_manager_middleware
+
+
+async def _settings_readable() -> None:
+    """Repair the settings file before ComfyUI reads or saves it."""
+    try:
+        import asyncio
+
+        from open_manager import settingsfile
+
+        await asyncio.to_thread(settingsfile.ensure)
+    except Exception as error:
+        logger.warning("settings check skipped (%s: %s)", type(error).__name__, error)

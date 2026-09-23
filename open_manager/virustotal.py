@@ -1,19 +1,4 @@
-"""Reputation lookups for the files a pack ships, against VirusTotal.
-
-Only hashes leave the machine. A file is identified to VirusTotal by its SHA-256, which the
-service either recognises or does not; the file itself is never uploaded, so nothing from an
-unreleased pack is published to a corpus other people can download.
-
-The public API allows four requests a minute, offers no way to ask about several hashes at
-once, and grants a daily allowance that varies by account -- published as five hundred, but
-an unverified key may get a single lookup a day. The real figure is read from the service
-rather than assumed. The allowance is then spent carefully: only the files :mod:`.risk`
-already considers worth naming are looked up, and every answer is cached by hash across
-packs and sessions, so the same file is never paid for twice.
-
-The key belongs to the user. It arrives with a request, is held only for the length of the
-scan, and is never written to disk or repeated back.
-"""
+"""Reputation lookups for the files a pack ships, against VirusTotal."""
 
 from __future__ import annotations
 
@@ -36,37 +21,22 @@ __all__ = [
     "state",
 ]
 
-#: Where a file report is read from. The id is the file's SHA-256.
 API_URL = "https://www.virustotal.com/api/v3/files/{sha256}"
 
-#: Seconds one lookup may take.
 TIMEOUT = 20
 
-#: Requests a public key is allowed each minute. Kept to deliberately, because exceeding it
-#: earns a 429 and no answer.
 PER_MINUTE = 4
 
-#: Requests assumed per day before the key's real allowance is known. VirusTotal publishes
-#: 500 for the public API, but an account's actual figure varies -- an unverified one can be
-#: as low as a single lookup a day -- so this is only a starting point and
-#: :func:`fetch_quota` replaces it with what the service reports.
 DAILY_BUDGET = 500
 
-#: Where a key's real allowance is read from. This does not appear to count against it.
 QUOTA_URL = "https://www.virustotal.com/api/v3/users/{key}/overall_quotas"
 
-#: Seconds between lookups, from :data:`PER_MINUTE`.
 SPACING = 60.0 / PER_MINUTE
 
-#: Days a verdict is reused. A hash names one byte sequence forever, but engines change
-#: their minds, so an answer is not kept indefinitely.
 CACHE_DAYS = 30
 
-#: Largest file hashed. Beyond this the read costs more than the answer is worth.
 MAX_FILE = 256 * 1024 * 1024
 
-#: Extensions worth asking about: compiled code, pickled data and prebuilt packages. These
-#: mirror what :mod:`.risk` reports, so a scan follows the same judgement.
 SUFFIXES = (
     ".pyd", ".so", ".dylib", ".dll", ".exe",
     ".pkl", ".pickle", ".pt", ".pth", ".ckpt", ".joblib", ".dill",
@@ -164,9 +134,6 @@ def digest(path: Path) -> str:
 def candidates(directory: Path) -> list[Path]:
     """The files in an installed pack worth asking about.
 
-    Everything else is source a reader can open, and spending a request on it would leave
-    nothing for the files that cannot be read.
-
     Args:
         directory: The installed pack directory.
 
@@ -185,10 +152,6 @@ def candidates(directory: Path) -> list[Path]:
 
 async def fetch_quota(key: str, session: aiohttp.ClientSession) -> dict:
     """What the key is actually allowed, as VirusTotal reports it.
-
-    The published public figure is 500 a day, but a given account may be allowed far less,
-    so the real number is asked for rather than assumed. Failure is not fatal: the scan
-    falls back to the published figure and stops when the service says to.
 
     Args:
         key: The user's API key.
@@ -216,9 +179,6 @@ async def fetch_quota(key: str, session: aiohttp.ClientSession) -> dict:
 
 async def _lookup(sha256: str, key: str, session: aiohttp.ClientSession) -> dict:
     """Ask VirusTotal what it knows about one hash.
-
-    The key travels as a header, never in the URL, because a URL is the part that ends up in
-    proxy and server logs.
 
     Args:
         sha256: The file's digest.
@@ -265,10 +225,6 @@ async def _lookup(sha256: str, key: str, session: aiohttp.ClientSession) -> dict
 def _redact(text: str, key: str) -> str:
     """A message with the key taken out of it.
 
-    :data:`QUOTA_URL` carries the key in its path, and an aiohttp error stringifies the URL
-    it was fetching. Error text is reported through :func:`state`, so it is scrubbed before
-    it is stored rather than trusted not to contain the key.
-
     Args:
         text: The message to report.
         key: The key to remove.
@@ -297,9 +253,6 @@ def state() -> dict:
 async def scan(pack: str, directory: Path, key: str) -> None:
     """Look up every file in a pack worth asking about.
 
-    Runs one at a time, spaced to the public allowance, reporting through :func:`state`. A
-    hash already answered for costs nothing and is not spaced.
-
     Args:
         pack: Name shown while the scan runs.
         directory: The installed pack directory.
@@ -318,7 +271,6 @@ async def scan(pack: str, directory: Path, key: str) -> None:
         spent = 0
         last = 0.0
         async with aiohttp.ClientSession() as session:
-            # What this key may actually do today, rather than what the tier nominally says.
             quota = await fetch_quota(key, session)
             _state["allowed"] = quota.get("allowed", DAILY_BUDGET)
             _state["used"] = quota.get("used", budget_used())
@@ -361,7 +313,7 @@ async def scan(pack: str, directory: Path, key: str) -> None:
                              "detail": verdict["error"]}
                         )
                         _state["done"] += 1
-                        if verdict["error"] != "lookup failed":
+                        if not verdict["error"].startswith("lookup failed"):
                             break
                         continue
                     _remember(sha256, verdict)
@@ -379,7 +331,7 @@ async def scan(pack: str, directory: Path, key: str) -> None:
                 _state["done"] += 1
         if spent:
             _spend(spent)
-    except Exception as error:  # noqa: BLE001 - a scan must never take the server down
+    except Exception as error:  # noqa: BLE001
         _state["error"] = _redact(f"{type(error).__name__}: {error}", key)
     finally:
         _state["scanning"] = False

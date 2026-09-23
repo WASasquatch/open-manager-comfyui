@@ -1,0 +1,23 @@
+{
+  "id": "viewer",
+  "name": "Image Viewer",
+  "hint": "An image viewer with zoom, fit, rotate and crop",
+  "tags": [
+    "images",
+    "view",
+    "zoom"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "surfaces": {
+    "desktop": false,
+    "start": false
+  },
+  "multiple": true,
+  "look": {
+    "tint": "grey"
+  },
+  "capabilities": [
+    "assets"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "comfy-templates",
+  "name": "Templates",
+  "hint": "ComfyUI's workflow templates, in a window",
+  "tags": [
+    "templates",
+    "workflows",
+    "examples",
+    "comfyui",
+    "starter"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "comfy-templates.svg",
+  "group": "ComfyUI",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "teal"
+  },
+  "capabilities": [
+    "Reads the template index",
+    "Opens a template as a workflow tab"
+  ]
+}

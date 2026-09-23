@@ -2,7 +2,7 @@
 
 A theme is a ComfyUI colour palette with an optional `extras` block. ComfyUI reads `colors` and
 ignores `extras`; Open Manager reads both. Copy one of the six in
-[`open_manager/themes/`](open_manager/themes/) and change the id.
+[`open_manager/themes/`](../open_manager/themes/) and change the id.
 
 Declare themes in your pack's `pyproject.toml`. They appear on the pack page with an Add button.
 
@@ -11,8 +11,8 @@ Declare themes in your pack's `pyproject.toml`. They appear on the pack page wit
 themes = ["themes/my-theme/my-theme.json"]
 ```
 
-Subdirectories are fine. A theme the reader has already added is re-read from the installed
-pack on load, so raising `version` updates their copy without them pressing Add again.
+Subdirectories are fine. A theme a user has already added is re-read from the installed
+pack on load, so raising `version` updates their copy without pressing Add again.
 
 ---
 
@@ -42,9 +42,8 @@ Standard ComfyUI palette. The keys Open Manager also reads:
 | `BACKGROUND_IMAGE` | `litegraph_base` | the dot grid |
 
 **Light palettes:** ComfyUI adds 50 to the HSL lightness of every node colour it draws. State
-`color` values about 50 points darker than you want. Gradient `stops` are **not** lifted, because
-Open Manager paints those itself, so state those at their final value. Getting this backwards is
-the most common mistake.
+`color` values about 50 points darker than you want. Gradient `stops` are **not** lifted: state
+those at their final value.
 
 ---
 
@@ -86,7 +85,7 @@ animated.
 | `shape.radius` | number | 0 to 120 | ComfyUI's |
 | `shape.titleHeight` | number | 0 to 120 | ComfyUI's |
 | `shape.slotHeight` | number | 0 to 120 | ComfyUI's |
-| `links.mode` | string | `straight`, `linear`, `spline` | the reader's setting |
+| `links.mode` | string | `straight`, `linear`, `spline` | the user's Link Render Mode |
 | `links.border` | boolean | | ComfyUI's |
 | `shadow` | colour | any CSS colour, or `none` | ComfyUI's |
 | `nodeOpacity` | number | 0 to 1 | 1, solid |
@@ -109,10 +108,10 @@ also takes `title`, which relabels the class, capped at 60 characters.
 2 usable stops drops the gradient.
 
 **Category matching** is on the full lowercased category path, longest first, so
-`was suite/image/masking` beats `was suite/image`. Core nodes also match the segment below
-`model/`.
+`was suite/image/masking` beats `was suite/image`. A category under `model/` also matches the
+segment below it, so `model/loaders` matches `loaders`.
 
-**Precedence:** a colour the reader set on the node, then a `nodes` rule, then a `categories`
+**Precedence:** a colour the user set on the node, then a `nodes` rule, then a `categories`
 rule, then the top level `extras`. Each facet resolves independently, so a category can supply
 the body while the top level supplies the icon.
 
@@ -185,7 +184,7 @@ counted distinctly, so naming one file across sixty categories costs one of the 
 
 ---
 
-## Readers can turn it off
+## Users can turn it off
 
 Under **Settings > Open Manager > Theme**:
 
@@ -195,7 +194,7 @@ Under **Settings > Open Manager > Theme**:
 | Node background image strength | multiplies the `body.opacity` you asked for |
 | Theme icons in node titles | off restores the plain dot |
 | Selection glow | off restores ComfyUI's outline |
-| Theme graph backdrop | off restores the palette's canvas colour |
+| Theme graph backdrop | off restores the palette's canvas colour and dot grid |
 | Node body opacity | the opacity itself, absolute. 1 defers to your `nodeOpacity` |
 
 Design for the on state. None of these write to your file.
@@ -204,9 +203,9 @@ Design for the on state. None of these write to your file.
 
 ## Nodes 2.0
 
-- `shape.radius` and `shape.titleHeight` are ignored. Vue nodes round their corners in CSS and
-  size their header from padding. `shape.slotHeight` still applies.
-- Icon and title is offset to preserve the node collapse/expand button which is finally rendered as a state indicator instead of a static orb we replace in LGraph nodes.
+- `shape.radius` and `shape.titleHeight` are ignored. `shape.slotHeight` still applies.
+- The icon sits between the collapse button and the title. An image icon is drawn at 16 pixels
+  at most.
 
 ---
 
@@ -215,7 +214,7 @@ Design for the on state. None of these write to your file.
 | | |
 | --- | --- |
 | Nothing is saved | Header, title and text colour are applied for the draw and undone after, so they never enter a saved workflow |
-| Scoped | `extras` apply only while your theme is active, and geometry is restored when the reader switches away |
-| The reader's settings are theirs | `Comfy.LinkRenderMode` and node opacity are never written |
+| Scoped | `extras` apply only while your theme is active, and geometry is restored when the user switches away |
+| Settings untouched | A theme never writes `Comfy.LinkRenderMode` or node opacity |
 | Bounded | Unknown keys dropped, numbers range checked, no animation |
-| Answerable | The effects that cost or intrude most have a setting, listed above. Colours, gradients, `shape`, link drawing, `shadow` and `tileAlpha` have none, so the answer there is to switch theme |
+| No setting | Colours, gradients, `shape`, link drawing, `shadow` and `tileAlpha` apply whenever the theme is active |

@@ -1,19 +1,4 @@
-"""What an install did to the Python environment, and how to put it back.
-
-Installing a pack runs pip, and pip is free to upgrade, downgrade or add anything the pack's
-requirements imply. That is usually fine and occasionally is the thing that breaks an install
-that worked ten minutes ago. This records the package list either side of an install, so the
-difference is a fact rather than a guess, and keeps the record on disk so it can still be
-undone after a restart -- which is when the damage is usually noticed.
-
-Restoring is destructive and is treated that way. It is never automatic, the exact commands
-are shown before anything runs, and a set of packages is refused outright: the interpreter's
-own tooling and the libraries ComfyUI is built on. Downgrading those to undo a pack install
-trades one broken environment for a worse one, and pip is quite willing to do it.
-
-The record describes the running interpreter. An install directed at a different one is not
-snapshotted, because a list read from this process would describe the wrong environment.
-"""
+"""What an install did to the Python environment, and how to put it back."""
 
 from __future__ import annotations
 
@@ -29,12 +14,6 @@ from . import paths, piptool
 __all__ = ["REFUSED", "compare", "forget", "record", "recorded", "restore", "restore_plan",
            "snapshot"]
 
-#: Packages never uninstalled or downgraded by a restore, whatever an install did to them.
-#:
-#: The first group is how pip itself runs; removing them leaves an environment that cannot
-#: install anything, including the thing that would fix it. The second is what ComfyUI imports
-#: at startup, where a downgrade can stop the server booting, and a reader whose server will
-#: not boot cannot reach this to undo it.
 REFUSED = frozenset({
     "pip", "setuptools", "wheel", "packaging",
     "torch", "torchvision", "torchaudio", "torchsde",
@@ -42,11 +21,8 @@ REFUSED = frozenset({
     "psutil", "pyyaml", "scipy",
 })
 
-#: How many installs are kept. Older records are dropped: a diff from fifty installs ago
-#: describes an environment that has moved on and restoring to it is not an undo.
 KEEP = 40
 
-#: A bound on one restore, which may be downloading wheels.
 TIMEOUT = 1800
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -59,10 +35,6 @@ def _fold(name: str) -> str:
 
 def snapshot() -> dict[str, str]:
     """Every distribution installed in the running interpreter.
-
-    Read through ``importlib.metadata`` rather than by running ``pip freeze``: it is the same
-    information without a subprocess, and it cannot fail halfway and return a partial list
-    that would read as packages having been removed.
 
     Returns:
         ``{folded name: version}``, empty where the list could not be read.
@@ -78,7 +50,6 @@ def snapshot() -> dict[str, str]:
             if name:
                 found[_fold(name)] = str(dist.version)
         except Exception:
-            # One unreadable distribution is not a reason to lose the other nine hundred.
             continue
     return found
 
@@ -174,10 +145,6 @@ def _pip(args: list[str], python: str = "") -> tuple[bool, str]:
 def restore(diff: dict, python: str = "") -> dict:
     """Undo what an install did to the environment.
 
-    The two halves run separately and both are reported, because the second failing does not
-    unwind the first: an environment left between the two states is still a state the reader
-    has to be told about rather than left to discover.
-
     Args:
         diff: A result of :func:`compare`.
         python: Interpreter to act on. Defaults to the running one.
@@ -200,7 +167,6 @@ def restore(diff: dict, python: str = "") -> dict:
         "ok": all(step["ok"] for step in steps) if steps else True,
         "plan": plan,
         "steps": steps,
-        # Whatever happened, the interpreter is holding modules from before it happened.
         "restart_required": bool(steps),
     }
 

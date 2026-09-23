@@ -6,7 +6,6 @@ import logging
 
 __all__ = ["get_logger"]
 
-#: Prefix every logger name carries.
 ROOT = "open_manager"
 
 

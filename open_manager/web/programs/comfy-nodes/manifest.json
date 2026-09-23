@@ -1,0 +1,27 @@
+{
+  "id": "comfy-nodes",
+  "name": "Nodes",
+  "hint": "Search every registered node type, drag one onto the graph",
+  "tags": [
+    "nodes",
+    "node library",
+    "search",
+    "graph",
+    "comfyui"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "comfy-nodes.svg",
+  "group": "ComfyUI",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "accent"
+  },
+  "capabilities": [
+    "Reads the registered node types",
+    "Adds a node to the open graph"
+  ]
+}
