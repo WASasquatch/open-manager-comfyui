@@ -223,5 +223,8 @@ __marimo__/
 # Cache
 tmp/
 
+# Kept out of the published package.
+tests/
+
 # Where Open Manager keeps its files when there is no ComfyUI to ask.
 _cache/
