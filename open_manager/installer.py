@@ -375,6 +375,7 @@ def install_repo(
     with_deps: bool = True,
     ref: str = "",
     overwrite: bool = False,
+    policy: str = "all",
 ) -> InstallResult:
     """Install a pack from its GitHub repository, for packs not on the registry.
 
@@ -446,7 +447,7 @@ def install_repo(
     result = InstallResult(ok=True, directory=str(target), files=len(written), restart_required=True)
     if with_deps and _requirements(target):
         result.pip_ran = True
-        _ran = _pip_install(target, python)
+        _ran = _pip_install(target, python, policy)
         result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
@@ -597,21 +598,101 @@ def requirement_redirect(line: str) -> tuple[str, str]:
     return "", ""
 
 
+INSTALL_POLICIES = ("all", "new", "upgrade", "downgrade")
+
+POLICY_DEFAULT = "new"
+
+
+def install_policy(name: str) -> str:
+    """Fold a requested policy to one this understands.
+
+    Args:
+        name: Policy as asked for.
+
+    Returns:
+        A member of :data:`INSTALL_POLICIES`, :data:`POLICY_DEFAULT` where unrecognised.
+    """
+    folded = str(name or "").strip().lower()
+    return folded if folded in INSTALL_POLICIES else POLICY_DEFAULT
+
+
+def _policy_holds(policy: str, direction: str) -> bool:
+    """Whether a policy refuses a requirement that would replace what is installed."""
+    if policy == "new":
+        return True
+    if policy == "upgrade":
+        return direction == "downgrade"
+    if policy == "downgrade":
+        return direction == "upgrade"
+    return False
+
+
+def _replacements(lines: list[str], python: str) -> dict[str, tuple[str, str]]:
+    """Which requirement lines would replace a package already installed.
+
+    Args:
+        lines: Requirement lines as the pack wrote them.
+        python: Interpreter the install targets.
+
+    Returns:
+        ``{raw_line: (direction, installed_version)}`` for conflicting lines only.
+    """
+    from . import deps
+
+    try:
+        checked = deps.check(lines)
+    except Exception:
+        return {}
+    elsewhere = {}
+    if python and os.path.normcase(python) != os.path.normcase(sys.executable):
+        from . import impact
+
+        elsewhere = impact.installed_versions(python)
+    found: dict[str, tuple[str, str]] = {}
+    for entry in checked:
+        raw = entry.get("raw", "")
+        have = entry.get("installed", "")
+        if elsewhere:
+            have = elsewhere.get(_norm(entry.get("name", "")), "")
+            if not have:
+                continue
+            if not entry.get("spec"):
+                continue
+            way = deps.direction(entry.get("spec", ""), have)
+            if way == "change":
+                continue
+        elif entry.get("status") != "conflict":
+            continue
+        else:
+            way = entry.get("direction") or "change"
+        found[raw] = (way, have)
+    return found
+
+
 def plan_requirements(
     lines: list[str],
+    policy: str = "all",
+    python: str = "",
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     """What will be handed to pip, and what changed on the way.
 
     Args:
         lines: Requirement lines as the pack wrote them.
+        policy: One of :data:`INSTALL_POLICIES`. ``all`` installs as the pack asks;
+            ``new`` refuses every requirement that would replace an installed package;
+            ``upgrade`` and ``downgrade`` refuse the opposite direction.
+        python: Interpreter the install targets, for reading what is installed.
 
     Returns:
         ``(to_install, held_back, substituted, redirects)``. ``held_back`` names the
-        :data:`PIP_BLACKLIST` requirements dropped; ``redirects`` names the
-        :data:`PIP_REDIRECTS` option lines dropped, each as ``line (why)``; ``substituted``
-        records each ``before -> after`` the user's overrides applied.
+        :data:`PIP_BLACKLIST` requirements dropped and any the policy refused, each with
+        its reason; ``redirects`` names the :data:`PIP_REDIRECTS` option lines dropped,
+        each as ``line (why)``; ``substituted`` records each ``before -> after`` the
+        user's overrides applied.
     """
     overrides = pip_overrides()
+    chosen = install_policy(policy) if policy else "all"
+    replacing = _replacements(lines, python) if chosen != "all" else {}
     keep: list[str] = []
     held: list[str] = []
     swapped: list[str] = []
@@ -629,11 +710,18 @@ def plan_requirements(
             swapped.append(f"{line.strip()} -> {overrides[name]}")
             keep.append(overrides[name])
             continue
+        moved = replacing.get(line.strip()) or replacing.get(line)
+        if moved and _policy_holds(chosen, moved[0]):
+            way = {"downgrade": "would downgrade", "upgrade": "would upgrade"}.get(
+                moved[0], "would replace"
+            )
+            held.append(f"{line.strip()} ({way} {name or 'it'} {moved[1]})")
+            continue
         keep.append(line)
     return keep, held, swapped, redirects
 
 
-def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
+def install_requirements(directory: Path, python: str = "", policy: str = "all") -> tuple[bool, str]:
     """Install an already-placed pack's requirements.
 
     Args:
@@ -645,11 +733,11 @@ def install_requirements(directory: Path, python: str = "") -> tuple[bool, str]:
     """
     if not _requirements(directory):
         return True, "No requirements declared."
-    ran = _pip_install(directory, python)
+    ran = _pip_install(directory, python, policy)
     return ran["ok"], ran["output"]
 
 
-def _pip_install(directory: Path, python: str) -> dict:
+def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
     """Install a pack's requirements, less anything held back.
 
     Args:
@@ -661,7 +749,9 @@ def _pip_install(directory: Path, python: str) -> dict:
         back or substituted. ``errors`` is what pip said went wrong. ``installer`` is
         ``pip``, ``uv`` or ``none``.
     """
-    keep, held, swapped, redirects = plan_requirements(_requirements(directory))
+    keep, held, swapped, redirects = plan_requirements(
+        _requirements(directory), policy, python
+    )
     notes = []
     if held:
         notes.append("Held back to protect the running install: " + ", ".join(held))
@@ -867,6 +957,7 @@ def install(
     python: str = "",
     with_deps: bool = True,
     overwrite: bool = False,
+    policy: str = "all",
 ) -> InstallResult:
     """Download and place a pack, and install its requirements.
 
@@ -929,7 +1020,7 @@ def install(
     )
     if with_deps and _requirements(target):
         result.pip_ran = True
-        _ran = _pip_install(target, python)
+        _ran = _pip_install(target, python, policy)
         result.pip_ok, result.pip_output = _ran["ok"], _ran["output"]
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])

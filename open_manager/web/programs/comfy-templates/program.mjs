@@ -6,6 +6,54 @@ const CUSTOM_GROUP = "Custom Nodes";
 
 const ALL = "\u0000all";
 
+const RUNS_COMFY = "ComfyUI";
+
+const RUNS_API = "External or Remote API";
+
+const SORTS = [
+  ["default", "Default"],
+  ["recommended", "Recommended"],
+  ["popular", "Popular"],
+  ["alphabetical", "A → Z"],
+  ["newest", "Newest"],
+  ["size", "Model Size (Low to High)"],
+];
+
+const TYPES = [["all", "All"], ["graph", "Node graph"], ["app", "App"]];
+
+const RANK_SATURATION = 1000;
+
+const RANK_DEAD_ZONE = 5;
+
+function rankBoost(rank) {
+  if (!rank || Math.abs(rank) <= RANK_DEAD_ZONE) return 0;
+  const magnitude = Math.min(1,
+    Math.log1p(Math.abs(rank)) / Math.log1p(RANK_SATURATION));
+  return Math.sign(rank) * magnitude;
+}
+
+function freshness(date) {
+  if (!date) return 0.5;
+  const when = new Date(date);
+  if (Number.isNaN(when.getTime())) return 0.5;
+  const days = (Date.now() - when.getTime()) / 86400000;
+  return Math.max(0.1, 1 / (1 + days / 90));
+}
+
+function recommended(one, largest) {
+  const usage = largest ? (one.usage || 0) / largest : 0;
+  return usage * 0.5 + ((rankBoost(one.rank) + 1) / 2) * 0.3 + freshness(one.date) * 0.2;
+}
+
+function byTitle(a, b) {
+  const one = (a.title || a.name || "").trim();
+  const two = (b.title || b.name || "").trim();
+  const oneDigit = /^\d/.test(one);
+  const twoDigit = /^\d/.test(two);
+  if (oneDigit !== twoDigit) return oneDigit ? 1 : -1;
+  return one.localeCompare(two, undefined, { numeric: true, sensitivity: "base" });
+}
+
 function coreThumb(one) {
   const kind = one.mediaSubtype || "webp";
   return `/templates/${encodeURIComponent(one.name)}-1.${kind}`;
@@ -30,6 +78,12 @@ async function readCore() {
       tags: one.tags || [],
       models: one.models || [],
       tutorial: one.tutorialUrl || "",
+      app: one.isApp === true,
+      remote: one.openSource === false,
+      usage: typeof one.usage === "number" ? one.usage : 0,
+      date: one.date || "",
+      size: typeof one.size === "number" ? one.size : null,
+      rank: typeof one.searchRank === "number" ? one.searchRank : 0,
       thumb: coreThumb(one),
       source: `/templates/${encodeURIComponent(one.name)}.json`,
       group: group.title || group.category || group.moduleName || "Templates",
@@ -60,6 +114,12 @@ async function readCustom() {
         tags: [],
         models: [],
         tutorial: "",
+        app: false,
+        remote: false,
+        usage: 0,
+        date: "",
+        size: null,
+        rank: 0,
         thumb: customThumb(pack, name),
         source: `${CUSTOM_LIST}/${encodeURIComponent(pack)}/${encodeURIComponent(name)}.json`,
         group: pack,
@@ -72,7 +132,10 @@ async function readCustom() {
 export const program = {
   open(api) {
     const win = api.window({ size: "manager", title: "Templates" });
-    const state = { groups: [], chosen: ALL, find: "", busy: false };
+    const state = {
+      groups: [], chosen: ALL, find: "", busy: false, type: "all", sort: "default",
+      models: new Set(), tasks: new Set(), runs: new Set(),
+    };
 
     const find = api.el("input", "om-search tpl-find");
     find.placeholder = "Search templates by name, description or tag";
@@ -85,8 +148,14 @@ export const program = {
     const wrap = api.el("div", "tpl");
     const side = api.el("div", "tpl-side");
     const main = api.el("div", "tpl-main");
+    const bar = api.el("div", "tpl-bar");
+    const tabs = api.el("div", "tpl-tabs");
+    const filters = api.el("div", "tpl-filters");
     const grid = api.el("div", "tpl-grid");
     const status = api.el("div", "tpl-status", "Reading the template list...");
+    bar.appendChild(tabs);
+    bar.appendChild(filters);
+    main.appendChild(bar);
     main.appendChild(grid);
     main.appendChild(status);
     wrap.appendChild(side);
@@ -95,14 +164,45 @@ export const program = {
 
     const everything = () => state.groups.flatMap((one) => one.templates);
 
+    const modelNames = () =>
+      [...new Set(everything().flatMap((one) => one.models))].sort();
+    const taskNames = () =>
+      [...new Set(everything().flatMap((one) => one.tags))].sort();
+
     const matches = (one) => {
       if (state.chosen !== ALL && one.group !== state.chosen) return false;
+      if (state.type === "graph" && one.app) return false;
+      if (state.type === "app" && !one.app) return false;
+      if (state.models.size && !one.models.some((name) => state.models.has(name))) return false;
+      if (state.tasks.size && !one.tags.some((tag) => state.tasks.has(tag))) return false;
+      if (state.runs.size && !state.runs.has(one.remote ? RUNS_API : RUNS_COMFY)) return false;
       const term = state.find.trim().toLowerCase();
       if (!term) return true;
       const hay = (`${one.title} ${one.name} ${one.note} ${one.tags.join(" ")} `
         + `${one.models.join(" ")}`).toLowerCase();
       return term.split(/\s+/).every((word) => hay.includes(word));
     };
+
+    const arrange = (list) => {
+      const out = [...list];
+      if (state.sort === "popular") return out.sort((a, b) => (b.usage || 0) - (a.usage || 0));
+      if (state.sort === "alphabetical") return out.sort(byTitle);
+      if (state.sort === "newest") {
+        return out.sort((a, b) => new Date(b.date || "1970-01-01").getTime()
+          - new Date(a.date || "1970-01-01").getTime());
+      }
+      if (state.sort === "size") {
+        return out.sort((a, b) => (a.size ?? Infinity) - (b.size ?? Infinity));
+      }
+      if (state.sort === "recommended") {
+        const largest = out.reduce((most, one) => Math.max(most, one.usage || 0), 0);
+        return out.sort((a, b) => recommended(b, largest) - recommended(a, largest));
+      }
+      return out;
+    };
+
+    const anyFilter = () => state.type !== "all" || state.models.size || state.tasks.size
+      || state.runs.size || state.sort !== "default";
 
     const tally = (shown) => {
       const total = everything().length;
@@ -123,14 +223,13 @@ export const program = {
         const answer = await fetch(one.source);
         if (!answer.ok) throw new Error(`the server answered ${answer.status}`);
         const data = await answer.json();
-        const { app } = await import("/scripts/app.js");
-        if (typeof app?.loadGraphData !== "function") {
+        if (typeof api.graph?.open !== "function") {
           throw new Error("this ComfyUI cannot load a workflow from here");
         }
-        await app.loadGraphData(data, true, true, one.title);
+        await api.graph.open(data, one.title);
         api.graph?.show?.();
         api.toast(`Opened ${one.title}`, { kind: "ok" });
-        tally(everything().filter(matches));
+        tally(arrange(everything().filter(matches)));
       } catch (error) {
         api.notify("Not opened", `${one.title} could not be opened: ${error.message}`);
         status.textContent = `${one.title} could not be opened.`;
@@ -165,6 +264,8 @@ export const program = {
         lead: one.title,
         facts: [
           ["From", one.group],
+          ["Opens as", one.app ? "App" : "Node graph"],
+          ["Runs on", one.remote ? RUNS_API : RUNS_COMFY],
           one.models.length ? ["Models", one.models.join(", ")] : null,
           one.tags.length ? ["Tagged", one.tags.join(", ")] : null,
         ].filter(Boolean),
@@ -184,6 +285,116 @@ export const program = {
       });
       return cell;
     };
+
+    const pickers = [];
+
+    const picker = (name, plural, list, chosen, seekable) => {
+      const root = api.el("div", "tpl-pick");
+      const button = api.el("button", "tpl-pick-btn");
+      const text = api.el("span", "tpl-pick-text", name);
+      button.appendChild(text);
+      button.appendChild(api.el("span", "tpl-pick-caret", "▾"));
+      root.appendChild(button);
+      const pop = api.el("div", "tpl-pop");
+      const seek = api.el("input", "om-search tpl-pop-find");
+      seek.placeholder = "Search";
+      seek.spellcheck = false;
+      const rows = api.el("div", "tpl-pop-rows");
+      const foot = api.el("div", "tpl-pop-foot");
+      const clear = api.el("button", "om-btn", "Clear");
+      foot.appendChild(clear);
+      if (seekable) pop.appendChild(seek);
+      pop.appendChild(rows);
+      pop.appendChild(foot);
+      root.appendChild(pop);
+
+      const show = () => {
+        text.textContent = chosen.size ? `${chosen.size} ${plural}` : name;
+        button.classList.toggle("tpl-pick-set", chosen.size > 0);
+      };
+      const paint = () => {
+        const term = seekable ? seek.value.trim().toLowerCase() : "";
+        const values = list().filter((one) => !term || one.toLowerCase().includes(term));
+        rows.replaceChildren(...values.map((value) => {
+          const row = api.el("label", "tpl-pop-row");
+          const mark = api.el("input");
+          mark.type = "checkbox";
+          mark.checked = chosen.has(value);
+          mark.onchange = () => {
+            if (mark.checked) chosen.add(value);
+            else chosen.delete(value);
+            show();
+            draw();
+          };
+          row.appendChild(mark);
+          row.appendChild(api.el("span", "tpl-pop-name", value));
+          return row;
+        }));
+      };
+      let watcher = null;
+      const close = () => {
+        root.classList.remove("tpl-pick-open");
+        if (watcher) document.removeEventListener("mousedown", watcher);
+        watcher = null;
+      };
+      const open = () => {
+        for (const other of pickers) if (other.root !== root) other.close();
+        paint();
+        root.classList.add("tpl-pick-open");
+        watcher = (event) => {
+          if (!root.isConnected || !root.contains(event.target)) close();
+        };
+        setTimeout(() => document.addEventListener("mousedown", watcher), 0);
+        if (seekable) seek.focus();
+      };
+      button.onclick = () => {
+        if (root.classList.contains("tpl-pick-open")) close();
+        else open();
+      };
+      clear.onclick = () => { chosen.clear(); show(); paint(); draw(); };
+      seek.addEventListener("input", paint);
+      const handle = { root, close, show, prune: (values) => {
+        const kept = new Set(values);
+        for (const value of [...chosen]) if (!kept.has(value)) chosen.delete(value);
+        show();
+      } };
+      pickers.push(handle);
+      filters.appendChild(root);
+      return handle;
+    };
+
+    for (const [value, label] of TYPES) {
+      const tab = api.el("button", "tpl-tab", label);
+      tab.dataset.type = value;
+      tab.onclick = () => { state.type = value; draw(); };
+      tabs.appendChild(tab);
+    }
+
+    const models = picker("Model Filter", "Models", modelNames, state.models, true);
+    const tasks = picker("Tasks", "Tasks", taskNames, state.tasks, true);
+    const runs = picker("Runs on", "Runs On", () => [RUNS_COMFY, RUNS_API], state.runs, false);
+
+    const sort = api.el("select", "om-side-select tpl-sort");
+    for (const [value, label] of SORTS) {
+      const option = api.el("option", null, label);
+      option.value = value;
+      sort.appendChild(option);
+    }
+    sort.onchange = () => { state.sort = sort.value; draw(); };
+    filters.appendChild(sort);
+
+    const wipe = api.el("button", "om-btn tpl-wipe", "Clear filters");
+    wipe.onclick = () => {
+      state.type = "all";
+      state.sort = "default";
+      state.models.clear();
+      state.tasks.clear();
+      state.runs.clear();
+      sort.value = "default";
+      for (const one of pickers) one.show();
+      draw();
+    };
+    filters.appendChild(wipe);
 
     const drawSide = () => {
       side.replaceChildren();
@@ -205,7 +416,11 @@ export const program = {
 
     const draw = () => {
       drawSide();
-      const shown = everything().filter(matches);
+      for (const tab of tabs.children) {
+        tab.classList.toggle("tpl-tab-on", tab.dataset.type === state.type);
+      }
+      wipe.classList.toggle("tpl-wipe-on", Boolean(anyFilter()));
+      const shown = arrange(everything().filter(matches));
       grid.replaceChildren(...shown.map(card));
       tally(shown);
       if (!shown.length && everything().length) {
@@ -220,11 +435,15 @@ export const program = {
         readCustom().catch(() => []),
       ]);
       state.groups = [...core, ...custom];
+      models.prune(modelNames());
+      tasks.prune(taskNames());
+      runs.prune([RUNS_COMFY, RUNS_API]);
       draw();
     };
 
     find.addEventListener("input", () => { state.find = find.value; draw(); });
     again.onclick = () => { void fill(); };
+    win.onClose(() => { for (const one of pickers) one.close(); });
 
     api.style(`
       .tpl { display: flex; flex: 1; min-height: 0; }
@@ -240,6 +459,41 @@ export const program = {
       .tpl-place-on { background: color-mix(in srgb, var(--om-text) 12%, transparent);
         font-weight: 600; }
       .tpl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      .tpl-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+        border-bottom: 1px solid var(--om-border); flex-wrap: wrap; }
+      .tpl-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 6px;
+        background: color-mix(in srgb, var(--om-text) 7%, transparent); }
+      .tpl-tab { border: 0; border-radius: 4px; background: transparent; color: inherit;
+        font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+      .tpl-tab:hover { background: var(--om-hover); }
+      .tpl-tab-on { background: var(--om-text); color: var(--om-bg); font-weight: 600; }
+      .tpl-filters { display: flex; align-items: center; gap: 6px; margin-left: auto;
+        flex-wrap: wrap; }
+      .tpl-pick { position: relative; }
+      .tpl-pick-btn { display: flex; align-items: center; gap: 6px; font: inherit;
+        font-size: 12px; padding: 4px 9px; border-radius: 6px; cursor: pointer;
+        border: 1px solid var(--om-border); background: var(--om-input); color: inherit; }
+      .tpl-pick-btn:hover { background: var(--om-hover); }
+      .tpl-pick-set { border-color: color-mix(in srgb, var(--om-text) 45%, transparent);
+        font-weight: 600; }
+      .tpl-pick-caret { opacity: .6; font-size: 10px; }
+      .tpl-pop { display: none; position: absolute; right: 0; top: calc(100% + 4px);
+        z-index: 40; min-width: 230px; max-width: 320px; padding: 6px;
+        border: 1px solid var(--om-border); border-radius: 8px; background: var(--om-bg);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
+      .tpl-pick-open .tpl-pop { display: block; }
+      .tpl-pop-find { width: 100%; margin-bottom: 6px; }
+      .tpl-pop-rows { max-height: 280px; overflow-y: auto; display: flex;
+        flex-direction: column; }
+      .tpl-pop-row { display: flex; align-items: center; gap: 7px; padding: 4px 6px;
+        border-radius: 5px; cursor: pointer; font-size: 12px; }
+      .tpl-pop-row:hover { background: var(--om-hover); }
+      .tpl-pop-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tpl-pop-foot { display: flex; justify-content: flex-end; padding-top: 6px;
+        margin-top: 4px; border-top: 1px solid var(--om-border); }
+      .tpl-sort { font-size: 12px; }
+      .tpl-wipe { display: none; }
+      .tpl-wipe-on { display: inline-flex; }
       .tpl-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 10px; display: grid;
         gap: 10px; align-content: start; grid-auto-rows: max-content;
         grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }

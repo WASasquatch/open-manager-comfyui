@@ -448,6 +448,30 @@ async def plan(items: list) -> dict:
     }
 
 
+def finished_since(when: float) -> list[dict]:
+    """The files downloads have written since a moment.
+
+    Args:
+        when: A time from ``time.time()``.
+
+    Returns:
+        ``{path, directory, finished_at}`` per finished download whose file is on disk.
+    """
+    _load()
+    found = []
+    for row in _entries.values():
+        if row.get("status") != "done" or float(row.get("finished_at") or 0) <= when:
+            continue
+        try:
+            target = Path(row["path"]) if row.get("path") else _target_for(row)
+        except (OSError, KeyError, TypeError, ValueError):
+            continue
+        if target is not None and target.is_file():
+            found.append({"path": str(target), "directory": str(row.get("directory") or ""),
+                          "finished_at": float(row.get("finished_at") or 0)})
+    return found
+
+
 def record_for(where: str) -> dict:
     """The finished download that wrote this file, where one of them did.
 

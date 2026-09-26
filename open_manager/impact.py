@@ -14,7 +14,9 @@ from typing import Sequence
 
 from . import piptool
 
-__all__ = ["CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from"]
+__all__ = [
+    "CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from", "installed_versions",
+]
 
 TIMEOUT = 180
 
@@ -179,6 +181,18 @@ def _installed(python: str) -> dict[str, str]:
         }
     except (OSError, subprocess.SubprocessError, ValueError):
         return {}
+
+
+def installed_versions(python: str = "") -> dict[str, str]:
+    """Every distribution installed in an interpreter, keyed by folded name.
+
+    Args:
+        python: Interpreter to inspect. Defaults to the running one.
+
+    Returns:
+        ``{name: version}``, empty where the listing failed.
+    """
+    return _installed(python or sys.executable)
 
 
 def analyse(requirements: Sequence[str], python: str = "") -> Impact:

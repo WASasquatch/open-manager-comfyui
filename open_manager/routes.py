@@ -40,6 +40,7 @@ from . import (
     localnodes,
     monitor,
     nodemap,
+    pause as run_pause,
     registry,
     risk,
     selfupdate,
@@ -94,6 +95,32 @@ _LOOPBACK = ("127.0.0.1", "::1", "localhost")
 def _model_folder_names() -> set:
     """Every folder a download may be written to."""
     return model_policy.folders()
+
+
+def _panel_module(request: web.Request) -> bool:
+    """Whether a request is for one of the panel's own script modules."""
+    if not request.path.endswith(".mjs"):
+        return False
+    if not request.match_info.get("filename", "").startswith("modules/"):
+        return False
+    resource = request.match_info.route.resource
+    directory = resource.get_info().get("directory") if resource is not None else None
+    if directory is None:
+        return False
+    from . import web_directory
+
+    return os.path.normcase(os.path.realpath(directory)) == os.path.normcase(
+        os.path.realpath(web_directory())
+    )
+
+
+@web.middleware
+async def _uncached_modules(request: web.Request, handler):
+    """Serve the panel's script modules with the no-store header ComfyUI gives `.js` files."""
+    response = await handler(request)
+    if _panel_module(request):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 DOC_LIMIT = 400_000
@@ -1486,7 +1513,9 @@ def register_routes() -> None:
         directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id)
         if directory is None:
             return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
-        ok, output = await asyncio.to_thread(installer.install_requirements, directory, ""
+        policy = installer.install_policy((body or {}).get("policy", "all"))
+        ok, output = await asyncio.to_thread(installer.install_requirements, directory, "",
+            policy,
         )
         return web.json_response({"ok": ok, "output": output})
 
@@ -1996,6 +2025,41 @@ def register_routes() -> None:
             pass
         return web.json_response({"ok": True, "reading": first, **answer})
 
+    run_pause.install()
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/pause")
+    @_json_body
+    async def pause_run(request: web.Request, body: dict) -> web.Response:
+        """Pause the running prompt to disk, and answer once it has been written."""
+        widgets = body.get("widgets")
+        answer = await asyncio.to_thread(
+            run_pause.request, str(body.get("mode") or "boundary"),
+            widgets if isinstance(widgets, list) else None)
+        return web.json_response(answer, status=200 if answer.get("ok") or answer.get("finished")
+                                 else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/pause")
+    async def pause_read(request: web.Request) -> web.Response:
+        """A workflow's saved pause, or every saved pause where none is named."""
+        workflow_id = request.query.get("workflow", "").strip()
+        if not workflow_id:
+            found = await asyncio.to_thread(run_pause.listing)
+            return web.json_response({"ok": True, "available": run_pause.available(),
+                                      "pauses": found})
+        found = await asyncio.to_thread(run_pause.read, workflow_id)
+        return web.json_response({"ok": True, "available": run_pause.available(),
+                                  "pause": found})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/pause/discard")
+    @_json_body
+    async def pause_discard(request: web.Request, body: dict) -> web.Response:
+        """Delete a workflow's saved pause."""
+        workflow_id = str(body.get("workflow") or "").strip()
+        if not workflow_id:
+            return web.json_response({"ok": False, "reason": "no workflow named"}, status=400)
+        removed = await asyncio.to_thread(run_pause.discard, workflow_id)
+        return web.json_response({"ok": True, "removed": removed})
+
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor/free")
     @_json_body
     async def monitor_free(request: web.Request, body: dict) -> web.Response:
@@ -2068,6 +2132,15 @@ def register_routes() -> None:
     async def library_references(_request: web.Request) -> web.Response:
         """The model filenames the saved workflows appear to ask for."""
         found = await asyncio.to_thread(library.references)
+        return web.json_response(found)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/references")
+    @_json_body
+    async def library_references_with_open(request: web.Request, body: dict) -> web.Response:
+        """The model filenames the saved and open workflows appear to ask for."""
+        opened = body.get("open")
+        found = await asyncio.to_thread(
+            library.references, opened if isinstance(opened, list) else None)
         return web.json_response(found)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/hash")
@@ -2308,10 +2381,11 @@ def register_routes() -> None:
 
         with_deps = bool(body.get("with_deps", True))
         overwrite = bool(body.get("overwrite", False))
+        policy = installer.install_policy(body.get("policy", "all"))
 
         before = await asyncio.to_thread(environment.snapshot) if with_deps else {}
         result = await asyncio.to_thread(installer.install, node_id, version,
-            target.get("download_url", ""), "", with_deps, overwrite,
+            target.get("download_url", ""), "", with_deps, overwrite, policy,
         )
         answer = result.to_json()
         if before:
@@ -2351,8 +2425,10 @@ def register_routes() -> None:
         if ref and not metadata.valid_ref(ref):
             return web.json_response({"ok": False, "reason": "invalid ref"}, status=400)
         overwrite = bool(body.get("overwrite"))
+        policy = installer.install_policy(body.get("policy", "all"))
         before = await asyncio.to_thread(environment.snapshot) if with_deps else {}
-        result = await asyncio.to_thread(installer.install_repo, repo, "", with_deps, ref, overwrite
+        result = await asyncio.to_thread(installer.install_repo, repo, "", with_deps, ref, overwrite,
+            policy,
         )
         answer = result.to_json()
         if before:
@@ -2621,6 +2697,11 @@ def register_routes() -> None:
                 "policy": "warn-never-block",
             }
         )
+
+    try:
+        PromptServer.instance.app.middlewares.append(_uncached_modules)
+    except RuntimeError as error:
+        logger.warning("panel modules may be cached by the browser (%s)", error)
 
     _registered = True
     logger.info("routes registered below %s", PREFIX)

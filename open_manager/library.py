@@ -138,7 +138,7 @@ def index(refresh: bool = False) -> dict:
     if not refresh:
         held = _read("model_index.json", None)
         if isinstance(held, dict) and isinstance(held.get("files"), list):
-            return held
+            return _with_finished_downloads(held)
 
     files: list[dict] = []
     partials: list[dict] = []
@@ -207,6 +207,43 @@ def index(refresh: bool = False) -> dict:
     }
     _write("model_index.json", answer)
     return answer
+
+
+def _with_finished_downloads(held: dict) -> dict:
+    """Add the files downloads finished after the last walk to a remembered index."""
+    since = float(held.get("scanned_at") or 0)
+    fresh = [one for one in downloads.finished_since(since)
+             if one["finished_at"] > float(held.get("downloads_at") or 0)]
+    if not fresh:
+        return held
+    known = {_key(one.get("path", "")) for one in held["files"]}
+    roots = _roots()
+    for one in fresh:
+        full = one["path"]
+        if _key(full) in known:
+            continue
+        suffix = os.path.splitext(full)[1].lower()
+        if suffix not in KNOWN_FORMATS:
+            continue
+        try:
+            stat = os.stat(full)
+        except OSError:
+            continue
+        owner = next((entry for entry in roots
+                      if _key(full).startswith(_key(entry["root"]) + "/")), None)
+        known.add(_key(full))
+        held["files"].append({
+            "path": full,
+            "name": os.path.basename(full),
+            "directory": owner["directory"] if owner else one["directory"],
+            "root": owner["root"] if owner else os.path.dirname(full),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "format": suffix,
+        })
+    held["downloads_at"] = max(one["finished_at"] for one in fresh)
+    _write("model_index.json", held)
+    return held
 
 
 def fingerprint(where: str, size: int) -> str:
@@ -427,31 +464,34 @@ def declared_models(document: object, limit: int = MAX_DECLARED) -> list[dict]:
     found: list[dict] = []
     seen: set = set()
 
+    def take(items: list, node: str) -> None:
+        for item in items:
+            if not isinstance(item, dict) or len(found) >= limit:
+                continue
+            url = models.normalise(str(item.get("url") or ""))
+            name = str(item.get("name") or "")
+            directory = str(item.get("directory") or "")
+            key = (url, name, directory)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append({
+                "url": url,
+                "name": name,
+                "directory": directory,
+                "hash": str(item.get("hash") or ""),
+                "hash_type": str(item.get("hash_type") or ""),
+                "owner": models.owner_of(url),
+                "node": node,
+            })
+
     def walk(node: object, depth: int = 0) -> None:
         if depth > 20 or len(found) >= limit:
             return
         if isinstance(node, dict):
             properties = node.get("properties")
             if isinstance(properties, dict) and isinstance(properties.get("models"), list):
-                for item in properties["models"]:
-                    if not isinstance(item, dict) or len(found) >= limit:
-                        continue
-                    url = models.normalise(str(item.get("url") or ""))
-                    name = str(item.get("name") or "")
-                    directory = str(item.get("directory") or "")
-                    key = (url, name, directory)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    found.append({
-                        "url": url,
-                        "name": name,
-                        "directory": directory,
-                        "hash": str(item.get("hash") or ""),
-                        "hash_type": str(item.get("hash_type") or ""),
-                        "owner": models.owner_of(url),
-                        "node": str(node.get("type") or node.get("id") or ""),
-                    })
+                take(properties["models"], str(node.get("type") or node.get("id") or ""))
             for value in node.values():
                 walk(value, depth + 1)
         elif isinstance(node, list):
@@ -459,23 +499,62 @@ def declared_models(document: object, limit: int = MAX_DECLARED) -> list[dict]:
                 walk(value, depth + 1)
 
     walk(document)
+    if isinstance(document, dict) and isinstance(document.get("models"), list):
+        take(document["models"], "")
     return found
 
 
-def references() -> dict:
-    """Every model filename the saved workflows appear to ask for.
+def references(open_documents: list | None = None) -> dict:
+    """Every model filename the saved and open workflows appear to ask for.
+
+    Args:
+        open_documents: ``{workflow, document, saved, modified}`` per workflow open in the
+            editor. An open workflow stands in for the saved file of the same name.
 
     Returns:
         ``{names, declared, workflows, unreadable, searched_at}``, where ``declared`` is
-        ``{workflow, models}`` for each workflow that declares any.
+        ``{workflow, path, open, modified, models}`` for each workflow that declares any;
+        ``path`` is the file on disk, empty for a workflow never saved.
     """
     where = _workflow_dir()
     names: set[str] = set()
     declared: list[dict] = []
     read = 0
     unreadable = 0
+    live: dict[str, dict] = {}
+    for one in (open_documents or [])[:MAX_WORKFLOWS]:
+        if not isinstance(one, dict) or not isinstance(one.get("document"), dict):
+            continue
+        label = str(one.get("workflow") or "").replace("\\", "/").strip()
+        if label.startswith("workflows/"):
+            label = label[len("workflows/"):]
+        if label and label not in live:
+            live[label] = one
+    for label, one in live.items():
+        document = one["document"]
+        try:
+            _names_in(document, names)
+        except RecursionError:
+            continue
+        read += 1
+        asked = declared_models(document)
+        if asked:
+            on_disk = where / label if where is not None and one.get("saved") else None
+            declared.append({
+                "workflow": label,
+                "path": str(on_disk) if on_disk is not None and on_disk.is_file() else "",
+                "open": True,
+                "modified": bool(one.get("modified")),
+                "models": asked,
+            })
     if where is not None:
         for path in sorted(where.rglob("*.json"))[:MAX_WORKFLOWS]:
+            try:
+                named = path.relative_to(where).as_posix()
+            except ValueError:
+                named = path.name
+            if named in live:
+                continue
             try:
                 if path.stat().st_size > MAX_WORKFLOW_BYTES:
                     unreadable += 1
@@ -488,11 +567,8 @@ def references() -> dict:
                 continue
             asked = declared_models(document)
             if asked:
-                try:
-                    named = str(path.relative_to(where))
-                except ValueError:
-                    named = path.name
-                declared.append({"workflow": named, "models": asked})
+                declared.append({"workflow": named, "path": str(path), "open": False,
+                                 "modified": False, "models": asked})
     return {
         "names": sorted(names),
         "declared": declared,

@@ -53,6 +53,7 @@ packages = ["open_manager", "comfyui_manager"]
 open_manager = [
     "web/*.js",
     "web/*.svg",
+    "web/modules/*.mjs",
     "web/programs/*/manifest.json",
     "web/programs/*/*.mjs",
     "web/programs/*/*.html",

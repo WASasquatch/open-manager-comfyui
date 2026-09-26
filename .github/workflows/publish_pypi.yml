@@ -65,6 +65,7 @@ jobs:
           import open_manager, pathlib
           web = pathlib.Path(open_manager.__file__).parent / "web"
           assert (web / "open_manager.js").is_file(), "web assets missing from the wheel"
+          assert (web / "modules" / "extension.mjs").is_file(), "web modules missing from the wheel"
           print("contract satisfied")'
 
       - name: Publish

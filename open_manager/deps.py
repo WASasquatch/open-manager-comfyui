@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 
-__all__ = ["check", "comfyui_core"]
+__all__ = ["check", "comfyui_core", "direction"]
 
 _CORE_NAMES = frozenset({
     "torch", "torchsde", "torchvision", "torchaudio", "numpy", "transformers",
@@ -44,6 +44,43 @@ def comfyui_core() -> dict:
     return pins
 
 
+def direction(spec: str, installed: str) -> str:
+    """Which way a specifier would move an installed version.
+
+    Args:
+        spec: The requirement's specifier, as ``packaging`` spells it.
+        installed: The version present now.
+
+    Returns:
+        ``upgrade``, ``downgrade`` or ``change`` where neither side is decisive.
+    """
+    try:
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import InvalidVersion, Version
+    except Exception:
+        return "change"
+    try:
+        have = Version(installed)
+        clauses = SpecifierSet(spec or "")
+    except (InvalidVersion, TypeError, ValueError):
+        return "change"
+    below = above = False
+    for clause in clauses:
+        try:
+            edge = Version(str(clause.version).rstrip("*").rstrip("."))
+        except (InvalidVersion, TypeError, ValueError):
+            continue
+        if clause.operator in ("<", "<=", "==", "===", "~=") and edge < have:
+            below = True
+        if clause.operator in (">", ">=", "==", "===", "~=") and edge > have:
+            above = True
+    if below and not above:
+        return "downgrade"
+    if above and not below:
+        return "upgrade"
+    return "change"
+
+
 def check(requirements) -> list[dict]:
     """Check declared requirements against the environment and ComfyUI.
 
@@ -70,13 +107,13 @@ def check(requirements) -> list[dict]:
         if raw.startswith(("git+", "-e ", "--editable")) or "git+" in raw or "://" in raw:
             name = re.sub(r"\.git.*$", "", raw.rsplit("/", 1)[-1]) or raw
             out.append({"raw": raw, "name": name, "spec": "from URL", "installed": "",
-                        "status": "vcs", "core": False, "comfyui": ""})
+                        "status": "vcs", "direction": "", "core": False, "comfyui": ""})
             continue
         try:
             req = Requirement(raw)
         except Exception:
             out.append({"raw": raw, "name": raw, "spec": "", "installed": "",
-                        "status": "unparsed", "core": False, "comfyui": ""})
+                        "status": "unparsed", "direction": "", "core": False, "comfyui": ""})
             continue
         name = req.name
         try:
@@ -98,6 +135,7 @@ def check(requirements) -> list[dict]:
             "spec": str(req.specifier),
             "installed": installed or "",
             "status": status,
+            "direction": direction(str(req.specifier), installed) if status == "conflict" else "",
             "core": folded in _CORE_NAMES or folded in core,
             "comfyui": core.get(folded, ""),
         })
