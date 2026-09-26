@@ -6,7 +6,11 @@ import { panelSetting } from "./settings.mjs";
 import { dlPost, bytesText } from "./downloads.mjs";
 import { workflowGraphById } from "./workflows.mjs";
 
-const pauseState = { running: false, busy: false, fixed: null, queued: new Set(), wired: false };
+const pauseState = {
+  running: false, busy: false, fixed: null, queued: new Set(), wired: false, resumable: null,
+};
+
+const RUN_MENU_WAIT = 1500;
 
 function pauseOn() {
   return panelSetting("openManager.pauseButton", true) !== false;
@@ -96,16 +100,133 @@ function restorePausedWidgets(record) {
   if (changed) app.graph.setDirtyCanvas(true, true);
 }
 
-async function restorePauseForGraph() {
-  if (!pauseOn()) return;
-  const workflowId = String(app.graph?.id || "");
-  if (!workflowId) return;
+async function readPause(workflowId) {
   try {
     const answer = await (await api.fetchApi(
       `${API}/pause?workflow=${encodeURIComponent(workflowId)}`)).json();
-    if (answer?.pause) restorePausedWidgets(answer.pause);
+    return answer?.pause || null;
   } catch {
+    return undefined;
   }
+}
+
+async function refreshResume() {
+  const workflowId = String(app.graph?.id || "");
+  const record = pauseOn() && workflowId ? await readPause(workflowId) : null;
+  if (record === undefined) return null;
+  if (String(app.graph?.id || "") !== workflowId) return null;
+  pauseState.resumable = record;
+  paintResume();
+  return record;
+}
+
+async function restorePauseForGraph() {
+  const record = await refreshResume();
+  if (record) restorePausedWidgets(record);
+}
+
+function paintResume() {
+  const group = document.querySelector(".queue-button-group");
+  const record = pauseState.resumable;
+  const on = !!record && pauseOn() && !pauseState.running && !pauseState.busy
+    && record.workflow_id === String(app.graph?.id || "");
+  for (const other of document.querySelectorAll(".om-resume")) {
+    if (other !== group) other.classList.remove("om-resume");
+  }
+  group?.classList.toggle("om-resume", on);
+}
+
+async function forgetPause() {
+  const record = pauseState.resumable;
+  if (!record) return false;
+  const answer = await dlPost("/pause/discard", { workflow: record.workflow_id }).catch(() => null);
+  if (!answer?.ok) {
+    notify("Not discarded", answer?.reason || "The pause could not be discarded.");
+    return false;
+  }
+  const fixed = pauseState.fixed;
+  if (fixed && fixed.workflow === record.workflow_id) {
+    for (const one of fixed.fixed) one.control.value = one.value;
+    pauseState.fixed = null;
+    app.graph?.setDirtyCanvas(true, true);
+  }
+  if (pauseState.pendingWorkflow === record.workflow_id) pauseState.pendingWorkflow = null;
+  pauseState.queued.add(pauseKey(record));
+  pauseState.resumable = null;
+  paintResume();
+  return true;
+}
+
+async function startFresh() {
+  if (!(await forgetPause())) return;
+  await app.extensionManager?.command?.execute?.("Comfy.QueuePrompt");
+}
+
+function closeRunMenu() {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+}
+
+function injectRunMenu(menu) {
+  if (menu.querySelector(".om-run-item")) return;
+  const items = [...menu.querySelectorAll('[role="menuitem"]')];
+  const model = items.find((one) => !one.className.includes("bg-primary-background")) || items[0];
+  if (!model) return;
+  const row = (label, act) => {
+    const item = model.cloneNode(true);
+    for (const name of ["id", "data-reka-collection-item", "data-highlighted", "data-state"]) {
+      item.removeAttribute(name);
+    }
+    item.classList.add("om-run-item");
+    item.textContent = label;
+    item.tabIndex = -1;
+    item.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeRunMenu();
+      act();
+    });
+    return item;
+  };
+  const split = el("div", "om-run-split");
+  split.setAttribute("role", "separator");
+  const host = model.parentElement === menu ? menu : model.parentElement?.parentElement || menu;
+  host.append(split, row("Start fresh", startFresh), row("Discard pause", forgetPause));
+}
+
+function awaitRunMenu(trigger) {
+  let timer = 0;
+  const pick = (node) => {
+    if (!(node instanceof Element)) return null;
+    const menu = node.matches('[role="menu"]') ? node : node.querySelector('[role="menu"]');
+    if (!menu) return null;
+    const by = menu.getAttribute("aria-labelledby");
+    return !by || !trigger.id || by === trigger.id ? menu : null;
+  };
+  const watcher = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) {
+        const menu = pick(node);
+        if (!menu) continue;
+        watcher.disconnect();
+        clearTimeout(timer);
+        injectRunMenu(menu);
+        return;
+      }
+    }
+  });
+  watcher.observe(document.body, { childList: true, subtree: true });
+  timer = setTimeout(() => watcher.disconnect(), RUN_MENU_WAIT);
+}
+
+function wireRunMenu() {
+  const opening = (event) => {
+    const trigger = event.target?.closest?.('.om-resume > [data-testid="queue-mode-menu-trigger"]');
+    if (!trigger) return;
+    if (event.type === "keydown" && !["Enter", " ", "ArrowDown"].includes(event.key)) return;
+    awaitRunMenu(trigger);
+  };
+  document.addEventListener("pointerdown", opening, true);
+  document.addEventListener("keydown", opening, true);
 }
 
 async function runningWorkflowId() {
@@ -139,7 +260,10 @@ async function pauseRun(mode) {
           + `${bytesText(answer.bytes)}.`, { kind: "ok" });
     const record = await (await api.fetchApi(
       `${API}/pause?workflow=${encodeURIComponent(answer.workflow_id)}`)).json().catch(() => null);
-    if (record?.pause) restorePausedWidgets(record.pause);
+    if (record?.pause) {
+      if (record.pause.workflow_id === String(app.graph?.id || "")) pauseState.resumable = record.pause;
+      restorePausedWidgets(record.pause);
+    }
   } catch (error) {
     notify("Not paused", error.message || "The run could not be paused.");
   } finally {
@@ -149,52 +273,65 @@ async function pauseRun(mode) {
 }
 
 function paintPause() {
-  const box = document.querySelector(".om-pause");
-  if (!box) return;
-  box.style.display = pauseState.running || pauseState.busy ? "" : "none";
-  const go = box.querySelector(".om-pause-go");
-  go.disabled = pauseState.busy;
-  go.querySelector(".om-pause-text").textContent = pauseState.busy ? "Pausing" : "Pause";
-  box.querySelector(".om-pause-more").disabled = pauseState.busy;
+  const button = document.querySelector(".om-pause");
+  if (!button) return;
+  const out = !(pauseState.running || pauseState.busy);
+  button.classList.toggle("om-pause-out", out);
+  button.parentElement?.classList.toggle("om-pause-on", !out);
+  button.setAttribute("aria-hidden", out ? "true" : "false");
+  button.tabIndex = out ? -1 : 0;
+  button.disabled = out || pauseState.busy;
+  button.classList.toggle("om-pause-busy", pauseState.busy);
+  button.title = pauseState.busy ? "Pausing" : "Pause";
+  paintResume();
 }
 
 function buildPauseButton() {
-  const box = el("div", "om-pause");
-  const go = el("button", "om-pause-go");
-  go.title = "Pause";
-  go.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">'
+  const button = el("button", "om-pause om-pause-out");
+  button.type = "button";
+  button.setAttribute("aria-label", "Pause");
+  button.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">'
     + '<rect x="3.5" y="2.5" width="3" height="11" rx="1" fill="currentColor"/>'
     + '<rect x="9.5" y="2.5" width="3" height="11" rx="1" fill="currentColor"/></svg>';
-  go.appendChild(el("span", "om-pause-text", "Pause"));
-  go.onclick = () => pauseRun("boundary");
-  const more = el("button", "om-pause-more", "▾");
-  more.title = "Pause options";
-  more.onclick = (event) => {
+  button.onclick = () => pauseRun("boundary");
+  button.oncontextmenu = (event) => {
+    event.preventDefault();
     event.stopPropagation();
-    openRowMenu(more, { align: "right", items: [
+    if (pauseState.busy) return;
+    openRowMenu(button, { align: "right", items: [
       { label: "Pause after this node", fn: () => pauseRun("boundary") },
       { label: "Pause now", fn: () => pauseRun("now") },
     ] });
   };
-  box.appendChild(go);
-  box.appendChild(more);
-  return box;
+  return button;
+}
+
+function pauseSpot(group) {
+  const trigger = group.querySelector(':scope > [data-testid="queue-mode-menu-trigger"]');
+  if (trigger) return trigger;
+  return group.querySelector(':scope > [data-testid="queue-button"]')?.nextElementSibling || null;
 }
 
 function mountPauseButton() {
   const present = document.querySelector(".om-pause");
+  for (const group of document.querySelectorAll(".om-pause-on")) {
+    if (group !== present?.parentElement) group.classList.remove("om-pause-on");
+  }
   if (!pauseOn()) {
+    present?.parentElement?.classList.remove("om-pause-on");
     present?.remove();
     return false;
   }
   const group = document.querySelector(".queue-button-group");
-  if (!group?.parentElement) return false;
-  if (present && present.previousElementSibling === group) {
+  if (!group) return false;
+  const before = pauseSpot(group);
+  if (present && present.parentElement === group && present.nextElementSibling === before) {
     paintPause();
     return true;
   }
+  present?.parentElement?.classList.remove("om-pause-on");
   present?.remove();
-  group.parentElement.insertBefore(buildPauseButton(), group.nextSibling);
+  group.insertBefore(buildPauseButton(), before);
   paintPause();
   return true;
 }
@@ -202,9 +339,12 @@ function mountPauseButton() {
 function wirePause() {
   if (pauseState.wired) return;
   pauseState.wired = true;
+  wireRunMenu();
   const settle = (running) => {
+    const ended = pauseState.running && !running;
     pauseState.running = running;
     mountPauseButton();
+    if (ended) refreshResume();
   };
   api.addEventListener("execution_start", () => settle(true));
   api.addEventListener("execution_success", () => settle(false));

@@ -183,6 +183,19 @@ style.textContent = `
 @keyframes om-spin { to { transform: rotate(360deg); } }
 @keyframes om-ellipsis { 0% { content: ""; } 25% { content: "."; }
   50% { content: ".."; } 75% { content: "..."; } }
+@supports (color: oklch(from red l c h)) {
+  .queue-button-group.om-resume > [data-testid="queue-button"][data-variant="primary"] {
+    background: oklch(from var(--color-primary-background, #0b8ce9) l c calc(h - 60)); }
+  .queue-button-group.om-resume > [data-testid="queue-button"][data-variant="primary"]:hover {
+    background: oklch(from var(--color-primary-background, #0b8ce9) calc(l + .05) c calc(h - 60)); }
+}
+.queue-button-group.om-resume > [data-testid="queue-button"][data-variant="primary"]:has(> [data-testid="queue-button-icon"][class*="lucide--play"]) {
+  font-size: 0; }
+.queue-button-group.om-resume > [data-testid="queue-button"][data-variant="primary"]:has(> [data-testid="queue-button-icon"][class*="lucide--play"])::after {
+  content: "Resume"; font-size: .875rem; line-height: 1.25rem; margin-left: -.375rem; }
+.queue-button-group.om-resume > [data-testid="queue-button"][data-variant="primary"] > [data-testid="queue-button-icon"][class*="lucide--play"] {
+  --svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='5 4 15 12 5 20 5 4'/%3E%3Cline x1='19' x2='19' y1='5' y2='19'/%3E%3C/svg%3E"); }
+.om-run-split { height: 1px; margin: 4px 2px; background: var(--color-border-subtle, var(--om-border)); }
 @media (prefers-reduced-motion: reduce) {
   .om-loading-spin { animation: none; border-top-color: var(--om-border); }
   .om-loading-text::after { content: "..."; animation: none; }
@@ -1248,16 +1261,26 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-cost-failed { background: #a5261d; }
 .om-cost-line { color: var(--om-muted); }
 .om-cost-stale { color: #d29922; }
-.om-pause { display: inline-flex; align-items: stretch; height: 32px; border-radius: 8px;
-  overflow: hidden; border: 1px solid var(--om-border); background: var(--om-surface); }
-.om-pause button { display: inline-flex; align-items: center; gap: 6px; border: 0;
-  background: transparent; color: var(--om-text); cursor: pointer;
-  font: 13px/1 system-ui, sans-serif; }
-.om-pause button:hover:not(:disabled) { background: var(--om-hover); }
-.om-pause button:disabled { opacity: .6; cursor: default; }
-.om-pause-go { padding: 0 12px; }
-.om-pause-more { padding: 0 8px; border-left: 1px solid var(--om-border) !important;
-  color: var(--om-muted) !important; }
+.om-pause { display: inline-flex; align-items: center; justify-content: flex-start; flex: none;
+  width: 26px; height: 100%; padding: 0 0 0 6px; border: 0; border-radius: 0; cursor: pointer;
+  overflow: hidden; box-sizing: border-box;
+  background: color-mix(in oklch, var(--color-primary-background, #0b8ce9) 42%, #5b6470);
+  color: #fff; transition: width .2s ease, padding .2s ease, background .15s; }
+.om-pause svg { flex: none; }
+.om-pause.om-pause-out { width: 0; padding-left: 0; pointer-events: none; }
+.queue-button-group > [data-testid="queue-button"] {
+  transition: color .15s, background-color .15s, border-color .15s, border-radius .12s ease .2s; }
+.queue-button-group.om-pause-on > [data-testid="queue-button"] {
+  transition: color .15s, background-color .15s, border-color .15s, border-radius 0s; }
+.om-pause:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--color-primary-background, #0b8ce9) 58%, #5b6470); }
+.om-pause:disabled { cursor: default; }
+.om-pause-busy svg { animation: om-pause-beat 1s ease-in-out infinite; }
+@keyframes om-pause-beat { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .om-pause, .queue-button-group > [data-testid="queue-button"] { transition: none; } }
+.queue-button-group.om-pause-on > [data-testid="queue-button"] {
+  border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .om-mon { display: inline-flex; align-items: center; gap: 10px; margin: 0 8px;
   font: 10px/1.2 system-ui, sans-serif; color: var(--om-muted); white-space: nowrap; }
 .om-mon-cell { display: inline-flex; align-items: center; gap: 4px; }

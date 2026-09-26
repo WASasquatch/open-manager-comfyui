@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "comfyui-open-manager"
 description = "A manager for the whole ComfyUI workspace: custom nodes, themes, models, downloads, a resource monitor and a desktop."
-version = "0.2.1"
+version = "0.2.2"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
