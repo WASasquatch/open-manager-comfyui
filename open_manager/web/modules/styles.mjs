@@ -324,7 +324,7 @@ sidebarStyle.textContent = `
   font: 13px/1.5 system-ui, sans-serif; color: var(--om-text); box-sizing: border-box; }
 .om-nav { display: flex; gap: 4px; flex: none; }
 .om-nav-btn { flex: 1; padding: 6px 4px; background: var(--om-surface); border: 1px solid var(--om-border);
-  border-radius: 6px; color: var(--om-muted); cursor: pointer; font-size: 12px; }
+  border-radius: 6px; color: var(--om-muted); cursor: pointer; font-size: 15px; line-height: 1; }
 .om-nav-btn:hover { background: var(--om-hover); }
 .om-nav-more { flex: none; width: 28px; padding: 6px 0; font-size: 14px; line-height: 1; }
 .om-nav-btn.active { background: var(--om-border); color: var(--om-text); border-color: var(--om-border); }
@@ -1065,6 +1065,57 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-deskset-switch { gap: 8px; cursor: pointer; color: var(--om-text-2); font-size: 12px; }
 .om-deskset-by { margin-left: auto; color: var(--om-muted); font-size: 11px; }
 .om-deskset-switch > input { flex: none; }
+.om-presets { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  min-height: 100%; box-sizing: border-box; }
+.om-preset-save { display: flex; gap: 8px; align-items: center; }
+.om-preset-save .om-search { flex: 1; }
+.om-preset-list { display: flex; flex-direction: column; gap: 6px; }
+.om-preset-row { border: 1px solid var(--om-border); border-radius: 8px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 4px; background: var(--om-surface); }
+.om-preset-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.om-preset-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-preset-marks { display: inline-flex; gap: 4px; flex: none; }
+.om-preset-marks .om-chip { font-size: 10px; padding: 0 6px; }
+.om-preset-more { padding: 4px 8px; }
+.om-preset-meta { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.om-preset-values { flex: 1; min-width: 0; color: var(--om-muted); font-size: 11px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.om-preset-store { display: inline-flex; align-items: center; flex: none; margin-left: auto;
+  font-size: 11px; }
+.om-preset-fold { flex: none; width: 20px; padding: 0; border: 0; background: none;
+  color: var(--om-muted); cursor: pointer; font-size: 15px; line-height: 1; }
+.om-preset-fold:hover { color: var(--om-text); }
+.om-preset-name { cursor: pointer; }
+.om-preset-fields { display: flex; flex-direction: column; margin-top: 4px;
+  border: 1px solid var(--om-border); border-radius: 6px; background: var(--om-input);
+  overflow: hidden; }
+.om-preset-fields-head { display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  border-bottom: 1px solid var(--om-border); min-height: 18px; }
+.om-preset-count { flex: 1; color: var(--om-muted); font-size: 11px; }
+.om-preset-filter.om-search { width: 180px; flex: none; padding: 3px 8px; font-size: 12px; }
+.om-preset-field-list { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+.om-preset-field { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto;
+  gap: 12px; align-items: start; padding: 5px 10px; font-size: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--om-border) 55%, transparent); }
+.om-preset-field:last-child { border-bottom: 0; }
+.om-preset-field:hover { background: var(--om-hover); }
+.om-preset-field[hidden] { display: none; }
+.om-preset-key { color: var(--om-muted); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; line-height: 20px; }
+.om-preset-full { color: var(--om-text-2); line-height: 20px; min-width: 0; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; user-select: text;
+  font-variant-numeric: tabular-nums; }
+.om-preset-blank { color: var(--om-muted); font-style: italic; }
+.om-preset-long .om-preset-full { white-space: pre-wrap; word-break: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: pointer; }
+.om-preset-field-open .om-preset-full { display: block; -webkit-line-clamp: unset;
+  max-height: 220px; overflow-y: auto; cursor: auto; padding: 6px 8px; margin: 2px 0;
+  line-height: 1.5; border: 1px solid var(--om-border); border-radius: 4px;
+  background: var(--om-surface); }
+.om-preset-use.om-btn { padding: 1px 8px; font-size: 11px; line-height: 16px; margin-top: 1px; }
+.om-preset-acts { display: inline-flex; gap: 4px; flex: none; }
+.om-preset-empty { color: var(--om-muted); font-size: 13px; padding: 8px 2px; }
 .om-pad { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .om-pad-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .om-pad-tabs { flex: 1; min-height: 0; display: flex; flex-direction: column;

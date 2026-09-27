@@ -1,7 +1,7 @@
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
 import { el, toast, notify, chooseAction } from "./ui.mjs";
-import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, installedMenu, enqueueInstall, install, byTrustedAuthor } from "./installs.mjs";
+import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, packName, installedMenu, enqueueInstall, install, byTrustedAuthor } from "./installs.mjs";
 import { openPack, openRepoPack } from "./packs.mjs";
 import { loadingBlock } from "./markdown.mjs";
 import { loadSelfInfo, selfUpdateTarget, openAboutDialog, vtReady, vtRemaining, panelSetting } from "./settings.mjs";
@@ -276,7 +276,7 @@ function buildInstalledRow(pack) {
   row.appendChild(packIcon(pack.icon, pack.id));
 
   const text = el("div", "om-side-text");
-  text.appendChild(el("div", "om-side-name", pack.id));
+  text.appendChild(packName(pack.id, "om-side-name"));
   const meta = el("div", "om-side-meta");
   const shownDir = pack.disabled ? pack.dir.replace(/\.disabled$/, "") : pack.dir;
   meta.appendChild(document.createTextNode(`${pack.version}${shownDir !== pack.id ? " · " + shownDir : ""}`));

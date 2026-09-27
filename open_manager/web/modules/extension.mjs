@@ -28,6 +28,7 @@ import { openModelLibrary } from "./library.mjs";
 import { watchGrips, applyGrips, gripMenuItem } from "./grips.mjs";
 import { patchResize } from "./node-resize.mjs";
 import { watchJump } from "./socket-jump.mjs";
+import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
 
 let lastMissingTypes = null;
 
@@ -549,6 +550,15 @@ app.registerExtension({
         + "applies, and middle-drag anywhere else still pans.",
     },
     {
+      id: "openManager.nodePresets",
+      name: "Node presets",
+      category: ["Open Manager", "Interface", "nodePresets"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Adds a presets button to the selection toolbar of nodes with widgets. A preset "
+        + "keeps a node's widget values under a name, in your library and in the workflow.",
+    },
+    {
       id: "openManager.enrichMetadata",
       name: "Read pack README and repository metadata",
       category: ["Open Manager", "Registry", "enrichMetadata"],
@@ -982,7 +992,11 @@ app.registerExtension({
       label: "Open Manager: toggle the pack browser",
       function: () => togglePanelWindow("registry"),
     },
+    presetCommand,
   ],
+  getSelectionToolboxCommands(item) {
+    return presetToolboxCommands(item);
+  },
   getNodeMenuItems(node) {
     const items = [];
     if (panelSetting("openManager.nodeModelMenu", true) !== false) {
@@ -1042,6 +1056,7 @@ app.registerExtension({
     watchGrips();
     patchResize();
     watchJump();
+    watchPresetLabels();
     registerThemes().catch(() => {});
     watchThemeExtras();
     refreshPackThemes().then((updated) => {

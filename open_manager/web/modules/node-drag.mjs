@@ -177,7 +177,7 @@ function nodeDragFrom(item, entry) {
   mountNodeDrop();
   guardWindowDrags();
   const dialogued = () => !!item.closest(".om-backdrop");
-  liveTip(item, () => ({ lead: type }));
+  liveTip(item, () => ({ lead: type, lines: [dialogued() ? "" : "Drag node to graph"] }));
   item.classList.add("om-node-here");
   item.dataset.omDrag = "1";
   item.draggable = true;
