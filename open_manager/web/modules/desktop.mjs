@@ -89,6 +89,19 @@ function deskFreeBox() {
   return document.querySelector(".graph-canvas-panel") || deskCanvasBox();
 }
 
+const DESK_DRAWER_MIN = 40;
+
+let deskGutter = 8;
+
+function deskRoomBox() {
+  let outer = null;
+  for (let split = deskFreeBox()?.closest(".p-splitter"); split;
+    split = split.parentElement?.closest(".p-splitter")) {
+    outer = split;
+  }
+  return outer;
+}
+
 function deskAsked() {
   const query = new URLSearchParams(window.location.search);
   return query.has("share") || query.has("template");
@@ -111,14 +124,18 @@ function deskFit() {
   if (!grid) return;
   const free = deskFreeBox()?.getBoundingClientRect();
   if (!free || !free.width) return;
+  const room = deskRoomBox()?.getBoundingClientRect() || free;
+  if (free.left - room.left < DESK_DRAWER_MIN) {
+    deskGutter = Math.max(0, Math.round(free.left - room.left));
+  }
   const strip = document.querySelector('[data-testid="topbar-workflow-tabs"]')
     ?.getBoundingClientRect();
-  const ceiling = strip && strip.height ? Math.max(strip.bottom, box.top) : free.top;
+  const ceiling = strip && strip.height ? Math.max(strip.bottom, box.top) : room.top;
   const gap = (value) => Math.max(10, Math.round(value));
-  deskInset.left = gap(free.left - box.left + 10);
+  deskInset.left = gap(room.left + deskGutter - box.left + 10);
   deskInset.top = gap(ceiling - box.top + 10);
-  deskInset.right = gap(box.right - free.right + 10);
-  deskInset.bottom = gap(Math.min(box.bottom, floor) - free.bottom + 10);
+  deskInset.right = gap(box.right - (room.right - deskGutter) + 10);
+  deskInset.bottom = gap(Math.min(box.bottom, floor) - (room.bottom - deskGutter) + 10);
   placeDeskCells();
 }
 
@@ -642,7 +659,7 @@ function watchDeskTabWidth() {
   const side = deskSidebar();
   if (!side || !window.ResizeObserver) return;
   deskSideRoom?.disconnect();
-  deskSideRoom = new ResizeObserver(() => fitDeskTab());
+  deskSideRoom = new ResizeObserver(() => { fitDeskTab(); deskFit(); });
   deskSideRoom.observe(side);
 }
 

@@ -1554,6 +1554,7 @@ gripStyle.textContent = `
 .om-grip::after { content: ""; position: absolute; left: 50%; top: 50%; width: 24px; height: 2px;
   margin: -1px 0 0 -12px; border-radius: 1px; background: var(--om-muted, #8b949e); opacity: .35; }
 .om-grip:hover::after, .om-grip[data-om-held="1"]::after { opacity: .95; }
+.om-grip.om-grip-tail { bottom: -${GRIP_BAR}px; }
 `;
 document.head.appendChild(gripStyle);
 
