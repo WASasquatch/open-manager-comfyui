@@ -88,6 +88,62 @@ function togglePanelWindow(view) {
   return openPanelWindow(view);
 }
 
+const HUB_MAIN = [["registry", "missing", "downloads", "library", "github"], ["installed"]];
+
+const HUB_TOOLS = ["memory", "environment", "scan", "keys"];
+
+const HUB_SIDE = ["about"];
+
+const HUB_CHOICES = [
+  { id: "openManager.managerEntry", prefix: "Extensions opens", options: ["auto", "panel", "classic"], fallback: "auto" },
+  { id: "openManager.trustMode", prefix: "Trust", options: ["author", "action"], fallback: "author" },
+  { id: "openManager.installPolicy", prefix: "Install policy", options: ["new", "upgrade", "downgrade", "all"], fallback: "new" },
+];
+
+function hubSetting(id, fallback) {
+  try {
+    const value = app.extensionManager?.setting?.get?.(id);
+    return value === undefined || value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function hubStore(id, value) {
+  try { app.extensionManager?.setting?.set?.(id, value); } catch {}
+}
+
+function hubChoice(choice) {
+  const select = el("select", "om-hub-select");
+  const now = String(hubSetting(choice.id, choice.fallback));
+  for (const value of choice.options) {
+    const option = el("option", null, `${choice.prefix}: ${value}`);
+    option.value = value;
+    option.selected = value === now;
+    select.appendChild(option);
+  }
+  select.onchange = () => hubStore(choice.id, select.value);
+  return select;
+}
+
+function hubCheck(id, label, fallback) {
+  const row = el("label", "om-hub-check");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = hubSetting(id, fallback) !== false;
+  box.onchange = () => hubStore(id, box.checked);
+  row.appendChild(box);
+  row.appendChild(el("span", null, label));
+  return row;
+}
+
+function hubGroup(tag, buttons) {
+  const group = el("div", "om-hub-group");
+  group.appendChild(el("div", "om-hub-tag", tag));
+  for (const button of buttons) group.appendChild(button);
+  return group;
+}
+
 function openManagerMenu() {
   const existing = document.querySelector(".om-backdrop .om-hub");
   if (existing) { existing.closest(".om-backdrop").remove(); return null; }
@@ -96,22 +152,50 @@ function openManagerMenu() {
   const dialog = el("div", "om-dialog om-hub");
   dialog.appendChild(el("div", "om-hub-title", "Open Manager Menu"));
 
-  const body = el("div", "om-hub-body");
-  const status = el("div", "om-hub-status", "Reading the registry cache...");
-  body.appendChild(status);
+  const destinations = managerDestinations();
+  const byKey = new Map(destinations.map((one) => [one.key, one]));
+  const placed = new Set();
+  const button = (one) => {
+    placed.add(one.key);
+    const node = el("button", "om-hub-btn", one.label);
+    if (one.hint) node.title = one.hint;
+    node.onclick = () => { backdrop.remove(); one.open(); };
+    return node;
+  };
+  const buttons = (keys) => keys.filter((key) => byKey.has(key)).map((key) => button(byKey.get(key)));
 
-  const grid = el("div", "om-hub-grid");
-  for (const one of managerDestinations()) {
-    const button = el("button", "om-hub-btn", one.label);
-    if (one.hint) button.title = one.hint;
-    button.onclick = () => { backdrop.remove(); one.open(); };
-    grid.appendChild(button);
+  const left = el("div", "om-hub-col");
+  left.appendChild(hubCheck("openManager.windowManager", "Pack manager as a window", true));
+  for (const choice of HUB_CHOICES) left.appendChild(hubChoice(choice));
+  const tools = buttons(HUB_TOOLS);
+  if (tools.length) left.appendChild(hubGroup("TOOLS", tools));
+
+  const middle = el("div", "om-hub-col");
+  for (const keys of HUB_MAIN) {
+    const block = el("div", "om-hub-stack");
+    for (const node of buttons(keys)) block.appendChild(node);
+    if (block.childElementCount) middle.appendChild(block);
   }
-  body.appendChild(grid);
-
-  const restart = el("button", "om-hub-btn om-hub-danger", "Restart ComfyUI");
+  const restart = el("button", "om-hub-btn om-hub-danger", "Restart");
+  restart.title = "Restart ComfyUI";
   restart.onclick = () => restartServer(restart);
-  body.appendChild(restart);
+  middle.appendChild(restart);
+
+  const right = el("div", "om-hub-col");
+  for (const node of buttons(HUB_SIDE)) right.appendChild(node);
+  const programs = destinations.filter((one) => !placed.has(one.key)).map(button);
+  if (programs.length) {
+    const group = hubGroup("PROGRAMS", programs);
+    group.classList.toggle("om-hub-group-pair", programs.length > 6);
+    right.appendChild(group);
+  }
+  const status = el("div", "om-hub-status", "Reading the registry cache...");
+  right.appendChild(status);
+
+  const body = el("div", "om-hub-body");
+  body.appendChild(left);
+  body.appendChild(middle);
+  body.appendChild(right);
   dialog.appendChild(body);
 
   const close = el("button", "om-hub-close", "Close");

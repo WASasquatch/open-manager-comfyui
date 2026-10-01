@@ -112,13 +112,13 @@ label sizes are under **Settings → Open Manager → Desktop**.
 | Write Start on the Start button | off |
 | An icon in each window title | on |
 | Default window size | large |
-| Aero headers | off, at 55% opacity, 18% darkening, 12 blur |
+| Aero windows | off, at 55% opacity, 18% darkening, 12 blur |
 | Blur inactive windows | off, at 3 |
 | Drop shadow | on |
 | Title text, content text, header height | 15, 13, 44 |
 | Icon size, label size | 44, 12 |
 
-The picture above has aero headers on.
+The picture above has aero windows on.
 
 ## Desktop Settings
 

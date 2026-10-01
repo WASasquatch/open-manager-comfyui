@@ -142,6 +142,8 @@ style.textContent = `
 .om-ictl:hover > .om-btn.om-caret.installing { border-left-color: #388bfd; }
 .om-ictl:hover > .om-btn.om-caret.flagged { border-left-color: #d29922; }
 .om-ictl:hover > .om-btn.om-caret.banned { border-left-color: #f85149; }
+body.om-bridge .om-backdrop { z-index: ${HOST_MENU_Z - 40}; }
+body.om-bridge .om-menu { z-index: ${HOST_MENU_Z - 30}; }
 .om-menu { position: fixed; z-index: ${MENU_Z}; min-width: 150px; background: var(--om-surface);
   border: 1px solid var(--om-border); border-radius: 8px; padding: 4px;
   box-shadow: 0 8px 24px rgba(0,0,0,.5); font: 13px/1.5 system-ui, sans-serif; }
@@ -431,29 +433,46 @@ sidebarStyle.textContent = `
 .om-table-ictl { transform: scale(.85); transform-origin: left center; }
 .om-table-head .om-tcell-title { display: block; cursor: default; }
 .om-dialog.om-hub {
-  width: min(92vw, 430px); height: auto; max-height: 86vh;
-  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+  width: min(94vw, 1060px); height: auto; max-height: 90vh;
+  display: flex; flex-direction: column; gap: 18px; padding: 28px 30px 20px; overflow: hidden;
 }
 .om-hub-title {
-  padding: 10px 14px; text-align: center; font-weight: 700; letter-spacing: .06em;
+  padding: 6px 14px; text-align: center; font-weight: 700; font-size: 22px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: var(--om-surface); border-bottom: 1px solid var(--om-border);
+  background: #000; color: #fff;
 }
-.om-hub-body { padding: 14px; display: flex; flex-direction: column; gap: 10px;
-  overflow-y: auto; }
-.om-hub-status { color: var(--om-muted); font-size: 11px; text-align: center; }
-.om-hub-grid { display: flex; flex-direction: column; gap: 6px; }
+.om-hub-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px; overflow-y: auto; align-items: start; }
+.om-hub-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.om-hub-stack { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
 .om-hub-btn {
-  padding: 9px 12px; text-align: center; font-size: 13px; cursor: pointer;
+  padding: 5px 10px; text-align: center; font-size: 16px; cursor: pointer;
   background: var(--om-surface); color: var(--om-text);
-  border: 1px solid var(--om-border); border-radius: 6px;
+  border: 1px solid var(--om-border); border-radius: 8px;
 }
 .om-hub-btn:hover { background: var(--om-hover); }
-.om-hub-danger { border-color: #7f1d1d; color: #fca5a5; }
-.om-hub-danger:hover { background: #7f1d1d; color: #fff; }
+.om-hub-danger { background: #5c0000; border-color: #7f1d1d; color: #fff; }
+.om-hub-danger:hover { background: #7f1d1d; }
+.om-hub-check { display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; }
+.om-hub-select { padding: 3px 6px; font-size: 14px; border-radius: 4px;
+  background: var(--om-surface); color: var(--om-text); border: 1px solid var(--om-border); }
+.om-hub-group { position: relative; display: flex; flex-direction: column; gap: 4px;
+  margin-top: 30px; padding: 22px 10px 10px; border: 1px solid var(--om-border);
+  border-radius: 4px; }
+.om-hub-group-pair { display: grid; grid-template-columns: 1fr 1fr; }
+.om-hub-group-pair .om-hub-btn { font-size: 14px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.om-hub-tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  padding: 1px 32px; border-radius: 4px; background: #8b1a1a; color: #fff;
+  font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.om-hub-status { margin-top: 14px; padding: 10px; min-height: 120px;
+  border: 1px solid var(--om-border); background: var(--om-input);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--om-text-2); white-space: pre-wrap; }
 .om-hub-close {
-  padding: 10px; font-size: 13px; cursor: pointer; color: var(--om-text);
-  background: var(--om-surface); border: none; border-top: 1px solid var(--om-border);
+  padding: 4px; font-size: 18px; cursor: pointer; color: var(--om-text);
+  background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px;
 }
 .om-hub-close:hover { background: var(--om-hover); }
 .om-side-list, .om-body, .om-readme-body, .om-versions {
@@ -716,6 +735,9 @@ video.om-lb-img { background: #000; }
   font: 12px/1.4 system-ui, sans-serif; }
 .om-dl-open:hover { background: var(--om-hover); color: var(--om-text); }
 .om-dl-open-icon { font-size: 13px; line-height: 1; }
+.om-qol-issue { margin-left: 6px; color: var(--om-text-2); font-size: 12px;
+  text-decoration: underline; text-underline-offset: 2px; }
+.om-qol-issue:hover { color: var(--om-text); }
 @media (max-width: 1100px) { .om-dl-open-text { display: none; } }
 .om-dl-open-icons { margin: 2px; padding: 3px; width: 28px; min-height: 24px;
   align-self: stretch; justify-content: center; }
@@ -1245,6 +1267,13 @@ body.om-desk-open div:has(> .actionbar-container) {
   transition: background var(--default-transition-duration, .1s) linear,
               opacity var(--default-transition-duration, .1s) linear,
               color var(--default-transition-duration, .1s) linear; }
+.om-task-item { position: relative; }
+.om-task-x { position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; display: none; align-items: center; justify-content: center;
+  border-radius: 4px; background: var(--om-surface); color: var(--om-muted);
+  box-shadow: -6px 0 6px -2px var(--om-surface); font-size: 15px; line-height: 1; }
+.om-task-item:hover .om-task-x, .om-task-item:focus-visible .om-task-x { display: inline-flex; }
+.om-task-x:hover { background: var(--om-hover); color: var(--om-text); }
 .om-task-item:hover { opacity: 1; color: var(--om-text);
   background: var(--p-togglebutton-hover-background, var(--content-hover-bg, var(--om-hover))); }
 .om-task-item:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
@@ -1292,6 +1321,7 @@ body.om-desk-open div:has(> .actionbar-container) {
   .om-task-item { height: calc(100% - 10px); }
   .om-task-row { padding: 9px 8px; }
   .om-task-shut { visibility: visible; }
+  .om-task-x { display: inline-flex; }
 }
 @media (prefers-reduced-motion: reduce) {
   .om-task-pop { transition: none; }
@@ -1485,6 +1515,15 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-mem-graph-detail:empty { height: 0; min-height: 0; }
 .om-mem-graph-detail:empty { padding: 0; }
 .om-mem-models { padding: 10px 14px; flex: 2 1 auto; min-height: 90px; overflow-y: auto; }
+.om-mem-held { display: flex; flex-direction: column; flex: 2 1 auto; min-height: 0; }
+.om-mem-bar-grab:not(.om-mem-bar-toggle) { cursor: grab; }
+.om-mem-dragging { opacity: .45; }
+.om-mem-body > [data-section] { position: relative; }
+.om-mem-over-top::after, .om-mem-over-bottom::after { content: ""; position: absolute;
+  left: 0; right: 0; height: 3px; background: var(--om-accent, #4493f8);
+  pointer-events: none; z-index: 2; }
+.om-mem-over-top::after { top: 0; }
+.om-mem-over-bottom::after { bottom: 0; }
 .om-mem-model { border: 1px solid var(--om-border); border-radius: 8px; padding: 9px 11px;
   display: flex; flex-direction: column; gap: 6px; background: var(--om-surface); }
 .om-mem-empty { text-align: center; color: var(--om-muted); opacity: .55;
@@ -1510,8 +1549,8 @@ document.head.appendChild(sidebarStyle);
 
 const gripStyle = document.createElement("style");
 gripStyle.textContent = `
-.om-grip { position: absolute; left: 0; right: ${GRIP_INSET}px; bottom: 0; height: ${GRIP_BAR}px;
-  cursor: ns-resize; touch-action: none; z-index: 2; }
+.om-grip { position: absolute; left: 0; right: ${GRIP_INSET}px; bottom: 0;
+  width: auto !important; height: ${GRIP_BAR}px !important; cursor: ns-resize; touch-action: none; z-index: 2; }
 .om-grip::after { content: ""; position: absolute; left: 50%; top: 50%; width: 24px; height: 2px;
   margin: -1px 0 0 -12px; border-radius: 1px; background: var(--om-muted, #8b949e); opacity: .35; }
 .om-grip:hover::after, .om-grip[data-om-held="1"]::after { opacity: .95; }

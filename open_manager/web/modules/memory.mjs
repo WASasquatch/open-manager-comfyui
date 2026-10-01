@@ -131,6 +131,68 @@ function buildGraphBlock(key, label, colour) {
            folded: () => box.classList.contains("om-mem-folded") };
 }
 
+const MEMORY_SECTIONS = ["cpu", "ram", "vram", "models"];
+
+const SECTION_DRAG_TYPE = "application/x-om-mem-section";
+
+function sectionOrder() {
+  const saved = String(dlRecall("om-mem-order", "")).split(",")
+    .filter((key) => MEMORY_SECTIONS.includes(key));
+  return [...new Set([...saved, ...MEMORY_SECTIONS])];
+}
+
+function arrangeSections(body, sections) {
+  const byKey = new Map(sections.map((one) => [one.dataset.section, one]));
+  for (const key of sectionOrder()) {
+    const one = byKey.get(key);
+    if (one) body.appendChild(one);
+  }
+}
+
+function sectionDraggable(section, handle) {
+  handle.draggable = true;
+  handle.dataset.omDrag = "1";
+  handle.classList.add("om-mem-bar-grab");
+  const clear = () => section.classList.remove("om-mem-over-top", "om-mem-over-bottom");
+  handle.addEventListener("dragstart", (event) => {
+    event.dataTransfer.setData(SECTION_DRAG_TYPE, section.dataset.section);
+    event.dataTransfer.effectAllowed = "move";
+    section.parentElement._omDragging = section;
+    section.classList.add("om-mem-dragging");
+  });
+  handle.addEventListener("dragend", () => {
+    section.classList.remove("om-mem-dragging");
+    if (section.parentElement) section.parentElement._omDragging = null;
+  });
+  const below = (event) => {
+    const box = section.getBoundingClientRect();
+    return event.clientY > box.top + box.height / 2;
+  };
+  section.addEventListener("dragover", (event) => {
+    const moving = section.parentElement?._omDragging;
+    if (!moving || moving === section) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const after = below(event);
+    section.classList.toggle("om-mem-over-bottom", after);
+    section.classList.toggle("om-mem-over-top", !after);
+  });
+  section.addEventListener("dragleave", (event) => {
+    if (!section.contains(event.relatedTarget)) clear();
+  });
+  section.addEventListener("drop", (event) => {
+    const body = section.parentElement;
+    const moving = body?._omDragging;
+    clear();
+    if (!moving || moving === section) return;
+    event.preventDefault();
+    body.insertBefore(moving, below(event) ? section.nextSibling : section);
+    const order = [...body.children].map((one) => one.dataset.section).filter(Boolean);
+    dlRemember("om-mem-order", order.join(","));
+    body.dispatchEvent(new CustomEvent("om-mem-arranged"));
+  });
+}
+
 const BLOCK_COLOURS = ["#a371f7", "#3fb950", "#58a6ff", "#d29922", "#db61a2", "#39c5cf"];
 
 function keyItem(device, seat) {
@@ -623,11 +685,19 @@ function openMemoryPanel() {
     buildGraphBlock("ram", "System memory", "#3fb950"),
     buildGraphBlock("vram", "Graphics memory", "#a371f7"),
   ];
-  for (const one of graphs) body.appendChild(one.box);
-
-  body.appendChild(memoryBar("Models held").bar);
+  const held = el("div", "om-mem-held");
+  const heldBar = memoryBar("Models held").bar;
+  held.appendChild(heldBar);
   const modelList = el("div", "om-dl-list om-mem-models");
-  body.appendChild(modelList);
+  held.appendChild(modelList);
+
+  const sections = [...graphs.map((one) => one.box), held];
+  graphs.forEach((one) => { one.box.dataset.section = one.key; });
+  held.dataset.section = "models";
+  sectionDraggable(held, heldBar);
+  for (const one of graphs) sectionDraggable(one.box, one.box.firstChild);
+  arrangeSections(body, sections);
+  body.addEventListener("om-mem-arranged", () => { paint(); repaintBlockMaps(panel.el); });
   panel.body.appendChild(body);
 
   const showEmpty = () => {

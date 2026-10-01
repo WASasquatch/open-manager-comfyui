@@ -272,6 +272,16 @@ function buildTaskOne(panel) {
   }
   item.appendChild(taskIcon(panel));
   item.appendChild(el("span", "om-task-text", name));
+  const shut = el("span", "om-task-x", "×");
+  shut.title = "Close";
+  shut.setAttribute("aria-hidden", "true");
+  shut.addEventListener("pointerdown", (event) => event.stopPropagation());
+  shut.addEventListener("click", (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    panel.destroy();
+  });
+  item.appendChild(shut);
   item.setAttribute("aria-label", minimised ? `${name}, minimised` : name);
   liveTip(item, () => ({
     lead: name,

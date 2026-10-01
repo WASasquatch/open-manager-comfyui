@@ -493,6 +493,7 @@ async function runInstallQueue() {
       rememberInstall(job.packId, "installed");
       loadInstalledIndex();
       if (job.scanFirst) await scanThenFinish(job.packId);
+      job.onDone?.(result);
       if (result.pip_ran && !result.pip_ok) {
         const summary = environmentSummary(result.environment);
         const first = (result.pip_errors || [])[0];
@@ -504,6 +505,7 @@ async function runInstallQueue() {
       rememberInstall(job.packId, null);
       issues.push(`${job.name} ${job.entry.version}: ${result.reason}`);
       if (result.environment_id) restoreOffers.push({ id: result.environment_id, name: job.name });
+      job.onDone?.(result);
     }
   }
   queueTotal = 0;
@@ -742,22 +744,23 @@ async function offerRestore(entryId, packName) {
   if (outcome?.restart_required) remindRestart();
 }
 
-async function install({ packId, entry, control, rowsRoot, overwrite }) {
+async function install({ packId, entry, control, rowsRoot, overwrite,
+                         installedVersion = "", onDone = null }) {
   if (entry.installable === false) {
     notify(`${packId} ${entry.version} is blocked`,
       entry.blocked_reason
       || "Blocked by policy. Open Manager's settings decide whether banned versions install.");
-    return;
+    return false;
   }
-  const installed = rowsRoot ? rowsRoot._installedVersion : "";
+  const installed = rowsRoot ? rowsRoot._installedVersion : installedVersion;
   const change = versionSwitch(installed, entry.version);
   if (panelSetting("openManager.trustRegistry", false) === true) {
     const repository = await repositoryForPack(packId, entry, rowsRoot);
     const parts = repoOwnerName(repository);
-    if (parts && !(await confirmAuthorTrust(parts.owner, repository, "install a pack"))) return;
+    if (parts && !(await confirmAuthorTrust(parts.owner, repository, "install a pack"))) return false;
   }
   const policy = await confirmInstall(packId, entry, change);
-  if (!policy) return;
+  if (!policy) return false;
 
   let scanFirst = vtReady() && panelSetting("openManager.scanOnInstall", false) === true;
   if (scanFirst && (await vtRemaining()) === 0) {
@@ -766,7 +769,7 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
       `${packId} cannot be scanned before it installs. Install without scanning?`,
       "Skip scan and install",
     );
-    if (!go) return;
+    if (!go) return false;
     scanFirst = false;
   }
 
@@ -776,7 +779,9 @@ async function install({ packId, entry, control, rowsRoot, overwrite }) {
     name: entry.name || packId,
     scanFirst,
     policy,
+    onDone,
   });
+  return true;
 }
 
 const trustedAuthors = new Set();
@@ -962,8 +967,8 @@ function confirmRepoInstall(pack) {
 
 async function installFromRepo(pack, control) {
   const parts = repoOwnerName(pack.repo);
-  if (parts && !(await confirmAuthorTrust(parts.owner, pack.repo, "install a pack"))) return;
-  if (!(await confirmRepoInstall(pack))) return;
+  if (parts && !(await confirmAuthorTrust(parts.owner, pack.repo, "install a pack"))) return false;
+  if (!(await confirmRepoInstall(pack))) return false;
   control?.setInstalling?.();
   const progress = toast(`Installing ${pack.title} from GitHub...`, { sticky: true });
   let result;
@@ -994,6 +999,7 @@ async function installFromRepo(pack, control) {
     progress.remove();
     notify("Install failed", result.reason);
   }
+  return result;
 }
 
 async function uninstall({ packId, entry, control, rowsRoot, registryId }) {

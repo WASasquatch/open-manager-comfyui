@@ -28,6 +28,10 @@ import { openModelLibrary } from "./library.mjs";
 import { watchGrips, applyGrips, gripMenuItem } from "./grips.mjs";
 import { patchResize } from "./node-resize.mjs";
 import { watchJump } from "./socket-jump.mjs";
+import { groupAlignMenuItems, alignCommand, alignToolboxCommands, watchAlignPress } from "./group-align.mjs";
+import { watchCoreManager } from "./core-manager.mjs";
+import { qolSettings, startQolPatches, qolNodeMenuItems } from "./qol-patches.mjs";
+import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
 
 let lastMissingTypes = null;
@@ -350,11 +354,11 @@ app.registerExtension({
     {
       id: "openManager.aero",
       onChange: () => applyWindowLook(),
-      name: "Aero window headers",
+      name: "Aero windows",
       category: ["Open Manager", "Windows", "aero"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Draws every window header as glass: the theme's colours, translucent, over a "
+      tooltip: "Draws every window as glass: the theme's colours, translucent, over a "
         + "blur of what is behind the window.",
     },
     {
@@ -385,8 +389,7 @@ app.registerExtension({
       type: "slider",
       attrs: { min: 0, max: 40, step: 2 },
       defaultValue: 12,
-      tooltip: "How far what is behind the window is softened before it is seen through the "
-        + "header.",
+      tooltip: "How far what is behind the window is softened before it is seen through it.",
     },
     {
       id: "openManager.blurAmount",
@@ -456,8 +459,20 @@ app.registerExtension({
       options: ["auto", "panel", "classic"],
       defaultValue: "auto",
       tooltip: "'auto' follows ComfyUI: the classic menu where it was started with "
-        + "--enable-manager-legacy-ui, and the panel otherwise. 'panel' always opens the "
-        + "manager. 'classic' always opens the menu.",
+        + "--enable-manager-legacy-ui, and Node Discovery otherwise. 'panel' always opens Node "
+        + "Discovery. 'classic' always opens the menu. Use ComfyUI's Nodes Manager overrides "
+        + "this while it is on.",
+    },
+    ...qolSettings(),
+    {
+      id: "openManager.coreManagerUi",
+      name: "Use ComfyUI's Nodes Manager",
+      category: ["Open Manager", "Interface", "coreManagerUi"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "On, the Extensions button and ComfyUI's manager links open ComfyUI's own Nodes "
+        + "Manager, with every install, update and removal run by Open Manager. Off, they open "
+        + "Node Discovery.",
     },
     {
       id: "openManager.trustMode",
@@ -513,8 +528,8 @@ app.registerExtension({
       type: "boolean",
       defaultValue: true,
       tooltip: "Drag a node's left or right edge to set its width on its own, or its bottom edge "
-        + "to set its height on its own. The corners still do both at once. The top edge is left "
-        + "alone, because that is the title bar a node is dragged by.",
+        + "to set its height on its own. The corners still do both at once. The top edge stays "
+        + "the title bar.",
     },
     {
       id: "openManager.multiResize",
@@ -537,6 +552,16 @@ app.registerExtension({
         + "replace an installed package. 'upgrade' allows upgrades and holds back downgrades, "
         + "'downgrade' the reverse. 'all' installs exactly what the pack asks for. Held-back "
         + "requirements are named in the install output.",
+    },
+    {
+      id: "openManager.groupAlign",
+      name: "Align selected groups from the right-click menu",
+      category: ["Open Manager", "Interface", "groupAlign"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "With two or more groups selected, the selection toolbox and, on the classic "
+        + "canvas, the right-click menu offer Align Selected Groups To: Top, Bottom, Left or "
+        + "Right. Each group moves with everything inside it.",
     },
     {
       id: "openManager.socketJump",
@@ -648,9 +673,9 @@ app.registerExtension({
       type: "boolean",
       defaultValue: false,
       tooltip: "Ask GitHub to name a repository's licence in one request instead of guessing "
-        + "at filenames. Needs a GitHub token, set under Open Manager > Access keys. Without "
-        + "one the limit is 60 requests an hour, which one listing spends. Falls back to "
-        + "reading files when the API cannot answer.",
+        + "at filenames. Needs a GitHub token, entered under Access keys in the Open Manager "
+        + "menu. Without one the limit is 60 requests an hour, which one listing spends. Falls "
+        + "back to reading files when the API cannot answer.",
     },
     {
       id: "openManager.licenseRace",
@@ -676,9 +701,9 @@ app.registerExtension({
       type: "boolean",
       defaultValue: false,
       tooltip: "Check a freshly placed pack against VirusTotal before its requirements are "
-        + "installed and before ComfyUI is asked to restart. Needs a VirusTotal key, set under "
-        + "Open Manager > Access keys. Where the day's allowance is spent you are asked "
-        + "whether to install without scanning.",
+        + "installed and before ComfyUI is asked to restart. Needs a VirusTotal key, entered "
+        + "under Access keys in the Open Manager menu. Where the day's allowance is spent you "
+        + "are asked whether to install without scanning.",
     },
     {
       id: "openManager.panelHeaders",
@@ -993,9 +1018,13 @@ app.registerExtension({
       function: () => togglePanelWindow("registry"),
     },
     presetCommand,
+    alignCommand,
   ],
+  getCanvasMenuItems(canvas) {
+    return groupAlignMenuItems(canvas);
+  },
   getSelectionToolboxCommands(item) {
-    return presetToolboxCommands(item);
+    return [...presetToolboxCommands(item), ...alignToolboxCommands(item)];
   },
   getNodeMenuItems(node) {
     const items = [];
@@ -1017,6 +1046,11 @@ app.registerExtension({
     if (reset) {
       if (!items.length) items.push(null);
       items.push(reset);
+    }
+    const patched = qolNodeMenuItems(node);
+    if (patched.length) {
+      if (!items.length) items.push(null);
+      items.push(...patched);
     }
     return items;
   },
@@ -1056,6 +1090,10 @@ app.registerExtension({
     watchGrips();
     patchResize();
     watchJump();
+    watchAlignPress();
+    watchCoreManager();
+    startQolPatches();
+    watchManagerBridge();
     watchPresetLabels();
     registerThemes().catch(() => {});
     watchThemeExtras();

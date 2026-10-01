@@ -40,7 +40,7 @@ async function migrateKeys() {
     }
   }
   if (moved.length) {
-    toast(`${moved.join(" and ")} moved from ComfyUI's settings to Open Manager > Access keys.`,
+    toast(`${moved.join(" and ")} moved from ComfyUI's settings to Access keys in the Open Manager menu.`,
           { kind: "ok", sticky: true });
   }
 }

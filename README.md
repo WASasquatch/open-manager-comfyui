@@ -48,12 +48,12 @@ python main.py --enable-manager
 | Update | `pip install --upgrade comfyui-open-manager` |
 | uv environment | `uv pip install comfyui-open-manager`. Pack requirements install through uv too |
 | Portable build | Use its own interpreter: `python_embeded\python.exe -m pip install ...` |
-| Name clash | Both packages own `comfyui_manager`. Uninstall the other first. Reinstalling it, or a desktop auto-update, puts it back |
+| Name clash | Both packages own `comfyui_manager`. Uninstall the other first. On a portable build Open Manager still loads if the other is installed again; elsewhere installing it again replaces Open Manager |
 | Log | `--enable-manager` writes `user/comfyui.log`, rotating to `comfyui.prev.log` and `comfyui.prev2.log`. `OPEN_MANAGER_NO_LOG` leaves it alone |
 
 ### Access keys (optional)
 
-Set under Open Manager > Access keys. A variable, where set, is used instead.
+Set under Access keys in the Open Manager menu. A variable, where set, is used instead.
 
 | For | Variables | Get one at |
 |---|---|---|
@@ -137,6 +137,16 @@ opens them.
 destinations under `--enable-manager-legacy-ui`. Override it under *What the Extensions button
 opens*. Both carry every destination, and the sidebar tab is unaffected.
 
+ComfyUI's own manager links, such as the missing-nodes panel's, open the same place. Turn on
+*Use ComfyUI's Nodes Manager* to have them, and **Extensions**, open ComfyUI's Nodes Manager
+instead. Every install it starts is still run by Open Manager. So are the **Install** buttons
+ComfyUI shows for missing nodes, whichever is set.
+
+*Quality of Life Patches* fixes faults in ComfyUI's own interface from Open Manager, each with
+its own switch. *Nodes Manager fits its contents* sizes the Nodes Manager's frame to its
+contents. On screens 3000px wide and over, the frame otherwise cuts off the right side, close
+button and filters.
+
 ### Network
 
 Open Manager reads the Comfy Registry live. What it contacts:
@@ -161,7 +171,7 @@ Under `Settings -> Open Manager`.
 |---|---|
 | Trust | Answer once per author, or every time |
 
-A GitHub token, set under Open Manager > Access keys or as `GITHUB_TOKEN`, raises 60
+A GitHub token, set under Access keys in the Open Manager menu or as `GITHUB_TOKEN`, raises 60
 anonymous calls an hour to 5,000. Without one, pack pages still show README, gallery and
 versions.
 

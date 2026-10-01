@@ -66,7 +66,7 @@ audio    .mp3 .wav .flac .ogg .oga .opus .m4a .aac
 ```
 
 **Gated and private models.** Set `HF_TOKEN` before ComfyUI starts, or paste it into
-**Open Manager > Access keys**. Get one at huggingface.co/settings/tokens.
+**Access keys** in the Open Manager menu. Get one at huggingface.co/settings/tokens.
 
 ```bat
 set HF_TOKEN=hf_xxx

@@ -20,9 +20,13 @@ import { topbarReady } from "./extension.mjs";
 
 function topbarSlot() {
   const strip = document.querySelector(".workflow-tabs-container.pointer-events-auto")?.firstElementChild;
-  return strip
-    ? [...strip.children].find((child) => !String(child.className).includes("workflow-tabs-container"))
-    : null;
+  if (!strip) return null;
+  if (!strip.classList.contains("workflow-tabs-container")) {
+    return [...strip.children].find((child) => !String(child.className).includes("workflow-tabs-container"))
+      || null;
+  }
+  return strip.querySelector(":scope > .new-blank-workflow-button")?.nextElementSibling?.firstElementChild
+    || null;
 }
 
 function buttonHost(slot) {

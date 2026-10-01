@@ -473,7 +473,7 @@ function aeroSwitch() {
     applyWindowLook();
   };
   row.appendChild(box);
-  row.appendChild(el("span", null, "Aero window headers"));
+  row.appendChild(el("span", null, "Aero windows"));
   return row;
 }
 

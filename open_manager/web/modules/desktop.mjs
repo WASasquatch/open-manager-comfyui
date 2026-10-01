@@ -24,7 +24,7 @@ const START_ART = {
   Games: ICON_BRAND,
 };
 
-const DESK_STRIP = '[data-testid="topbar-workflow-tabs"] > div > .workflow-tabs-container';
+const DESK_STRIP = '[data-testid="topbar-workflow-tabs"] .workflow-tabs-container';
 
 let deskLayer = null;
 let deskTab = null;
