@@ -143,9 +143,20 @@ instead. Every install it starts is still run by Open Manager. So are the **Inst
 ComfyUI shows for missing nodes, whichever is set.
 
 *Quality of Life Patches* fixes faults in ComfyUI's own interface from Open Manager, each with
-its own switch. *Nodes Manager fits its contents* sizes the Nodes Manager's frame to its
-contents. On screens 3000px wide and over, the frame otherwise cuts off the right side, close
-button and filters.
+its own switch and links to the issues it answers. A patch that finds ComfyUI changed, or
+already fixed, stands down and says so in the browser console.
+
+| Patch | Default | Effect |
+|---|---|---|
+| Nodes Manager fits its contents | On | The Nodes Manager's frame fits its contents. On screens 3000px wide and over it otherwise cuts off the right side, close button and filters |
+| Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the previews promoted to it |
+| Custom widgets follow their node's width | On | Custom and DOM widgets keep following their node once it has been shown in the properties panel |
+| Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
+| Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
+| Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
+| Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
+| No frontend_only badge | On | Nodes with no Python side carry no source badge |
+| Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
 
 ### Network
 

@@ -1065,6 +1065,7 @@ function defaultLinkMode() {
 
 let gateCache = {
   nodeArt: true, artStrength: 1, titleIcons: true, glow: true, backdrop: true, bodyOpacity: 1,
+  themeOpacity: false,
 };
 
 function readGate(id, fallback) {
@@ -1084,6 +1085,7 @@ function refreshGates() {
     glow: readGate("openManager.themeGlow", true) !== false,
     backdrop: readGate("openManager.themeBackdrop", true) !== false,
     bodyOpacity: Math.max(0, Math.min(1, Number(readGate("openManager.themeNodeOpacity", 1)))),
+    themeOpacity: readGate("openManager.themeNodeOpacityFromTheme", false) === true,
   };
   if (!Number.isFinite(gateCache.artStrength)) gateCache.artStrength = 1;
   if (!Number.isFinite(gateCache.bodyOpacity)) gateCache.bodyOpacity = 1;
@@ -1093,6 +1095,7 @@ function refreshGates() {
 function bodySolidity(extras) {
   const chosen = readerGates().bodyOpacity;
   if (chosen < 1) return chosen;
+  if (!readerGates().themeOpacity) return 1;
   const asked = extras?.nodeOpacity;
   if (!Number.isFinite(asked) || asked >= 1) return 1;
   return Math.max(0, asked);

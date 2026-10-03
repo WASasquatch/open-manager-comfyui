@@ -195,7 +195,8 @@ Under **Settings > Open Manager > Theme**:
 | Theme icons in node titles | off restores the plain dot |
 | Selection glow | off restores ComfyUI's outline |
 | Theme graph backdrop | off restores the palette's canvas colour and dot grid |
-| Node body opacity | the opacity itself, absolute. 1 defers to your `nodeOpacity` |
+| Node body opacity | the opacity itself, absolute. 1 is solid |
+| Use the theme's node body opacity | off by default. On, 1 defers to your `nodeOpacity` |
 
 Design for the on state. None of these write to your file.
 

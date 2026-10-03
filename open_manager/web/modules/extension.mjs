@@ -30,7 +30,8 @@ import { patchResize } from "./node-resize.mjs";
 import { watchJump } from "./socket-jump.mjs";
 import { groupAlignMenuItems, alignCommand, alignToolboxCommands, watchAlignPress } from "./group-align.mjs";
 import { watchCoreManager } from "./core-manager.mjs";
-import { qolSettings, startQolPatches, qolNodeMenuItems } from "./qol-patches.mjs";
+import { qolSettings, startQolPatches, qolNodeMenuItems, qolCanvasMenuItems } from "./qol-patches.mjs";
+import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
 
@@ -176,9 +177,18 @@ app.registerExtension({
       attrs: { min: 0, max: 1, step: 0.05 },
       defaultValue: 1,
       onChange: () => refreshExtras(),
-      tooltip: "How solid a node body is drawn: 0.6 is 60 percent, whatever the theme asks "
-        + "for. At 1 the theme's own value is used, or solid if it sets none. Title bars, "
-        + "widgets and text boxes are unaffected.",
+      tooltip: "How solid a node body is drawn: 0.6 is 60 percent, 1 is solid, whatever the "
+        + "theme asks for. Title bars, widgets and text boxes are unaffected.",
+    },
+    {
+      id: "openManager.themeNodeOpacityFromTheme",
+      name: "Use the theme's node body opacity",
+      category: ["Open Manager", "Theme", "themeNodeOpacityFromTheme"],
+      type: "boolean",
+      defaultValue: false,
+      onChange: () => refreshExtras(),
+      tooltip: "On, a theme that asks for see-through node bodies gets them while Node body "
+        + "opacity is at 1. Off, bodies are solid at 1.",
     },
     {
       id: "openManager.desktop",
@@ -861,6 +871,34 @@ app.registerExtension({
         + "that node will occupy.",
     },
     {
+      id: "openManager.stallAction",
+      name: "When a run stops answering",
+      category: ["Open Manager", "Monitor", "stallAction"],
+      type: "combo",
+      options: [
+        { text: "Offer Restart and requeue", value: "ask" },
+        { text: "Restart and requeue", value: "restart" },
+        { text: "Nothing", value: "off" },
+      ],
+      defaultValue: "ask",
+      onChange: () => pushStallConfig(),
+      tooltip: "A run counts as stuck after the minutes set below without progress, while the "
+        + "card is busy without working or the machine sits idle. Restart and requeue "
+        + "interrupts it, restarts ComfyUI if it stays stuck, and queues it and the waiting "
+        + "jobs again. A run still working is left to finish its step, for up to ten minutes. "
+        + "Without asking, it acts only on a card busy without working, and a job that gets "
+        + "stuck again within a day is not queued a second time.",
+    },
+    {
+      id: "openManager.stallMinutes",
+      name: "Minutes without progress before a run counts as stuck",
+      category: ["Open Manager", "Monitor", "stallMinutes"],
+      type: "slider",
+      attrs: { min: 5, max: 120, step: 1 },
+      defaultValue: 10,
+      onChange: () => pushStallConfig(),
+    },
+    {
       id: "openManager.memoryButton",
       onChange: () => remountTopbar(),
       name: "Show the Memory button",
@@ -1021,7 +1059,7 @@ app.registerExtension({
     alignCommand,
   ],
   getCanvasMenuItems(canvas) {
-    return groupAlignMenuItems(canvas);
+    return [...groupAlignMenuItems(canvas), ...qolCanvasMenuItems(canvas)];
   },
   getSelectionToolboxCommands(item) {
     return [...presetToolboxCommands(item), ...alignToolboxCommands(item)];
@@ -1093,6 +1131,7 @@ app.registerExtension({
     watchAlignPress();
     watchCoreManager();
     startQolPatches();
+    watchStalls();
     watchManagerBridge();
     watchPresetLabels();
     registerThemes().catch(() => {});

@@ -54,6 +54,8 @@ from . import (
     marks,
     programs as desk_programs,
     settingsfile,
+    stall,
+    tdr,
     usertheme,
     wallpaper,
 )
@@ -2000,6 +2002,50 @@ def register_routes() -> None:
         except (TypeError, ValueError):
             index, cells = 0, 240
         return web.json_response(await asyncio.to_thread(monitor.blocks, index, cells))
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/monitor/tdr")
+    async def monitor_tdr(request: web.Request) -> web.Response:
+        """Windows' GPU timeout, and the driver resets it has caused."""
+        refresh = _flag(request.query.get("refresh", False))
+        return web.json_response(await asyncio.to_thread(tdr.status, refresh))
+
+    stall.start()
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/stall")
+    async def stall_state(_request: web.Request) -> web.Response:
+        """What happens when a run stops answering, and anything waiting on an answer."""
+        return web.json_response({"ok": True, **stall.state()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/stall/config")
+    @_json_body
+    async def stall_config(_request: web.Request, body: dict) -> web.Response:
+        """Set what happens when a run stops answering."""
+        return web.json_response({"ok": True, "config": stall.configure(
+            body.get("mode"), body.get("minutes"))})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/stall/unstick")
+    @_json_body
+    async def stall_unstick(request: web.Request, body: dict) -> web.Response:
+        """Interrupt the run, and restart ComfyUI with its queue if it is stuck."""
+        if not gates.RESTART:
+            return web.json_response(gates.refuse('restart'), status=403)
+        peer = request.transport.get_extra_info("peername") if request.transport else None
+        if (peer[0] if peer else "") not in _LOOPBACK:
+            return web.json_response({"ok": False, "reason": "restart is loopback-only"}, status=403)
+        return web.json_response(stall.unstick(stall.MANUAL_GRACE, "asked from the browser",
+                                               now=_flag(body.get("now"))))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/stall/dismiss")
+    @_json_body
+    async def stall_dismiss(_request: web.Request, body: dict) -> web.Response:
+        """Leave a stuck run alone."""
+        return web.json_response({"ok": True, **stall.dismiss(str(body.get("prompt_id") or ""))})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/stall/seen")
+    @_json_body
+    async def stall_seen(_request: web.Request, _body: dict) -> web.Response:
+        """Mark the last restart as told."""
+        return web.json_response({"ok": True, **stall.seen()})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/monitor/models")
     async def monitor_models(_request: web.Request) -> web.Response:

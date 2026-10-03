@@ -522,6 +522,10 @@ sidebarStyle.textContent = `
   text-overflow: ellipsis; white-space: nowrap; }
 .om-card-desc { color: var(--om-text-2); font-size: 11px; line-height: 1.45; cursor: pointer;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.om-hit { background: var(--om-hit-bg, #e3b341); color: var(--om-hit-ink, #161616);
+  border-radius: 2px; }
+.om-card-desc .om-hit, .om-tcell-desc .om-hit { background: none;
+  color: var(--om-accent, #4493f8); }
 .om-card-ictl { margin-top: auto; }
 .om-card-ictl .om-btn { width: 100%; padding: 6px 12px; font-size: 12px; }
 .om-alert { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px;
@@ -1497,6 +1501,25 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-mem-bar-value { font-size: calc(var(--om-hdr, 44px) * 0.36); font-weight: 600;
   font-variant-numeric: tabular-nums; color: var(--om-text); }
 .om-mem-quiet .om-mem-canvas, .om-mem-quiet .om-mem-bar-value { opacity: .45; }
+.om-mem-tdr { flex: none; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+  font-weight: 600; color: var(--om-muted); border: 1px solid var(--om-border); cursor: pointer; }
+.om-mem-tdr[hidden] { display: none; }
+.om-mem-tdr-warn { color: #d29922; border-color: rgba(210,153,34,.55);
+  background: rgba(210,153,34,.10); }
+.om-mem-tdr[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(210,153,34,.35); }
+.om-tdr-card { pointer-events: auto; max-width: 460px; padding: 9px 11px; }
+.om-tdr-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.om-tdr-card-head .om-tip-lead { flex: 1; }
+.om-tdr-card-x { background: none; border: none; padding: 0 2px; font-size: 15px; line-height: 1;
+  color: var(--om-muted, #8b949e); cursor: pointer; }
+.om-tdr-card-x:hover { color: var(--om-text, #e6edf3); }
+.om-tdr-fix { color: var(--om-text, #e6edf3); margin-top: 7px; }
+.om-tdr-cmd-row { display: flex; gap: 6px; align-items: flex-start; margin-top: 5px; }
+.om-tdr-cmd { flex: 1; min-width: 0; padding: 5px 7px; border-radius: 4px;
+  background: var(--om-input, #0d1117); border: 1px solid var(--om-border, #2c332b);
+  color: var(--om-text, #e6edf3); overflow-wrap: anywhere; user-select: all; cursor: text;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.om-tdr-copy { flex: none; padding: 4px 11px; font-size: 11px; }
 .om-mem-quiet .om-mem-graph-detail { color: #d29922; }
 .om-mon-quiet { opacity: .45; }
 .om-mem-link { display: flex; align-items: center; gap: 10px; padding: 8px 14px;

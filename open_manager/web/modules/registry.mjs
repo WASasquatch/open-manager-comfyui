@@ -290,11 +290,20 @@ function renderRegistry(container) {
     trustWrap.appendChild(trustBox);
     trustWrap.appendChild(el("span", null, "Trusted authors"));
     trustWrap.title = "Only packs whose repository belongs to an author you have trusted";
+    const hitWrap = el("label", "om-side-filter");
+    const hitBox = el("input");
+    hitBox.type = "checkbox";
+    hitBox.checked = localStorage.getItem("om-registry-highlight") === "1";
+    hitWrap.appendChild(hitBox);
+    hitWrap.appendChild(el("span", null, "Highlight matches"));
+    hitWrap.title = "Marks the search text in names, publishers and descriptions, and starts each"
+      + " description at its first match";
     controls.appendChild(viewSel);
     controls.appendChild(sortSel);
     controls.appendChild(licSel);
     controls.appendChild(filterWrap);
     controls.appendChild(trustWrap);
+    controls.appendChild(hitWrap);
     container.appendChild(controls);
 
     const count = el("div", "om-side-status", "");
@@ -333,6 +342,10 @@ function renderRegistry(container) {
 
     const cardsOn = () => viewSel.value === "cards";
     const tableOn = () => viewSel.value === "table";
+    const hitNow = () => {
+      const query = search.value.trim().toLowerCase();
+      return hitBox.checked && query && !topicInQuery(query) ? query : "";
+    };
     const gapNow = () => GAP[viewSel.value] ?? GAP.list;
     const WIDE = 1000;
     const MID = 470;
@@ -351,43 +364,67 @@ function renderRegistry(container) {
       return changed;
     };
 
+    let tall = "";
+    let shift = "";
+
     const paint = (force = false) => {
       const rows = Math.ceil(filtered.length / perRow);
-      sizer.style.height = `${Math.max(0, rows * pitch - (rows ? gapNow() : 0))}px`;
+      const height = `${Math.max(0, rows * pitch - (rows ? gapNow() : 0))}px`;
+      if (height !== tall) {
+        tall = height;
+        sizer.style.height = height;
+      }
       const firstRow = Math.max(0, Math.floor(list.scrollTop / pitch) - OVERSCAN);
       const rowsShown = Math.ceil(list.clientHeight / pitch) + OVERSCAN * 2;
       const start = firstRow * perRow;
       const end = Math.min(filtered.length, (firstRow + rowsShown) * perRow);
+      const offset = `translateY(${firstRow * pitch}px)`;
+      if (offset !== shift) {
+        shift = offset;
+        win.style.transform = offset;
+      }
       if (!force && start === from && end === to) return;
       from = start;
       to = end;
-      win.style.transform = `translateY(${firstRow * pitch}px)`;
       const build = cardsOn() ? buildResultCard : tableOn() ? buildResultTableRow : buildResultRow;
-      win.replaceChildren(...filtered.slice(start, end).map((entry, i) => build(entry, start + i)));
+      const hit = hitNow();
+      win.replaceChildren(...filtered.slice(start, end).map((entry, i) => build(entry, start + i, hit)));
     };
 
     const fitColumns = () => {
       const width = list.clientWidth;
       const want = width <= 0 || width >= WIDE ? "om-t-wide"
         : width >= MID ? "om-t-mid" : "om-t-tight";
+      if (win.classList.contains(want) && head.classList.contains(want)) return false;
       for (const node of [head, win]) {
         node.classList.remove("om-t-wide", "om-t-mid", "om-t-tight");
         node.classList.add(want);
       }
-      if (tableOn() && head.clientWidth > 0 && list.clientWidth > 0) {
-        const gutter = Math.max(0, head.clientWidth - list.clientWidth);
-        head.style.paddingRight = `${8 + gutter}px`;
-      }
+      return true;
+    };
+
+    const fitGutter = () => {
+      if (!tableOn() || head.clientWidth <= 0 || list.clientWidth <= 0) return;
+      const gutter = Math.max(0, head.clientWidth - list.clientWidth);
+      head.style.paddingRight = `${8 + gutter}px`;
     };
 
     const repaint = (force = true) => {
       fitColumns();
+      fitGutter();
       paint(force);
       requestAnimationFrame(() => {
-        const tier = head.className;
-        fitColumns();
-        if (measure() || head.className !== tier) paint(true);
+        const moved = fitColumns();
+        if (moved) fitGutter();
+        if (measure() || moved) paint(true);
       });
+    };
+
+    const reshape = () => {
+      const moved = fitColumns();
+      if (moved) fitGutter();
+      if (cardsOn() || moved) measure();
+      paint();
     };
 
     let settle = null;
@@ -474,9 +511,14 @@ function renderRegistry(container) {
     };
 
     list.addEventListener("scroll", () => { paint(); queueVisibleLicences(); }, { passive: true });
+    let shapeDue = 0;
     const shape = new ResizeObserver(() => {
       if (!viewIsCurrent(generation)) { shape.disconnect(); return; }
-      repaint();
+      if (shapeDue) return;
+      shapeDue = requestAnimationFrame(() => {
+        shapeDue = 0;
+        if (viewIsCurrent(generation)) reshape();
+      });
     });
     shape.observe(list);
     let timer = null;
@@ -491,6 +533,11 @@ function renderRegistry(container) {
     trustBox.addEventListener("change", () => {
       localStorage.setItem("om-registry-trusted", trustBox.checked ? "1" : "0");
       apply();
+    });
+    hitBox.addEventListener("change", () => {
+      localStorage.setItem("om-registry-highlight", hitBox.checked ? "1" : "0");
+      from = to = -1;
+      repaint();
     });
     apply();
   };

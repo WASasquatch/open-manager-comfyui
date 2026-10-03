@@ -666,7 +666,7 @@ PINNED_UTIL = 90
 
 PINNED_MEM_UTIL = 10
 
-PINNED_POWER = 0.25
+PINNED_POWER = 0.30
 
 WORKING_POWER = 0.60
 
@@ -679,6 +679,10 @@ CLOCK_CAPPED = 0x4 | 0x8 | 0x20 | 0x40 | 0x80
 HANG_WATCH = 15.0
 
 HANG_CONFIRM = 45.0
+
+HANG_CONFIRM_LOOSE = 300.0
+
+HANG_WATCH_LOOSE = 60.0
 
 HANG_HOLD = 8
 
@@ -800,6 +804,21 @@ def _running_id(running) -> str:
         return str(running[0][1])
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _running_node(running) -> list:
+    """The node the run is on, as a fact row, or nothing where it cannot be said."""
+    try:
+        from server import PromptServer
+
+        node = PromptServer.instance.last_node_id
+        if node is None:
+            return []
+        spec = (running[0][2] or {}).get(str(node)) or {}
+        name = (spec.get("_meta") or {}).get("title") or spec.get("class_type") or ""
+        return [["Node", f"{name} #{node}" if name else f"#{node}"]]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _progress_mark() -> tuple:
@@ -1012,16 +1031,18 @@ def activity(reading: dict | None = None) -> dict:
         churn = _stream_churn(now)
         thrash = bool(churn and churn[0] >= THRASH_RATE
                       and churn[1] / churn[0] >= THRASH_SHARE)
-        qualifies = _pinned(device, share) and tight and not arriving \
+        qualifies = _pinned(device, share) and not arriving \
             and not (churn and churn[0] > 0)
         bucket, since = _hang_watch(now, qualifies, advanced is True)
+        confirm = HANG_CONFIRM if tight else HANG_CONFIRM_LOOSE
 
-        if bucket >= HANG_HOLD and since >= HANG_CONFIRM \
+        if bucket >= HANG_HOLD and since >= confirm \
                 and now >= float(_watch.get("rearm") or 0):
             owned = _pid_share(device, now)
             if owned is not None and owned >= PID_MAJORITY:
                 return {"state": "hang", "label": "Possible GPU hang",
-                        "facts": [["No progress", _span(since)], *counters, *weighed, *memory],
+                        "facts": [["No progress", _span(since)], *_running_node(running),
+                                  *counters, *weighed, *memory],
                         "detail": "Reads as a card holding a kernel rather than working "
                                   "through one."}
         if thrash:
@@ -1037,9 +1058,10 @@ def activity(reading: dict | None = None) -> dict:
                     "facts": [["Weights in", f"{_size(step[0])} in {_span(step[1])}"],
                               *counters, *memory],
                     "detail": "The card is fetching the model rather than waiting on it."}
-        if bucket and since >= HANG_WATCH:
+        if bucket and since >= (HANG_WATCH if tight else HANG_WATCH_LOOSE):
             return {"state": "stalling", "label": "Potential GPU hang",
-                    "facts": [["Watching", _span(since)], *counters, *weighed, *memory],
+                    "facts": [["Watching", _span(since)], *_running_node(running),
+                              *counters, *weighed, *memory],
                     "detail": "Could be a long kernel or a hang: too early to say which."}
         return {"state": "working", "label": "Working", "facts": [*counters, *memory],
                 "detail": "The card is computing, and work is going through."}
@@ -1058,7 +1080,7 @@ def activity(reading: dict | None = None) -> dict:
     stuck = now - float(_watch["quiet_since"] or now)
     if stuck >= STALL_CONFIRM:
         return {"state": "stalled", "label": "Memory stalled",
-                "facts": [["No progress", _span(stuck)], *quiet],
+                "facts": [["No progress", _span(stuck)], *_running_node(running), *quiet],
                 "detail": "Memory is full and nothing is moving: thrashing, not working."}
     return {"state": "stalling", "label": "Potential memory stall",
             "facts": [["Watching", _span(stuck)], *quiet],

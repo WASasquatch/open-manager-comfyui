@@ -1,9 +1,10 @@
 import { ICON_MEMORY } from "./base.mjs";
-import { el, toast, liveTip, notify, chooseAction } from "./ui.mjs";
+import { el, toast, liveTip, notify, chooseAction, factList } from "./ui.mjs";
 import { asWindow, windowSize, createFloatingPanel, floatingPanel, closeFloatingPanel } from "./windows.mjs";
 import { dlPost, bytesText, dlRemember, dlRecall } from "./downloads.mjs";
 import { monitorInterval, LINK_DEADLINE, link, readingHooks, dropMonitorCalls, linkLeased, linkMayPost, monPost, monGet, monRelease, pushStale, linkState, takeReading, linkTick, reviveSocket, LINK_SAY, buildLinkRow, meterText, MEMORY_CLIENT } from "./monitor.mjs";
 import { libGet } from "./library.mjs";
+import { restartAndRequeue, tdrStatus } from "./stall.mjs";
 
 const MEMORY_HISTORY = 240;
 
@@ -523,8 +524,8 @@ const ACTIVITY_LOOK = {
     + "moved for a short while." },
   stalled: { title: "Memory stalled", legend: "Quiet, memory full, and nothing has moved for "
     + "the better part of a minute." },
-  hang: { title: "Possible GPU hang", legend: "Busy, memory full, nothing arriving and "
-    + "nothing advancing." },
+  hang: { title: "Possible GPU hang", legend: "Busy without the power or memory traffic of "
+    + "real work, nothing arriving and nothing advancing." },
   oom: { title: "Out of memory", legend: "The last run failed for memory. ComfyUI unloaded "
     + "everything it held." },
   idle: { title: "Idle", legend: "Nothing is running. Models may still be held." },
@@ -581,6 +582,115 @@ function buildActivityOrb() {
   };
   orb.tell(null);
   return orb;
+}
+
+function copyText(text) {
+  const fallback = () => {
+    const area = el("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(area);
+    area.select();
+    let done = false;
+    try { done = document.execCommand("copy"); } catch { done = false; }
+    area.remove();
+    return done;
+  };
+  if (!navigator.clipboard?.writeText) return Promise.resolve(fallback());
+  return navigator.clipboard.writeText(text).then(() => true, () => fallback());
+}
+
+function tdrCardBody(found, close) {
+  const card = el("div", "om-tip om-tip-on om-tip-data om-tdr-card");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-label", found.lead);
+  const head = el("div", "om-tdr-card-head");
+  head.appendChild(el("div", "om-tip-lead", found.lead));
+  const shut = el("button", "om-tdr-card-x", "×");
+  shut.title = "Close";
+  shut.setAttribute("aria-label", "Close");
+  shut.onclick = () => close();
+  head.appendChild(shut);
+  card.appendChild(head);
+  if (found.facts?.length) card.appendChild(factList(found.facts, "om-tip-facts"));
+  for (const line of found.lines || []) card.appendChild(el("div", "om-tip-line", line));
+  if (found.fix) card.appendChild(el("div", "om-tip-line om-tdr-fix", found.fix));
+  if (found.command) {
+    const row = el("div", "om-tdr-cmd-row");
+    row.appendChild(el("code", "om-tdr-cmd", found.command));
+    const copy = el("button", "om-btn om-tdr-copy", "Copy");
+    copy.onclick = async () => {
+      if (!await copyText(found.command)) {
+        notify("Not copied", "The clipboard is not available here.");
+        return;
+      }
+      copy.textContent = "Copied";
+      clearTimeout(copy._reset);
+      copy._reset = setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+    };
+    row.appendChild(copy);
+    card.appendChild(row);
+  }
+  return card;
+}
+
+function pinnedTdrCard(host) {
+  let found = null;
+  let card = null;
+  const place = () => {
+    if (!card) return;
+    if (!host.isConnected || host.hidden) { close(); return; }
+    const at = host.getBoundingClientRect();
+    const box = card.getBoundingClientRect();
+    let top = at.bottom + 8;
+    if (top + box.height > innerHeight - 4) top = Math.max(4, at.top - box.height - 8);
+    const left = Math.max(6, Math.min(at.right - box.width, innerWidth - box.width - 6));
+    card.style.top = `${Math.round(top)}px`;
+    card.style.left = `${Math.round(left)}px`;
+  };
+  const outside = (event) => {
+    if (card && !card.contains(event.target) && !host.contains(event.target)) close();
+  };
+  const escape = (event) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    close();
+    host.focus();
+  };
+  function close() {
+    if (!card) return;
+    card.remove();
+    card = null;
+    host.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", outside, true);
+    document.removeEventListener("keydown", escape, true);
+    window.removeEventListener("scroll", place, true);
+    window.removeEventListener("resize", place);
+  }
+  const open = () => {
+    if (!found || card) return;
+    card = tdrCardBody(found, close);
+    document.body.appendChild(card);
+    place();
+    host.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+  };
+  const toggle = (event) => {
+    event.stopPropagation();
+    if (card) close();
+    else open();
+  };
+  host.addEventListener("click", toggle);
+  host.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggle(event);
+  });
+  return { fill: (value) => { found = value; }, close, shown: () => !!card };
 }
 
 function openMemoryPanel() {
@@ -651,6 +761,11 @@ function openMemoryPanel() {
   });
   tools.appendChild(clearRam);
 
+  const unstick = el("button", "om-btn om-dl-btn", "Restart and requeue");
+  unstick.title = "Interrupt the run, restart ComfyUI if it is stuck, and queue the jobs again.";
+  unstick.onclick = () => restartAndRequeue();
+  tools.appendChild(unstick);
+
   const body = el("div", "om-dl-body om-mem-body");
 
   const linkRow = buildLinkRow(() => relink());
@@ -685,6 +800,25 @@ function openMemoryPanel() {
     buildGraphBlock("ram", "System memory", "#3fb950"),
     buildGraphBlock("vram", "Graphics memory", "#a371f7"),
   ];
+  const tdrPill = el("span", "om-mem-tdr");
+  tdrPill.hidden = true;
+  tdrPill.tabIndex = 0;
+  tdrPill.setAttribute("role", "button");
+  tdrPill.setAttribute("aria-haspopup", "dialog");
+  tdrPill.setAttribute("aria-expanded", "false");
+  graphs[2].box.firstChild.insertBefore(tdrPill, graphs[2].value);
+  const tdrCard = pinnedTdrCard(tdrPill);
+  liveTip(tdrPill, () => (tdrCard.shown() ? "" : tdrPill._say || ""));
+  tdrStatus().then((found) => {
+    if (!found?.applies || !found.flagged || !panel.el.isConnected) return;
+    tdrPill.textContent = found.label;
+    tdrPill.classList.toggle("om-mem-tdr-warn", !!found.warn);
+    tdrPill._say = { lead: found.lead, facts: found.facts || [],
+                     lines: [...(found.lines || []), found.fix, found.command].filter(Boolean) };
+    tdrCard.fill(found);
+    tdrPill.hidden = false;
+  });
+
   const held = el("div", "om-mem-held");
   const heldBar = memoryBar("Models held").bar;
   held.appendChild(heldBar);
@@ -893,6 +1027,7 @@ function openMemoryPanel() {
   paint();
 
   const shutDown = () => {
+    tdrCard.close();
     readingHooks.delete(onReading);
     document.removeEventListener("visibilitychange", wake);
     clearInterval(panel._tick);

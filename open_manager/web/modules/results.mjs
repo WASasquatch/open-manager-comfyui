@@ -229,11 +229,49 @@ function starCount(stars) {
   return pill;
 }
 
-function buildResultRow(entry) {
+const HIT_LEAD = 40;
+
+function paintHits(holder, text, hit) {
+  const value = String(text ?? "");
+  const lower = value.toLowerCase();
+  if (!hit || lower.length !== value.length || !lower.includes(hit)) {
+    holder.textContent = value;
+    return holder;
+  }
+  const parts = [];
+  let at = 0;
+  for (let found = lower.indexOf(hit); found !== -1; found = lower.indexOf(hit, at)) {
+    if (found > at) parts.push(document.createTextNode(value.slice(at, found)));
+    parts.push(el("mark", "om-hit", value.slice(found, found + hit.length)));
+    at = found + hit.length;
+  }
+  if (at < value.length) parts.push(document.createTextNode(value.slice(at)));
+  holder.replaceChildren(...parts);
+  return holder;
+}
+
+function hitExcerpt(text, hit) {
+  const value = String(text || "");
+  const found = hit ? value.toLowerCase().indexOf(hit) : -1;
+  if (found <= HIT_LEAD) return value;
+  const start = value.lastIndexOf(" ", found - HIT_LEAD);
+  return start < 0 ? value : `… ${value.slice(start + 1)}`;
+}
+
+function paintDescription(holder, entry, hit) {
+  if (!entry.description) {
+    holder.textContent = "No description published.";
+    return holder;
+  }
+  return paintHits(holder, hitExcerpt(entry.description, hit), hit);
+}
+
+function buildResultRow(entry, index, hit) {
   const row = el("div", "om-side-row");
   row.appendChild(packIcon(entry.icon, entry.name || entry.id));
   const text = el("div", "om-side-text");
-  text.appendChild(packName(entry.name || entry.id, "om-side-name"));
+  const rowName = packName(entry.name || entry.id, "om-side-name");
+  text.appendChild(paintHits(rowName, rowName.textContent, hit));
   const meta = el("div", "om-side-meta");
   meta.appendChild(el("span", "om-meta-text",
     `${entry.advertised || "no version"} · ${countText(entry.downloads)} ↓`));
@@ -263,7 +301,7 @@ function dayText(stamp) {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "-";
 }
 
-function buildResultTableRow(entry, index) {
+function buildResultTableRow(entry, index, hit) {
   const row = el("div", "om-table-row");
 
   row.appendChild(el("div", "om-tcell om-tcell-num", String((index ?? 0) + 1)));
@@ -271,7 +309,7 @@ function buildResultTableRow(entry, index) {
   const title = el("div", "om-tcell om-tcell-title");
   title.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-table-icon"));
   const name = packName(entry.name || entry.id, "om-side-name");
-  title.appendChild(name);
+  title.appendChild(paintHits(name, name.textContent, hit));
   title.title = entry.name || entry.id;
   title.onclick = () => openPack(entry.id);
   const tableTrusted = trustBadge(entry);
@@ -291,13 +329,12 @@ function buildResultTableRow(entry, index) {
 
   row.appendChild(el("div", "om-tcell om-tcell-dl", `${countText(entry.downloads)} ↓`));
 
-  const desc = el("div", "om-tcell om-tcell-desc",
-    entry.description || "No description published.");
+  const desc = paintDescription(el("div", "om-tcell om-tcell-desc"), entry, hit);
   desc.title = entry.description || "";
   desc.onclick = () => openPack(entry.id);
   row.appendChild(desc);
 
-  row.appendChild(el("div", "om-tcell om-tcell-auth", entry.publisher || "-"));
+  row.appendChild(paintHits(el("div", "om-tcell om-tcell-auth"), entry.publisher || "-", hit));
 
   const lic = el("div", "om-tcell om-tcell-lic");
   const pill = el("span", "om-lic");
@@ -313,18 +350,19 @@ function buildResultTableRow(entry, index) {
   return row;
 }
 
-function buildResultCard(entry) {
+function buildResultCard(entry, index, hit) {
   const card = el("div", "om-card");
   const head = el("div", "om-card-head");
   head.appendChild(packIcon(entry.icon, entry.name || entry.id, "om-card-icon"));
   const title = el("div", "om-card-title");
-  title.appendChild(packName(entry.name || entry.id, "om-side-name"));
-  title.appendChild(el("div", "om-card-pub", entry.publisher || ""));
+  const cardName = packName(entry.name || entry.id, "om-side-name");
+  title.appendChild(paintHits(cardName, cardName.textContent, hit));
+  title.appendChild(paintHits(el("div", "om-card-pub"), entry.publisher || "", hit));
   head.appendChild(title);
   head.onclick = () => openPack(entry.id);
   card.appendChild(head);
 
-  const desc = el("div", "om-card-desc", entry.description || "No description published.");
+  const desc = paintDescription(el("div", "om-card-desc"), entry, hit);
   desc.onclick = () => openPack(entry.id);
   card.appendChild(desc);
 

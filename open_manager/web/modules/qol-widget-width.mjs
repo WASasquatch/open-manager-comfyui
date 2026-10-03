@@ -119,7 +119,11 @@ export default {
   tooltip: "On the classic canvas, ComfyUI gives custom and DOM widgets the width of the "
     + "properties panel once a node is shown there, so they stop following the node when it "
     + "is resized. On, the panel's width stays in the panel.",
-  issues: ["Comfy-Org/ComfyUI_frontend#12443"],
+  issues: [
+    "Comfy-Org/ComfyUI_frontend#12443",
+    "Comfy-Org/ComfyUI_frontend#13068",
+    "Comfy-Org/ComfyUI_frontend#19548",
+  ],
   defaultValue: true,
   verified: "1.54.8",
   check() {
