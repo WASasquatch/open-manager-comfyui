@@ -83,7 +83,7 @@ Under **Open Manager → Library**.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Model Library panel, and the Models button | **off** | The whole feature, and the Models button. |
+| Model Library panel, and the Models button | on | The whole feature, and the Models button. |
 | Let the Model Library read the contents of a file | on | Hashing and full duplicate confirmation read a model end to end: on a large library that is hundreds of gigabytes. Turn it off and the library still reports names, sizes, folders, duplicates by name and what nothing references, and never opens a file. A digest already taken is still shown. |
 | Show what each pack costs to load, on the Installed list | off | Reads ComfyUI's own import timings back out of its log and puts the seconds beside each installed pack. Nothing is measured or run. |
 

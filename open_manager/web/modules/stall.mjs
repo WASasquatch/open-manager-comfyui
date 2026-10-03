@@ -9,7 +9,11 @@ const UP_WAIT = 900000;
 
 const UP_EVERY = 1500;
 
+const REQUEUE_TRIES = 40;
+
 let watching = false;
+
+let lastShown = 0;
 
 let alertToast = null;
 
@@ -49,21 +53,47 @@ function minutesText(seconds) {
   return plural(Math.max(1, Math.round((seconds || 0) / 60)), "minute");
 }
 
-function awaitRestart(note) {
+async function serverUp() {
+  try {
+    const answer = await api.fetchApi("/system_stats", { cache: "no-store" });
+    return answer.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function awaitRequeue(note, before) {
+  for (let tries = 0; tries < REQUEUE_TRIES; tries += 1) {
+    if (pending !== note) return;
+    let found = null;
+    try {
+      found = await stallCall("");
+    } catch {
+      found = null;
+    }
+    if (found?.last?.at && found.last.at !== before) {
+      showLast(found.last);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, UP_EVERY));
+  }
+  if (pending !== note) return;
+  pending = null;
+  note.settle("ComfyUI restarted.", "ok", 8000);
+}
+
+function awaitRestart(note, before) {
   const started = Date.now();
   let down = false;
   const check = async () => {
     if (pending !== note) return;
-    let up = false;
-    try {
-      const answer = await api.fetchApi("/system_stats", { cache: "no-store" });
-      up = answer.ok;
-    } catch {
-      up = false;
+    const up = await serverUp();
+    if (!up && !down) {
+      down = true;
+      note.restarting();
     }
-    if (!up) down = true;
     if (up && down) {
-      location.reload();
+      awaitRequeue(note, before);
       return;
     }
     if (Date.now() - started > UP_WAIT) {
@@ -87,11 +117,18 @@ function stopNote() {
       if (node.querySelector(".om-stall-now")) return;
       const now = el("button", "om-btn om-stall-now", "Restart now");
       now.onclick = () => {
-        now.remove();
-        text.textContent = "Restarting";
+        note.restarting();
         stallCall("/unstick", { now: true }).catch(() => {});
       };
       node.insertBefore(now, node.querySelector(".om-toast-x"));
+    },
+    restarting() {
+      text.textContent = "Restarting";
+      node.querySelector(".om-stall-now")?.remove();
+    },
+    remove() {
+      clearTimeout(timer);
+      node.remove();
     },
     settle(message, kind, duration) {
       text.textContent = message;
@@ -107,6 +144,12 @@ function stopNote() {
 }
 
 async function unstickNow() {
+  let before = 0;
+  try {
+    before = (await stallCall(""))?.last?.at || 0;
+  } catch {
+    before = 0;
+  }
   let answer;
   try {
     answer = await stallCall("/unstick", {});
@@ -119,7 +162,7 @@ async function unstickNow() {
   }
   const note = stopNote();
   pending = note;
-  awaitRestart(note);
+  awaitRestart(note, before);
 }
 
 async function restartAndRequeue() {
@@ -175,9 +218,16 @@ function showAlert(alert) {
 }
 
 function showLast(last) {
-  if (!last?.at || last.seen) return;
-  const said = [`Restarted after a run stopped answering. ${plural(last.requeued || 0, "job")} `
-    + "queued again."];
+  if (!last?.at || last.at === lastShown) return;
+  lastShown = last.at;
+  const note = pending;
+  pending = null;
+  if (last.seen) {
+    note?.settle("ComfyUI restarted.", "ok", 8000);
+    return;
+  }
+  note?.remove();
+  const said = [`ComfyUI restarted. ${plural(last.requeued || 0, "job")} queued again.`];
   const skipped = last.skipped?.length || 0;
   const failed = last.failed?.length || 0;
   if (skipped) said.push(`${plural(skipped, "job")} left out: ${last.skipped[0]}.`);

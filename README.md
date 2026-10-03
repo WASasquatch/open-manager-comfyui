@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/5f264d2f-b11b-4ca9-9f69-73a553213e85
 | Packs | Browse the Comfy Registry, install from registry or GitHub, see what an install does before it runs |
 | Workspace | Models on disk, downloads, memory, outputs, and your own files |
 | For remote ComfyUI instances | A desktop on a tab of its own. No swapping between tools just to view outputs, or manage files |
-| Off by default | Model Library, the monitor strip and Desktop Mode |
+| Off by default | The monitor strip and Desktop Mode |
 | Never | A node in your graph. Nothing is installed or built at load time |
 
 **_Open Manager_** _is not affiliated with ComfyUI-Manager or the Comfy Registry._
@@ -87,7 +87,7 @@ Four pieces. None of them adds a node to your graph.
 | | | Default |
 | --- | --- | --- |
 | [Download Manager](docs/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, picks the drive | on |
-| [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced files, storage | off |
+| [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced files, storage | on |
 | [Resource Monitor](docs/MONITOR.md) | CPU, RAM, VRAM and temperatures in ComfyUI's control bar, with a Memory panel behind it | strip off, Memory button on |
 | [Desktop Mode](docs/DESKTOP.md) | Files, notes, outputs and programs on a tab of their own | off, and needs `OPEN_MANAGER_ENABLE_DESKTOP` |
 

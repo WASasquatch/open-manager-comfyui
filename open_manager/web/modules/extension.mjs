@@ -837,7 +837,7 @@ app.registerExtension({
       name: "Model Library panel, and the Models button",
       category: ["Open Manager", "Library", "modelLibrary"],
       type: "boolean",
-      defaultValue: false,
+      defaultValue: true,
       tooltip: "Adds a Models button that opens the model library: everything on disk across every folder ComfyUI registers, what is held in more than one place, and what no saved workflow appears to reference.",
     },
     {
