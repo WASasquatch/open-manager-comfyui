@@ -37,6 +37,7 @@ from . import (
     log,
     metadata,
     models as model_policy,
+    modellist,
     localnodes,
     monitor,
     nodemap,
@@ -1825,6 +1826,8 @@ def register_routes() -> None:
             str(body.get("hash_type") or ""),
             _flag(body.get("overwrite", False)),
             str(body.get("root") or ""),
+            str(body.get("subfolder") or ""),
+            _flag(body.get("repo", False)),
         )
         if not result.get("ok"):
             return web.json_response(result, status=400)
@@ -2213,6 +2216,32 @@ def register_routes() -> None:
         """Delete one model file."""
         result = await asyncio.to_thread(library.delete, str(body.get("path") or ""))
         return web.json_response(result, status=200 if result.get("ok") else 400)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/library/discover")
+    async def library_discover(_request: web.Request) -> web.Response:
+        """ComfyUI-Manager's model list, each entry placed and matched against the disk."""
+        return web.json_response(await asyncio.to_thread(modellist.listing))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/discover/sync")
+    @_json_body
+    async def library_discover_sync(_request: web.Request, _body: dict) -> web.Response:
+        """Fetch ComfyUI-Manager's model list again."""
+        if not gates.DOWNLOADS:
+            return web.json_response(gates.refuse("downloads"), status=403)
+        answer = await modellist.sync()
+        found = await asyncio.to_thread(modellist.listing)
+        return web.json_response({**found, "ok": answer["ok"], "reason": answer["reason"]})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/library/discover/repo")
+    @_json_body
+    async def library_discover_repo(_request: web.Request, body: dict) -> web.Response:
+        """The files a whole-repository entry in the model list fetches."""
+        if not gates.DOWNLOADS:
+            return web.json_response(gates.refuse("downloads"), status=403)
+        answer = await modellist.repo_files(str(body.get("repo") or ""),
+                                            str(body.get("folder") or ""),
+                                            str(body.get("subfolder") or ""))
+        return web.json_response(answer)
 
     @PromptServer.instance.routes.get(f"{PREFIX}/models/folders")
     async def model_folders(_request: web.Request) -> web.Response:

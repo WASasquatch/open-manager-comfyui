@@ -27,29 +27,75 @@ https://github.com/user-attachments/assets/5f264d2f-b11b-4ca9-9f69-73a553213e85
 
 ## Install
 
-| Mode | Result |
-| --- | --- |
-| Custom node | Sits beside ComfyUI-Manager. Its own sidebar tab |
-| pip package | Replaces the official manager, under `--enable-manager` |
+Two ways. Only the first gives you ComfyUI's **Extensions** button: ComfyUI draws it when it
+finds a manager package in its own Python at startup, before any custom node loads.
+
+| | As the manager | As a custom node |
+| --- | --- | --- |
+| Installed with | pip, into the Python ComfyUI runs on | `git clone` into `custom_nodes`, or from ComfyUI-Manager or the Comfy Registry |
+| Opens from | **Extensions**, and the **Discovery** sidebar tab | The **Discovery** sidebar tab |
+| ComfyUI-Manager | Replaced. A `ComfyUI-Manager` folder in `custom_nodes` is skipped | Left as it is |
+| Launch flag | `--enable-manager` | None |
+
+### As the manager
+
+**Windows portable build.** In the `ComfyUI_windows_portable` folder, the one holding
+`python_embeded` and `run_nvidia_gpu.bat`, run:
+
+```bat
+python_embeded\python.exe -m pip uninstall -y comfyui-manager
+python_embeded\python.exe -m pip install comfyui-open-manager
+```
+
+Then open `run_nvidia_gpu.bat` (or `run_cpu.bat`) in a text editor and add `--enable-manager` to
+the end of the line that starts `.\python_embeded\python.exe -s ComfyUI\main.py`, after the
+flags already on it:
+
+```bat
+.\python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build --enable-manager
+```
+
+Save it, and start ComfyUI with that file. A whole launch file, with switches and keys, is under
+[Launch files](#launch-files).
+
+**venv, conda or a manual install.** With the environment ComfyUI runs in activated:
 
 ```sh
-# as a custom node
-cd ComfyUI/custom_nodes
-git clone https://github.com/WASasquatch/open-manager-comfyui.git
-
-# or as the manager
-pip uninstall comfyui-manager
-pip install comfyui-open-manager
+python -m pip uninstall -y comfyui-manager
+python -m pip install comfyui-open-manager
 python main.py --enable-manager
 ```
 
+With uv, `uv pip uninstall comfyui-manager` and `uv pip install comfyui-open-manager`. Pack
+requirements then install through uv too.
+
+**Check.** At startup the console shows `[Open Manager] enabled in place of ComfyUI-Manager`, and
+**Extensions** opens Open Manager.
+
+| If | Then |
+| --- | --- |
+| The console says `the comfyui-manager package must be installed first` | The install went into a different Python. Run it again with the exact `python.exe` path that message prints. Do not run the `manager_requirements.txt` command it suggests: that installs the official ComfyUI-Manager instead |
+| pip answers `Requirement already satisfied` and that message stays | Add `--force-reinstall --no-deps` to the install command |
+| The official manager opens | Both packages own `comfyui_manager`, and it was installed again. On a portable build Open Manager still loads; elsewhere uninstall it and install Open Manager again |
+| An Open Manager folder is still in `custom_nodes` from an earlier install | Delete it, so one copy runs |
+
+### As a custom node
+
+```sh
+cd ComfyUI/custom_nodes
+git clone https://github.com/WASasquatch/open-manager-comfyui.git
+```
+
+Restart ComfyUI and open the **Discovery** tab in the sidebar. The console shows
+`routes registered below /open_manager/v1/api`.
+
+### Updating and logs
+
 | | |
 | --- | --- |
-| Update | `pip install --upgrade comfyui-open-manager` |
-| uv environment | `uv pip install comfyui-open-manager`. Pack requirements install through uv too |
-| Portable build | Use its own interpreter: `python_embeded\python.exe -m pip install ...` |
-| Name clash | Both packages own `comfyui_manager`. Uninstall the other first. On a portable build Open Manager still loads if the other is installed again; elsewhere installing it again replaces Open Manager |
-| Log | `--enable-manager` writes `user/comfyui.log`, rotating to `comfyui.prev.log` and `comfyui.prev2.log`. `OPEN_MANAGER_NO_LOG` leaves it alone |
+| As the manager | `python -m pip install --upgrade comfyui-open-manager`, with `python_embeded\python.exe` in place of `python` on a portable build |
+| As a custom node | `git pull` in its folder |
+| Log | `--enable-manager` writes `user/comfyui.log`, rotating to `comfyui.prev.log` and `comfyui.prev2.log`. `OPEN_MANAGER_NO_LOG=1` leaves it alone |
 
 ### Access keys (optional)
 
@@ -60,6 +106,9 @@ Set under Access keys in the Open Manager menu. A variable, where set, is used i
 | Gated and private models | `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`, `OPEN_MANAGER_HF_TOKEN` | huggingface.co/settings/tokens |
 | Starring, higher rate limit | `GITHUB_TOKEN`, `GH_TOKEN`, `OPEN_MANAGER_GITHUB_TOKEN` | github.com/settings/tokens |
 | Scanning an install | `VIRUS_TOTAL_KEY`, `VIRUSTOTAL_API_KEY`, `OPEN_MANAGER_VIRUSTOTAL_KEY` | virustotal.com/gui/my-apikey |
+
+The value is the key itself: `set HF_TOKEN=hf_xxx` on Windows, `export HF_TOKEN=hf_xxx` on Linux
+and macOS, in the file that starts ComfyUI. See [Launch files](#launch-files).
 
 ---
 
@@ -87,9 +136,9 @@ Four pieces. None of them adds a node to your graph.
 | | | Default |
 | --- | --- | --- |
 | [Download Manager](docs/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, picks the drive | on |
-| [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced files, storage | on |
+| [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced files, storage, and ComfyUI-Manager's model list to fetch from | on |
 | [Resource Monitor](docs/MONITOR.md) | CPU, RAM, VRAM and temperatures in ComfyUI's control bar, with a Memory panel behind it | strip off, Memory button on |
-| [Desktop Mode](docs/DESKTOP.md) | Files, notes, outputs and programs on a tab of their own | off, and needs `OPEN_MANAGER_ENABLE_DESKTOP` |
+| [Desktop Mode](docs/DESKTOP.md) | Files, notes, outputs and programs on a tab of their own | off, and needs `OPEN_MANAGER_ENABLE_DESKTOP=1` |
 
 Every panel opens as a movable window, or centred on the page. One setting each.
 
@@ -99,27 +148,71 @@ Desktop Mode is served by ComfyUI's own server: no second port, no second login.
 
 ### Server switches
 
-Set to `1`. What ships on is closed with a `NO_` switch; what ships off is opened with its own.
+Environment variables, read once when ComfyUI starts. `1` turns a switch on. `0`, or leaving it
+out, keeps the default. Set them in the file that starts ComfyUI, as in
+[Launch files](#launch-files), and restart after changing one.
 
-| Variable | Closes |
-|---|---|
-| `OPEN_MANAGER_NO_INSTALL` | Installing and removing packs |
-| `OPEN_MANAGER_NO_GITHUB` | Adding and installing GitHub repositories |
-| `OPEN_MANAGER_NO_DOWNLOADS` | Fetching models |
-| `OPEN_MANAGER_NO_RESTART` | Restarting ComfyUI |
-| `OPEN_MANAGER_NO_KEYS` | Writing access keys |
-| `OPEN_MANAGER_APPROVED_ONLY` | Anything the registry has not approved |
+What ships on is closed with a `NO_` switch:
 
-| Variable | Opens |
-|---|---|
-| `OPEN_MANAGER_ENABLE_DESKTOP` | Desktop Mode, for readers who switch it on in the settings |
-| `OPEN_MANAGER_ENABLE_FILES` | The file browser, for readers who switch it on in the settings |
-| `OPEN_MANAGER_FILE_WRITES` | Renaming, moving, copying and deleting files, making folders, and saving text files and pictures |
-| `OPEN_MANAGER_ALLOW_BANNED` | Installing versions the registry has banned, whatever the setting says |
+| Variable | `=1` | `=0` or not set |
+|---|---|---|
+| `OPEN_MANAGER_NO_INSTALL` | Packs cannot be installed or removed | Packs install and remove |
+| `OPEN_MANAGER_NO_GITHUB` | GitHub repositories cannot be added or installed | They can |
+| `OPEN_MANAGER_NO_DOWNLOADS` | Models cannot be fetched | They can |
+| `OPEN_MANAGER_NO_RESTART` | Open Manager cannot restart ComfyUI | It can |
+| `OPEN_MANAGER_NO_KEYS` | Access keys cannot be written | They can |
+| `OPEN_MANAGER_APPROVED_ONLY` | Only versions the registry lists as active install. No GitHub repositories | Flagged versions and GitHub repositories install too |
+
+What ships off is opened with its own:
+
+| Variable | `=1` | `=0` or not set |
+|---|---|---|
+| `OPEN_MANAGER_ENABLE_DESKTOP` | Desktop Mode can be switched on in the settings | Desktop Mode is hidden |
+| `OPEN_MANAGER_ENABLE_FILES` | The file browser can be switched on in the settings | The file browser is hidden |
+| `OPEN_MANAGER_FILE_WRITES` | The file browser renames, moves, copies and deletes files, makes folders, and saves text files and pictures | The file browser only reads |
+| `OPEN_MANAGER_ALLOW_BANNED` | Versions the registry has banned install, whatever the setting says | The setting decides |
+| `OPEN_MANAGER_REPO_DOWNLOADS` | Whole Hugging Face repositories in ComfyUI-Manager's model list download, configs included | Only single model files download |
 
 The server refuses what a closed switch governs and names the variable. Desktop Mode and the
 file browser are hidden rather than refused, and their settings do nothing until the machine
 opens them.
+
+### Launch files
+
+Each variable goes in the file that starts ComfyUI, above the line that runs it. These open
+Desktop Mode and the file browser, give a Hugging Face key, and start ComfyUI with Open Manager
+as its manager. As a custom node, leave out `--enable-manager`.
+
+**Windows portable.** `run_nvidia_gpu.bat`, in the `ComfyUI_windows_portable` folder. No spaces
+around `=`.
+
+```bat
+@echo off
+cd /d "%~dp0"
+set OPEN_MANAGER_ENABLE_DESKTOP=1
+set OPEN_MANAGER_ENABLE_FILES=1
+set HF_TOKEN=hf_xxx
+.\python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build --enable-manager
+pause
+```
+
+**Linux and macOS.** `run.sh`, in the ComfyUI folder. `venv` is the folder your environment is
+in; drop that line if `python` already is ComfyUI's.
+
+```sh
+#!/usr/bin/env bash
+cd "$(dirname "$0")"
+source venv/bin/activate
+export OPEN_MANAGER_ENABLE_DESKTOP=1
+export OPEN_MANAGER_ENABLE_FILES=1
+export HF_TOKEN=hf_xxx
+python main.py --enable-manager
+```
+
+Run `chmod +x run.sh` once, then start ComfyUI with `./run.sh`.
+
+A list is one value, comma separated: `set OPEN_MANAGER_MODEL_HOSTS=civitai.com,cdn.civitai.com`.
+The lists are in [DOWNLOADS.md](docs/DOWNLOADS.md#environment).
 
 ---
 

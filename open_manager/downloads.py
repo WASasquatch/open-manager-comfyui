@@ -141,10 +141,11 @@ def _target_for(entry: dict) -> "Path | None":
     directory = entry.get("directory") or ""
     name = entry.get("name") or ""
     chosen = entry.get("root") or ""
+    subfolder = entry.get("subfolder") or ""
     if chosen:
-        return models.destination(directory, name, chosen)
-    return (models.overwrite_target(directory, name, entry.get("replaces") or "")
-            or models.destination(directory, name))
+        return models.destination(directory, name, chosen, subfolder)
+    return (models.overwrite_target(directory, name, entry.get("replaces") or "", subfolder)
+            or models.destination(directory, name, "", subfolder))
 
 
 def _part_for(entry: dict) -> "Path | None":
@@ -251,6 +252,8 @@ def add(
     digest_type: str = "",
     overwrite: bool = False,
     root: str = "",
+    subfolder: str = "",
+    repo: bool = False,
 ) -> dict:
     """Put a model on the queue, or report why it cannot be.
 
@@ -264,6 +267,8 @@ def add(
         overwrite: Whether to replace a file that is already there.
         root: Which of the folder's registered paths to write to, or empty for the default.
             A machine with its models spread over several drives picks here.
+        subfolder: Plain folder names below that path to write into, or empty for none.
+        repo: Whether the file is one of a whole repository's.
 
     Returns:
         ``{ok, id, reason, entry}``. A refusal for an existing file carries ``installed``,
@@ -271,20 +276,21 @@ def add(
     """
     _load()
     resolved = models.normalise(url)
-    allowed, reason = models.check(resolved, name, directory, root)
+    allowed, reason = models.check(resolved, name, directory, root, subfolder, repo)
     if not allowed:
         return {"ok": False, "reason": reason}
+    subfolder = "/".join(models.subfolder_parts(subfolder) or [])
 
-    existing = models.installed_path(directory, name)
+    existing = models.installed_path(directory, name, subfolder)
     if existing and not overwrite:
         return {
             "ok": False,
-            "reason": f"{name} is already in {directory}",
+            "reason": f"{name} is already in {'/'.join(filter(None, (directory, subfolder)))}",
             "installed": existing,
         }
 
     going = ("queued", "downloading", "pausing")
-    target = models.destination(directory, name, root)
+    target = models.destination(directory, name, root, subfolder)
     for row in _entries.values():
         if row.get("status") not in going:
             continue
@@ -305,6 +311,8 @@ def add(
         "declared_url": url if url != resolved else "",
         "name": name,
         "directory": directory,
+        "subfolder": subfolder,
+        "repo": bool(repo),
         "owner": models.owner_of(resolved),
         "source": (source or "")[:120],
         "hash": (digest or "").strip().lower()[:128],
@@ -363,7 +371,8 @@ async def plan(items: list) -> dict:
     """What queueing these would ask of each drive, before any of it is queued.
 
     Args:
-        items: ``{url, name, directory, root}`` per model, as they would be added.
+        items: ``{url, name, directory, root, subfolder, repo}`` per model, as they would be
+            added.
 
     Returns:
         ``{ok, drives, adding, unknown, notes}``. Each drive carries ``path, free, total,
@@ -377,14 +386,16 @@ async def plan(items: list) -> dict:
         directory = str(item.get("directory") or "")
         name = str(item.get("name") or "")
         root = str(item.get("root") or "")
+        subfolder = str(item.get("subfolder") or "")
         url = models.normalise(str(item.get("url") or ""))
-        allowed, _ = models.check(url, name, directory, root)
+        allowed, _ = models.check(url, name, directory, root, subfolder, bool(item.get("repo")))
         if not allowed:
             continue
-        target = (models.destination(directory, name, root) if root
-                  else (models.overwrite_target(directory, name,
-                                                models.installed_path(directory, name))
-                        or models.destination(directory, name)))
+        target = (models.destination(directory, name, root, subfolder) if root
+                  else (models.overwrite_target(
+                            directory, name,
+                            models.installed_path(directory, name, subfolder), subfolder)
+                        or models.destination(directory, name, "", subfolder)))
         if target is not None:
             wanted.append({"url": url, "name": name, "target": target})
     if not wanted:
@@ -568,7 +579,7 @@ def delete_file(download_id: str) -> dict:
     if not where or not _on_disk(entry):
         return {"ok": False, "reason": "that file is not on disk"}
     if models.overwrite_target(entry.get("directory") or "", entry.get("name") or "",
-                               where) is None:
+                               where, entry.get("subfolder") or "") is None:
         return {"ok": False, "reason": "that file is not in a folder ComfyUI uses"}
     try:
         Path(where).unlink()

@@ -72,6 +72,10 @@ audio    .mp3 .wav .flac .ogg .oga .opus .m4a .aac
 set HF_TOKEN=hf_xxx
 ```
 
+```sh
+export HF_TOKEN=hf_xxx
+```
+
 Sent only to `huggingface.co` and `hf.co`. The CDN a download is redirected to gets nothing.
 
 **Hugging Face page links.** A `/blob/` link is rewritten to `/resolve/`, so it fetches the
@@ -84,6 +88,7 @@ file rather than the page.
 | Any other host | `OPEN_MANAGER_MODEL_HOSTS`, adds to the list above | Whatever that host serves |
 | Pickle-backed weights: `.ckpt` `.pt` `.pth` `.bin` | `OPEN_MANAGER_MODEL_FORMATS`, **replaces** the model list | These run code when a model is loaded |
 | Other media containers | `OPEN_MANAGER_MEDIA_FORMATS`, **replaces** the media list | Whatever reads them |
+| Whole Hugging Face repositories, from the Model Library's Discover tab | `OPEN_MANAGER_REPO_DOWNLOADS=1` | Their `.json`, `.txt` and `.model` config and tokenizer files. Weights still need an allowed format; code, images and the rest are left out |
 
 Both format variables replace rather than extend, so name every format you want, including the
 safe ones you are keeping.
@@ -93,7 +98,8 @@ safe ones you are keeping.
 - **Plain http.** Every hop must be https, and there is no setting for it.
 - **`.svg`.** It is a document that can carry script, not an image format.
 - **Video platforms.** There is no extraction of media from a page; a URL must point at a file.
-- **Paths you type.** A download lands in a folder ComfyUI registers, under a plain filename.
+- **Paths you type.** A download lands in a folder ComfyUI registers, under a plain filename, in
+  a plain subfolder only where ComfyUI-Manager's model list names one.
   Both the URL and the name you save it as are checked, so an allowed link cannot be written
   under an arbitrary extension.
 
@@ -127,13 +133,23 @@ Read once at start-up, so ComfyUI must be restarted after changing one.
 | `OPEN_MANAGER_MODEL_HOSTS` | Hosts to allow **in addition to** the built-in list, comma separated. |
 | `OPEN_MANAGER_MODEL_FORMATS` | Model extensions to allow **instead of** the safe set. |
 | `OPEN_MANAGER_MEDIA_FORMATS` | Media extensions to allow **instead of** the built-in set. |
+| `OPEN_MANAGER_REPO_DOWNLOADS` | `1` fetches whole Hugging Face repositories the model list names. |
 | `HF_TOKEN` | Hugging Face token. Also reads `HUGGING_FACE_HUB_TOKEN` and `OPEN_MANAGER_HF_TOKEN`. Read per request, not at start-up. |
 
 A key pasted into Access keys is never written to the environment.
 
-```bash
-OPEN_MANAGER_MODEL_HOSTS=civitai.com,cdn.civitai.com
-OPEN_MANAGER_MODEL_FORMATS=.safetensors,.sft,.gguf,.ckpt
+Each list is one value, comma separated, with no spaces around `=`. Hosts are bare names, no
+`https://`. In the file that starts ComfyUI, above the line that runs it; whole files are under
+[Launch files](../README.md#launch-files).
+
+```bat
+set OPEN_MANAGER_MODEL_HOSTS=civitai.com,cdn.civitai.com
+set OPEN_MANAGER_MODEL_FORMATS=.safetensors,.sft,.gguf,.ckpt
+```
+
+```sh
+export OPEN_MANAGER_MODEL_HOSTS=civitai.com,cdn.civitai.com
+export OPEN_MANAGER_MODEL_FORMATS=.safetensors,.sft,.gguf,.ckpt
 ```
 
 ## Related

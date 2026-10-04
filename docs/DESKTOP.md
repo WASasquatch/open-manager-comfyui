@@ -156,7 +156,8 @@ the machine rather than the browser.
 | `OPEN_MANAGER_FILE_WRITES=1` | Allow renaming, moving, copying, deleting, new folders and folder marks in the Folders and Documents windows, saving from the Image Viewer, and editing text files outside your own folders |
 
 Environment variables on the machine that runs ComfyUI, read when it starts. A switch overrides
-the setting it governs.
+the setting it governs. `0`, or leaving it out, keeps it off. Where they go:
+[Launch files](../README.md#launch-files).
 
 ## Related
 

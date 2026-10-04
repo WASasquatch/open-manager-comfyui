@@ -1340,6 +1340,14 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-lib-group-head .om-dl-name { flex: 1; }
 .om-lib-group .om-lib-row { background: var(--om-surface); }
 .om-lib-filter { flex: none; width: 200px; padding: 4px 8px; font-size: 12px; }
+.om-lib-picks { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 6px; }
+.om-lib-picks .om-side-select { flex: 0 1 auto; min-width: 0; max-width: 220px; }
+.om-lib-desc { color: var(--om-muted); font-size: 12px; line-height: 1.45;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.om-lib-page { color: var(--om-accent, #4493f8); text-decoration: none; flex: none; }
+.om-lib-page:hover { text-decoration: underline; }
+.om-lib-env { font-family: ui-monospace, monospace; font-size: 11px; color: var(--om-muted);
+  margin-left: 8px; }
 .om-cost { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 6px;
   color: var(--om-muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
 .om-cost-high { color: #d29922; border-color: #d29922; }

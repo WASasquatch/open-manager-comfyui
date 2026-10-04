@@ -13,6 +13,8 @@ __all__ = [
     "ALLOWED_HOSTS",
     "MEDIA_DIRECTORY",
     "MEDIA_FORMATS",
+    "REPO_DOWNLOADS",
+    "REPO_FILE_FORMATS",
     "SAFE_FORMATS",
     "kind_of",
     "check",
@@ -26,6 +28,7 @@ __all__ = [
     "owner_of",
     "roots",
     "sha256_file",
+    "subfolder_parts",
 ]
 
 _DEFAULT_HOSTS = frozenset({
@@ -88,6 +91,11 @@ MEDIA_FORMATS = _media()
 
 MEDIA_DIRECTORY = "input"
 
+REPO_DOWNLOADS = (os.environ.get("OPEN_MANAGER_REPO_DOWNLOADS", "").strip().lower()
+                  in {"1", "true", "yes", "on"})
+
+REPO_FILE_FORMATS = frozenset({".json", ".txt", ".model"})
+
 
 def _suffix(name: str) -> str:
     """A filename's extension, lowercased, empty where it has none."""
@@ -129,6 +137,32 @@ _RESERVED = frozenset(
     | {f"COM{n}" for n in range(1, 10)}
     | {f"LPT{n}" for n in range(1, 10)}
 )
+
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+MAX_SUBFOLDER_DEPTH = 8
+
+
+def subfolder_parts(subfolder: str) -> list[str] | None:
+    """The folders below a model folder that a file is written into.
+
+    Args:
+        subfolder: Slash-separated folder names, or empty for none.
+
+    Returns:
+        The names in order, empty for none, or ``None`` where any is not a plain name.
+    """
+    text = (subfolder or "").replace("\\", "/").strip("/")
+    if not text:
+        return []
+    parts = text.split("/")
+    if len(parts) > MAX_SUBFOLDER_DEPTH:
+        return None
+    for part in parts:
+        if (not _SAFE_SEGMENT.match(part) or part.endswith(".")
+                or part.upper().split(".")[0] in _RESERVED):
+            return None
+    return parts
 
 
 TOKEN_HOSTS = frozenset({"huggingface.co", "hf.co"})
@@ -260,7 +294,7 @@ def roots(directory: str) -> list[dict]:
     return found
 
 
-def destination(directory: str, name: str, root: str = "") -> Path | None:
+def destination(directory: str, name: str, root: str = "", subfolder: str = "") -> Path | None:
     """Where a model would be written, or ``None`` where it may not be.
 
     Args:
@@ -268,13 +302,17 @@ def destination(directory: str, name: str, root: str = "") -> Path | None:
         name: The file's name, without any path.
         root: One of the paths :func:`roots` reported, or empty for ComfyUI's default. A
             path that is not registered for this folder is refused rather than used.
+        subfolder: Plain folder names below the root, slash separated, or empty for none.
 
     Returns:
         The full path, or ``None`` where the directory is unknown, the name is not a plain
-        filename, the chosen root is not one ComfyUI registers, or the result would land
-        outside the folder.
+        filename, the subfolder is not plain, the chosen root is not one ComfyUI registers,
+        or the result would land outside the folder.
     """
     if not _SAFE_NAME.match(name or "") or name.upper().split(".")[0] in _RESERVED:
+        return None
+    parts = subfolder_parts(subfolder)
+    if parts is None:
         return None
     registered = _folder_roots(directory)
     if not registered:
@@ -288,10 +326,10 @@ def destination(directory: str, name: str, root: str = "") -> Path | None:
         chosen = Path(match)
     try:
         base = chosen.resolve()
+        target = (base.joinpath(*parts) / name).resolve()
     except OSError:
         return None
-    target = (base / name).resolve()
-    if target.parent != base:
+    if target.parent != base.joinpath(*parts):
         return None
     return target
 
@@ -359,18 +397,21 @@ def owned_path(where: str) -> Path | None:
     return None
 
 
-def overwrite_target(directory: str, name: str, existing: str) -> Path | None:
+def overwrite_target(directory: str, name: str, existing: str,
+                     subfolder: str = "") -> Path | None:
     """The path to rewrite when replacing a file already on disk.
 
     Args:
         directory: A ComfyUI model folder name.
         name: The file's name.
         existing: The path reported by :func:`installed_path`.
+        subfolder: The folders below the registered path the file sits in.
 
     Returns:
         The path to write, or ``None`` where it cannot be confirmed.
     """
-    if not existing or not _SAFE_NAME.match(name or ""):
+    parts = subfolder_parts(subfolder)
+    if not existing or not _SAFE_NAME.match(name or "") or parts is None:
         return None
     try:
         target = Path(existing).resolve()
@@ -379,33 +420,39 @@ def overwrite_target(directory: str, name: str, existing: str) -> Path | None:
     if target.name != name or not target.is_file():
         return None
     parent = _fold_path(target.parent)
-    return target if any(_fold_path(one) == parent for one in _folder_roots(directory)) else None
+    return target if any(_fold_path(Path(one).joinpath(*parts)) == parent
+                         for one in _folder_roots(directory)) else None
 
 
-def installed_path(directory: str, name: str) -> str:
+def installed_path(directory: str, name: str, subfolder: str = "") -> str:
     """Where this model already sits, empty where it is not downloaded.
 
     Args:
         directory: A ComfyUI model folder name.
         name: The file's name.
+        subfolder: The folders below the registered path it would sit in.
 
     Returns:
         The existing path, or an empty string.
     """
+    parts = subfolder_parts(subfolder)
+    if parts is None:
+        return ""
     if directory == MEDIA_DIRECTORY:
-        target = destination(directory, name)
+        target = destination(directory, name, "", subfolder)
         return str(target) if target is not None and target.is_file() else ""
     try:
         import folder_paths
 
-        found = folder_paths.get_full_path(directory, name)
+        found = folder_paths.get_full_path(directory, "/".join([*parts, name]))
         return str(found) if found else ""
     except Exception:
-        target = destination(directory, name)
+        target = destination(directory, name, "", subfolder)
         return str(target) if target and target.is_file() else ""
 
 
-def check(url: str, name: str, directory: str, root: str = "") -> tuple[bool, str]:
+def check(url: str, name: str, directory: str, root: str = "",
+          subfolder: str = "", repo: bool = False) -> tuple[bool, str]:
     """Whether this download is allowed, and why not where it is refused.
 
     Args:
@@ -413,6 +460,9 @@ def check(url: str, name: str, directory: str, root: str = "") -> tuple[bool, st
         name: The filename to write.
         directory: The ComfyUI model folder to write it in.
         root: Which of the folder's registered paths to write to, or empty for the default.
+        subfolder: Plain folder names below that path, or empty for none.
+        repo: Whether the file is one of a whole repository's, which also allows
+            :data:`REPO_FILE_FORMATS` where :data:`REPO_DOWNLOADS` is on.
 
     Returns:
         ``(allowed, reason)``. ``reason`` is empty when allowed and is written for the
@@ -433,6 +483,13 @@ def check(url: str, name: str, directory: str, root: str = "") -> tuple[bool, st
         return False, f"{directory or 'no directory'} is not a ComfyUI folder"
     media = directory == MEDIA_DIRECTORY
     permitted = MEDIA_FORMATS if media else SAFE_FORMATS
+    if repo and not media:
+        if not REPO_DOWNLOADS:
+            return False, (
+                "whole repositories are not downloaded. Set OPEN_MANAGER_REPO_DOWNLOADS=1 "
+                "to allow them."
+            )
+        permitted = SAFE_FORMATS | REPO_FILE_FORMATS
     advice = (
         "Set OPEN_MANAGER_MEDIA_FORMATS to choose your own list." if media else
         "Set OPEN_MANAGER_MODEL_FORMATS to choose your own list."
@@ -445,8 +502,11 @@ def check(url: str, name: str, directory: str, root: str = "") -> tuple[bool, st
                 f"{'media ' if media else ''}format. Allowed: {', '.join(sorted(permitted))}. "
                 f"{advice}"
             )
-    if root and destination(directory, name, root) is None and destination(directory, name):
+    if subfolder_parts(subfolder) is None:
+        return False, f"{subfolder} is not a plain folder name"
+    if (root and destination(directory, name, root, subfolder) is None
+            and destination(directory, name, "", subfolder)):
         return False, f"{root} is not one of the paths ComfyUI uses for {directory}"
-    if destination(directory, name, root) is None:
+    if destination(directory, name, root, subfolder) is None:
         return False, f"{name or 'that name'} is not a plain filename"
     return True, ""

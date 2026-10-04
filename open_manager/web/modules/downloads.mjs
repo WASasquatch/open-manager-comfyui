@@ -164,6 +164,7 @@ async function confirmDiskRoom(items) {
     report = await dlPost("/downloads/plan", {
       items: items.map((one) => ({
         url: one.url, name: one.name, directory: one.directory, root: one.root || "",
+        subfolder: one.subfolder || "", repo: !!one.repo,
       })),
     });
   } catch {
@@ -208,12 +209,12 @@ async function queueModel(model, { source = "", askTrust = true } = {}) {
     url: model.url, name: model.name, directory: model.directory, source,
     hash: model.hash || "", hash_type: model.hash_type || "",
     workers: dlWorkers(), overwrite: !!model.overwrite, root: model.root || "",
+    subfolder: model.subfolder || "", repo: !!model.repo,
   };
   let result = await dlPost("/downloads", body);
   if (!result.ok && result.installed && !model.overwrite) {
-    const elsewhere = model.root
-      && !samePlace(result.installed, `${model.root}\\${model.name}`)
-      && !samePlace(result.installed, `${model.root}/${model.name}`);
+    const into = model.root && [model.root, model.subfolder].filter(Boolean).join("/");
+    const elsewhere = into && !samePlace(result.installed, `${into}/${model.name}`);
     const replace = await chooseAction(
       elsewhere ? `Store a second copy of ${model.name}?` : `Replace ${model.name}?`,
       "",
@@ -221,7 +222,7 @@ async function queueModel(model, { source = "", askTrust = true } = {}) {
       { wide: true,
         facts: [
           ["On disk", result.installed],
-          ["Downloading to", elsewhere ? `${model.root}` : result.installed],
+          ["Downloading to", elsewhere ? into : result.installed],
           ["Result", elsewhere
             ? "Second copy. The one on disk stays."
             : "Replaced once the new file arrives whole."],
@@ -305,7 +306,8 @@ function buildDownloadRow(row, refresh) {
   item.appendChild(top);
 
   const where = el("div", "om-dl-where");
-  where.appendChild(el("span", null, row.directory || "?"));
+  where.appendChild(el("span", null,
+    [row.directory || "?", row.subfolder].filter(Boolean).join("/")));
   if (row.owner) {
     const from = el("span", "om-dl-owner", row.owner);
     from.title = row.url;
@@ -1009,4 +1011,4 @@ async function downloadNodeModels(node) {
   }
 }
 
-export { dlPost, bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, nodeModels, addModelUrlToNode, downloadNodeModels };
+export { dlPost, bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, nodeModels, addModelUrlToNode, downloadNodeModels, modelRoots, preferredRoot };

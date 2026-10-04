@@ -18,6 +18,7 @@ Nothing is read until the panel is opened, and nothing is hashed until you ask f
 | Duplicates | What is there twice, and how much of it you would get back |
 | No reference found | What no saved workflow appears to ask for |
 | Not downloaded | What a workflow asks for that is not on disk, and fetches the ones it can |
+| Discover | What ComfyUI-Manager's model list offers, which of it is here, and fetches the rest |
 | Storage | Where it all is, and how full each drive is |
 
 ## Duplicates, and what a duplicate claim is worth
@@ -50,6 +51,42 @@ batch; the models skipped are counted, and their accounts named.
 
 **What cannot.** A workflow that only names a file gives no source. Those are listed, and
 cannot be fetched from here.
+
+## Discover
+
+ComfyUI-Manager's model list, read from its repository the first time the tab opens, again once
+the copy is a day old, and on **Update list**. Newest additions first.
+
+| Show | Lists |
+|---|---|
+| Available | Not on disk, and allowed by the download rules |
+| On disk | Already in a model folder |
+| Not downloadable | Refused by the download rules, with the reason |
+| All | Everything in the list |
+
+Narrow it further by type, by base model, or with the filter box.
+
+**Where an entry lands.** In the subfolder ComfyUI-Manager names, under the registered folder it
+belongs to: `controlnet/SDXL` is an `SDXL` folder inside whichever `controlnet` path **Where new
+downloads are stored** picks. A workflow made on an install that used ComfyUI-Manager names the
+file the same way.
+
+**On disk** means a file at that place or, for a filename the list uses only once, a file of that
+name in any model folder. It reads the library's last walk, so **Rescan** after moving files by
+hand.
+
+**Not downloadable** is whatever the Download Manager refuses: pickle formats, hosts outside the
+allowed set, URLs that name no file, and folders no installed pack registers. Each row names the
+environment variable that would allow it, where one would; see [DOWNLOADS.md](DOWNLOADS.md).
+
+**Whole repositories.** A few entries are a Hugging Face repository rather than a file. With
+`OPEN_MANAGER_REPO_DOWNLOADS=1` each is read from Hugging Face when it is downloaded and its files
+queued into a folder of the repository's name: weights in an allowed format, and the `.json`,
+`.txt` and `.model` config and tokenizer files beside them. A repository whose weights are only in
+a refused format is refused whole.
+
+Selected entries go through the same trust prompt, free-space check and queue as any other
+download.
 
 ## Per file
 

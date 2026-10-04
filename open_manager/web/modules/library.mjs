@@ -1,10 +1,10 @@
 import { api } from "../../../scripts/api.js";
 import { API, ICON_LIBRARY } from "./base.mjs";
-import { el, toast, notify, chooseAction, openRowMenu } from "./ui.mjs";
+import { el, safeUrl, toast, notify, chooseAction, openRowMenu } from "./ui.mjs";
 import { asWindow, windowSize, createFloatingPanel, floatingPanel, closeFloatingPanel } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
-import { sinceText } from "./registry.mjs";
-import { bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf } from "./downloads.mjs";
+import { sinceText, dropdown } from "./registry.mjs";
+import { bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, modelRoots, preferredRoot } from "./downloads.mjs";
 import { workflowChoices, workflowGraph, openWorkflow } from "./workflows.mjs";
 
 const LIB_MAX_ROWS = 300;
@@ -14,6 +14,9 @@ let libRefs = null;
 const libWantedPicked = new Set();
 let libDupes = null;
 let libStorage = null;
+let libDiscover = null;
+let libDiscoverSynced = false;
+const libDiscoverPicked = new Set();
 
 async function libGet(path) {
   return (await api.fetchApi(`${API}${path}`)).json();
@@ -51,6 +54,8 @@ const LIB_TABS = [
     empty: "Every model is referenced by a workflow." },
   { key: "absent", title: "Not downloaded",
     empty: "Every model a workflow asks for is on disk." },
+  { key: "discover", title: "Discover",
+    empty: "No model list held yet." },
   { key: "storage", title: "Storage",
     empty: "Nothing indexed yet." },
 ];
@@ -359,6 +364,249 @@ async function fetchWanted(entries, refresh) {
   refresh?.(false);
 }
 
+const DISCOVER_SHOWN = [
+  { key: "available", title: "Available", holds: (one) => !one.blocked && !one.on_disk },
+  { key: "on-disk", title: "On disk", holds: (one) => !!one.on_disk },
+  { key: "blocked", title: "Not downloadable", holds: (one) => !!one.blocked && !one.on_disk },
+  { key: "all", title: "All", holds: () => true },
+];
+
+const DISCOVER_STATES = { queued: "Queued", downloading: "Downloading", pausing: "Downloading",
+                          paused: "Paused" };
+
+function discoverKey(one) {
+  return `${one.url}|${one.folder}/${one.subfolder}/${one.filename}`;
+}
+
+function discoverPlace(one) {
+  return one.folder ? [one.folder, one.subfolder].filter(Boolean).join("/") : one.save_path;
+}
+
+function discoverText(one) {
+  return [one.name, one.filename, one.type, one.base, one.description, discoverPlace(one),
+          one.owner].join(" ").toLowerCase();
+}
+
+function buildDiscoverRow(one, boxes, retally) {
+  const key = discoverKey(one);
+  const row = el("label",
+    `om-dl-model${one.on_disk ? " om-dl-have" : ""}${one.blocked ? " om-dl-refused" : ""}`);
+  const box = el("input", "om-dl-check");
+  box.type = "checkbox";
+  box.disabled = !!one.blocked;
+  box.checked = !one.blocked && libDiscoverPicked.has(key);
+  box.onchange = () => {
+    if (box.checked) libDiscoverPicked.add(key);
+    else libDiscoverPicked.delete(key);
+    retally();
+  };
+  boxes.set(key, box);
+  row.appendChild(box);
+
+  const text = el("div", "om-dl-modeltext");
+  const top = el("div", "om-dl-top");
+  top.appendChild(el("span", "om-dl-name", one.name));
+  if (one.size_text) top.appendChild(el("span", "om-lib-size", one.size_text));
+  text.appendChild(top);
+
+  const meta = el("div", "om-dl-where");
+  meta.appendChild(el("span", null,
+    `${discoverPlace(one)}/${one.filename}${one.repo ? "/" : ""}`));
+  if (one.type) meta.appendChild(el("span", "om-dl-src", one.type));
+  if (one.base && one.base !== one.type) meta.appendChild(el("span", "om-dl-src", one.base));
+  if (one.owner) meta.appendChild(el("span", "om-dl-owner", one.owner));
+  const page = safeUrl(one.reference);
+  if (page) {
+    const link = el("a", "om-lib-page", "Page");
+    link.href = page;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.onclick = (event) => event.stopPropagation();
+    meta.appendChild(link);
+  }
+  text.appendChild(meta);
+
+  if (one.description) {
+    const about = el("div", "om-lib-desc", one.description);
+    about.title = one.description;
+    text.appendChild(about);
+  }
+  if (one.blocked) {
+    const refused = el("div", "om-dl-note om-dl-bad", one.blocked);
+    if (one.enable) refused.appendChild(el("span", "om-lib-env", one.enable));
+    text.appendChild(refused);
+  } else if (DISCOVER_STATES[one.queued]) {
+    text.appendChild(el("div", "om-dl-note", DISCOVER_STATES[one.queued]));
+  } else if (one.on_disk) {
+    const have = el("div", "om-dl-note", "On disk");
+    have.title = one.on_disk;
+    text.appendChild(have);
+  }
+  row.appendChild(text);
+  return row;
+}
+
+function buildDiscoverView(report, wanted, refresh, redraw) {
+  const rows = report.models || [];
+  const parts = [];
+  parts.push(el("div", "om-lib-lead",
+    `${rows.length} models in ComfyUI-Manager's list · fetched ${sinceText(report.fetched_at)}`));
+
+  const pick = (key, fallback, options) => {
+    const select = dropdown(key, fallback, options);
+    select.onchange = () => { dlRemember(key, select.value); redraw(); };
+    return select;
+  };
+  const facet = (field) => [...new Set(rows.map((one) => one[field]).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const showPick = pick("om-lib-discover-show", "available",
+    DISCOVER_SHOWN.map((one) => [one.key, `${one.title} (${rows.filter(one.holds).length})`]));
+  const typePick = pick("om-lib-discover-type", "",
+    [["", "All types"], ...facet("type").map((one) => [one, one])]);
+  const basePick = pick("om-lib-discover-base", "",
+    [["", "All bases"], ...facet("base").map((one) => [one, one])]);
+  const picks = el("div", "om-lib-picks");
+  picks.appendChild(showPick);
+  picks.appendChild(typePick);
+  picks.appendChild(basePick);
+  parts.push(picks);
+
+  const shown = DISCOVER_SHOWN.find((one) => one.key === showPick.value) || DISCOVER_SHOWN[0];
+  const visible = rows
+    .filter((one) => shown.holds(one)
+      && (!typePick.value || one.type === typePick.value)
+      && (!basePick.value || one.base === basePick.value)
+      && (!wanted || discoverText(one).includes(wanted)))
+    .sort((a, b) => b.id - a.id);
+  const selectable = visible.filter((one) => !one.blocked);
+
+  const boxes = new Map();
+  const bar = el("div", "om-lib-actions");
+  const summary = el("span", "om-dl-summary", "");
+  const all = el("button", "om-btn", "Select all");
+  const go = el("button", "om-btn om-go", "Download");
+  const chosen = () => rows.filter((one) => !one.blocked && libDiscoverPicked.has(discoverKey(one)));
+  const retally = () => {
+    const picked = chosen();
+    summary.textContent = picked.length ? `${picked.length} selected` : "Nothing selected";
+    go.disabled = !picked.length;
+    const every = selectable.length
+      && selectable.every((one) => libDiscoverPicked.has(discoverKey(one)));
+    all.textContent = every ? "Select none" : "Select all";
+    all.disabled = !selectable.length;
+  };
+  all.onclick = () => {
+    const turnOn = !selectable.every((one) => libDiscoverPicked.has(discoverKey(one)));
+    for (const one of selectable) {
+      const key = discoverKey(one);
+      if (turnOn) libDiscoverPicked.add(key);
+      else libDiscoverPicked.delete(key);
+      const box = boxes.get(key);
+      if (box) box.checked = turnOn;
+    }
+    retally();
+  };
+  go.onclick = async () => {
+    const picked = chosen();
+    if (!picked.length) return;
+    go.disabled = true;
+    try {
+      await fetchDiscovered(picked, refresh);
+    } finally {
+      retally();
+    }
+  };
+  bar.appendChild(summary);
+  bar.appendChild(all);
+  bar.appendChild(go);
+  parts.push(bar);
+
+  if (visible.length) {
+    parts.push(...visible.map((one) => buildDiscoverRow(one, boxes, retally)));
+  } else {
+    const box = el("div", "om-empty");
+    box.appendChild(el("div", "om-empty-title", "No model in the list matches."));
+    parts.push(box);
+  }
+  retally();
+  return parts;
+}
+
+async function discoverFiles(one) {
+  if (!one.repo) {
+    return { ok: true, files: [{ url: one.url, name: one.filename, subfolder: one.subfolder }] };
+  }
+  try {
+    return await libPost("/library/discover/repo",
+      { repo: one.repo, folder: one.folder, subfolder: one.subfolder });
+  } catch {
+    return { ok: false, reason: "The repository could not be read." };
+  }
+}
+
+async function fetchDiscovered(chosen, refresh) {
+  const expanded = [];
+  const refused = [];
+  for (const one of chosen) {
+    const answer = await discoverFiles(one);
+    if (answer.ok) expanded.push({ one, files: answer.files || [] });
+    else refused.push([one.name, [answer.reason, answer.enable].filter(Boolean).join(" · ")]);
+  }
+  if (refused.length) {
+    await chooseAction(refused.length === 1 ? `${refused[0][0]} not downloaded`
+                                            : `${refused.length} not downloaded`,
+      "", [], { wide: true, facts: refused });
+  }
+
+  const perOwner = new Map();
+  for (const { one, files } of expanded) {
+    if (!perOwner.has(one.owner)) perOwner.set(one.owner, []);
+    perOwner.get(one.owner).push(...files.map((file) => file.name));
+  }
+  const answered = new Map();
+  const skipped = new Set();
+  const ready = [];
+  for (const { one, files } of expanded) {
+    if (!answered.has(one.owner)) {
+      const names = perOwner.get(one.owner) || [one.filename];
+      answered.set(one.owner, await confirmDownloadTrust(
+        one.owner,
+        names.length === 1 ? names[0] : `${names.length} files from ComfyUI-Manager's list`,
+        names.length !== 1,
+        formatsOf(names)));
+    }
+    if (!answered.get(one.owner)) { skipped.add(one.owner); continue; }
+    const root = preferredRoot(await modelRoots(one.folder));
+    for (const file of files) {
+      ready.push({
+        url: file.url, name: file.name, directory: one.folder, subfolder: file.subfolder,
+        owner: one.owner, root, hash: file.hash || "", hash_type: file.hash ? "sha256" : "",
+        repo: !!one.repo, key: discoverKey(one),
+      });
+    }
+  }
+  const dropped = expanded.filter(({ one }) => skipped.has(one.owner)).length;
+  if (dropped) {
+    toast(`Skipped ${dropped} model${dropped === 1 ? "" : "s"} from ${[...skipped].join(", ")}.`,
+          { kind: "warn" });
+  }
+  if (!ready.length || !(await confirmDiskRoom(ready))) return;
+
+  const done = new Set();
+  for (const model of ready) {
+    if (await queueModel(model, { source: "from ComfyUI-Manager's list", askTrust: false })) {
+      done.add(model.key);
+      libDiscoverPicked.delete(model.key);
+    }
+  }
+  const queued = done.size;
+  if (queued) {
+    toast(`Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    if (!floatingPanel("downloads")) openDownloadManager();
+  }
+  refresh?.(false);
+}
+
 function buildDuplicateGroup(group, refresh) {
   const box = el("div", "om-lib-group");
   const head = el("div", "om-lib-group-head");
@@ -544,6 +792,41 @@ function openModelLibrary() {
   };
   panel.tools.appendChild(confirm);
 
+  const update = el("button", "om-btn", "Update list");
+  update.title = "Fetch ComfyUI-Manager's model list again.";
+  update.style.display = "none";
+  let listProblem = "";
+  let listFetching = false;
+  const syncList = async (asked) => {
+    if (listFetching) return;
+    listFetching = true;
+    libDiscoverSynced = true;
+    update.disabled = true;
+    update.textContent = "Updating...";
+    let reason = "";
+    try {
+      const answer = await libPost("/library/discover/sync", {});
+      if (answer.models) libDiscover = answer;
+      reason = answer.ok ? "" : (answer.reason || "The list could not be fetched.");
+    } catch {
+      reason = "The list could not be fetched.";
+    } finally {
+      listFetching = false;
+      update.disabled = false;
+      update.textContent = "Update list";
+    }
+    listProblem = reason;
+    if (reason && asked && libDiscover?.cached) notify("List not updated", reason);
+    draw();
+  };
+  const syncIfStale = () => {
+    if (tab.key === "discover" && libDiscover && libDiscover.stale && !libDiscoverSynced) {
+      syncList(false);
+    }
+  };
+  update.onclick = () => syncList(true);
+  panel.tools.appendChild(update);
+
   const tabBar = el("div", "om-dl-tabs");
   panel.body.appendChild(tabBar);
   const body = el("div", "om-dl-body");
@@ -566,6 +849,7 @@ function openModelLibrary() {
         dlRemember("om-lib-tab", tab.key);
         buildTabs();
         draw();
+        syncIfStale();
       };
       return button;
     }));
@@ -580,6 +864,7 @@ function openModelLibrary() {
       duplicates: (libDupes?.groups?.length ?? 0) + (libDupes?.collisions?.length ?? 0),
       unreferenced: libRefs ? files.filter((one) => !referenced.has(one.name.toLowerCase())).length : 0,
       absent: libRefs ? [...referenced].filter((one) => !have.has(one)).length : 0,
+      discover: (libDiscover?.models || []).filter((one) => !one.blocked && !one.on_disk).length,
       storage: libStorage?.roots?.length ?? 0,
     };
   };
@@ -600,6 +885,7 @@ function openModelLibrary() {
     const reading = mayHash();
     check.style.display = reading && onDupes && level === "names" ? "" : "none";
     confirm.style.display = reading && onDupes && level !== "full" ? "" : "none";
+    update.style.display = tab.key === "discover" ? "" : "none";
     if (onDupes && libDupes) {
       confirm.textContent = `Verify fully (${bytesText(libDupes.candidate_bytes || 0)})`;
       confirm.title = "Reads every candidate in full to confirm which files are identical.";
@@ -655,6 +941,8 @@ function openModelLibrary() {
           + "Filenames built at run time are not seen.";
         parts.push(head, ...capped(mine.sort((a, b) => b.size - a.size)));
       }
+    } else if (tab.key === "discover") {
+      if (libDiscover?.cached) parts.push(...buildDiscoverView(libDiscover, wanted, refresh, draw));
     } else {
       const have = new Set(files.map((one) => one.name.toLowerCase()));
       const byName = new Map();
@@ -702,7 +990,11 @@ function openModelLibrary() {
       list.replaceChildren(...parts);
     } else {
       const box = el("div", "om-empty");
-      box.appendChild(el("div", "om-empty-title", tab.empty));
+      const problem = tab.key === "discover" && (listProblem || libDiscover?.error);
+      box.appendChild(el("div", "om-empty-title",
+        tab.key === "discover" && listFetching ? "Fetching ComfyUI-Manager's model list..."
+          : problem ? "The model list could not be fetched." : tab.empty));
+      if (problem && !listFetching) box.appendChild(el("div", "om-dl-note", problem));
       list.replaceChildren(box);
     }
   };
@@ -718,11 +1010,14 @@ function openModelLibrary() {
       libDupes = await libGet("/library/duplicates?level=names");
       if (!panel.el.isConnected) return;
       libStorage = await libGet("/library/storage");
+      if (!panel.el.isConnected) return;
+      libDiscover = await libGet("/library/discover");
     } catch {
       summary.textContent = "The model folders could not be read";
       return;
     }
     draw();
+    syncIfStale();
   };
 
   const onFinished = () => {
