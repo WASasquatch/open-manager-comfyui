@@ -538,6 +538,11 @@ sidebarStyle.textContent = `
   cursor: pointer; padding: 0 2px; flex: none; }
 .om-alert-x:hover { color: var(--om-text); }
 .om-alert-more { align-self: flex-start; margin-top: 4px; }
+.om-pip { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #f85149;
+  margin-left: 6px; vertical-align: middle; flex: none; }
+.om-nav-btn .om-pip { margin-left: 5px; vertical-align: 2px; }
+.om-conflict { color: #f85149; font-size: 12px; overflow-wrap: anywhere; }
+.om-conflict.om-conflict-misread { color: var(--om-muted); }
 .om-held { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 7px;
   color: var(--om-muted); font-size: 11px; }
 .om-side-updateall { flex: none; }

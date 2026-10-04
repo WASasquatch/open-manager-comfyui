@@ -9,6 +9,23 @@ import { packIcon, starCount } from "./results.mjs";
 import { viewGeneration, viewIsCurrent, refreshInstalledIfActive } from "./discovery.mjs";
 import { dropdown } from "./registry.mjs";
 import { dlPost } from "./downloads.mjs";
+import { hostConflicts, hostPipLit, acknowledgeHostPip, conflictText, misreadAccelerator, pipMark } from "./host-pips.mjs";
+
+function conflictIndex(reported) {
+  const found = new Map();
+  for (const one of reported) {
+    for (const key of [one.id, one.name]) if (key) found.set(foldId(key), one);
+  }
+  return found;
+}
+
+function conflictFor(pack, index) {
+  for (const key of [pack.registry_id, pack.id, holdKey(pack)]) {
+    const one = key && index.get(foldId(key));
+    if (one) return one;
+  }
+  return null;
+}
 
 function isRelease(v) {
   return /^\d+(\.\d+)*$/.test((v || "").trim());
@@ -44,6 +61,9 @@ async function renderInstalled(container) {
   if (!viewIsCurrent(generation)) return;
   const packs = data.packs;
   indexInstalled(packs);
+  const reported = hostConflicts();
+  const conflicts = conflictIndex(reported);
+  const fresh = hostPipLit();
 
   const [timings] = await Promise.all([loadStartupTimes(), loadHolds(), loadSelfInfo(true)]);
   if (!viewIsCurrent(generation)) return;
@@ -79,6 +99,7 @@ async function renderInstalled(container) {
     ["all", "All installed"],
     ["updates", "Updates available"],
     ["flagged", "Flagged or banned"],
+    ["conflicts", "Conflicts ComfyUI reports"],
     ["registry", "Registry"],
     ["github", "GitHub (from repo)"],
     ["disk", "Disk (local)"],
@@ -117,6 +138,7 @@ async function renderInstalled(container) {
     const rows = packs.filter((pack) => {
       if (mode === "updates" && !isInstalledUpdatable(pack)) return false;
       if (mode === "flagged" && !["flagged", "banned"].includes((pack.status || "").toLowerCase())) return false;
+      if (mode === "conflicts" && !conflictFor(pack, conflicts)) return false;
       if (mode === "off-registry" && pack.registry_id) return false;
       if (["registry", "github", "disk"].includes(mode) && pack.source !== mode) return false;
       if (trustedBox.checked && !byTrustedAuthor(pack)) return false;
@@ -138,7 +160,7 @@ async function renderInstalled(container) {
     };
     rows.sort(sorters[sortSel.value] || sorters.name);
     list.replaceChildren();
-    for (const pack of rows) list.appendChild(buildInstalledRow(pack));
+    for (const pack of rows) list.appendChild(buildInstalledRow(pack, conflictFor(pack, conflicts), fresh));
     count.textContent = rows.length === packs.length
       ? `${rows.length} shown`
       : `${rows.length} of ${packs.length} shown`;
@@ -166,6 +188,25 @@ async function renderInstalled(container) {
       container.insertBefore(banner, container.firstChild);
     }
   }
+
+  if (reported.length) {
+    const signature = reported
+      .map((one) => `${one.id}:${one.conflicts.map((item) => item.type).sort().join(",")}`)
+      .sort().join("|");
+    let dismissed = "";
+    try { dismissed = localStorage.getItem(CONFLICTS_KEY) || ""; } catch {}
+    if (fresh || dismissed !== signature) {
+      const banner = buildConflictAlert(reported, fresh, () => {
+        filterSel.value = "conflicts";
+        apply();
+      }, () => {
+        try { localStorage.setItem(CONFLICTS_KEY, signature); } catch {}
+        banner.remove();
+      });
+      container.insertBefore(banner, container.firstChild);
+    }
+  }
+  if (fresh) acknowledgeHostPip();
 
   status.textContent = updatableCount
     ? `${packs.length} installed · ${updatableCount} update(s) available`
@@ -269,14 +310,16 @@ function whenText(when) {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-function buildInstalledRow(pack) {
+function buildInstalledRow(pack, conflict = null, fresh = false) {
   const updatable = isInstalledUpdatable(pack);
   const row = el("div", "om-side-row");
   row._installedVersion = pack.version;
   row.appendChild(packIcon(pack.icon, pack.id));
 
   const text = el("div", "om-side-text");
-  text.appendChild(packName(pack.id, "om-side-name"));
+  const name = packName(pack.id, "om-side-name");
+  if (conflict && fresh) name.appendChild(pipMark());
+  text.appendChild(name);
   const meta = el("div", "om-side-meta");
   const shownDir = pack.disabled ? pack.dir.replace(/\.disabled$/, "") : pack.dir;
   meta.appendChild(document.createTextNode(`${pack.version}${shownDir !== pack.id ? " · " + shownDir : ""}`));
@@ -321,6 +364,12 @@ function buildInstalledRow(pack) {
     meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));
   }
   text.appendChild(meta);
+  for (const item of conflict?.conflicts || []) {
+    const line = el("div", `om-conflict${misreadAccelerator(item) ? " om-conflict-misread" : ""}`,
+      conflictText(item));
+    if (item.type === "import_failed" && item.required) line.title = item.required;
+    text.appendChild(line);
+  }
   if (pack.registry_id) text.onclick = () => openPack(pack.registry_id);
   else if (pack.repository) text.onclick = () => openRepoPack({ repo: pack.repository, title: pack.id, classes: [] });
   row.appendChild(text);
@@ -384,6 +433,32 @@ async function updateEveryPack(packs) {
 
 const ALERTS_KEY = "openManager.installedAlertsDismissed";
 const COLLIDE_KEY = "openManager.collisionsDismissed";
+const CONFLICTS_KEY = "openManager.hostConflictsDismissed";
+
+function buildConflictAlert(reported, fresh, onShow, onDismiss) {
+  const real = reported.filter((one) => one.conflicts.some((item) => !misreadAccelerator(item)));
+  const banner = el("div", `om-alert${real.length ? " om-alert-danger" : ""}`);
+  const body = el("div", "om-alert-body");
+  const head = el("b", null,
+    `ComfyUI reports ${reported.length} installed pack${reported.length === 1 ? "" : "s"} in conflict`);
+  if (fresh) head.appendChild(pipMark());
+  body.appendChild(head);
+  body.appendChild(el("div", "om-alert-names", reported.map((one) => one.name).join(", ")));
+  if (real.length < reported.length) {
+    const misread = reported.length - real.length;
+    body.appendChild(el("div", "om-alert-names",
+      `${misread} of them only for an accelerator ComfyUI's check misreads`));
+  }
+  const show = el("button", "om-btn om-dl-btn om-alert-more", "Show them");
+  show.onclick = onShow;
+  body.appendChild(show);
+  banner.appendChild(body);
+  const dismiss = el("button", "om-alert-x", "×");
+  dismiss.title = "Dismiss until this changes";
+  dismiss.onclick = onDismiss;
+  banner.appendChild(dismiss);
+  return banner;
+}
 
 async function renderCollisions(container, generation) {
   let found;

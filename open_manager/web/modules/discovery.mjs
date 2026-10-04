@@ -10,6 +10,7 @@ import { renderInstalled } from "./installed.mjs";
 import { renderMissing, sinceText, renderRegistry } from "./registry.mjs";
 import { managerDestinations } from "./topbar.mjs";
 import { lastMissingTypes } from "./extension.mjs";
+import { hostPipLit, watchHostPip, pipMark } from "./host-pips.mjs";
 
 function collectMissingNodeTypes() {
   const registered = window.LiteGraph?.registered_node_types || {};
@@ -301,6 +302,18 @@ function renderSidebar(root, initial) {
     buttons[key] = button;
     nav.appendChild(button);
   }
+
+  const pip = pipMark();
+  let unwatch = () => {};
+  let attached = false;
+  const showPip = () => {
+    if (buttons.installed.isConnected) attached = true;
+    else if (attached) { unwatch(); return; }
+    if (hostPipLit()) buttons.installed.appendChild(pip);
+    else pip.remove();
+  };
+  unwatch = watchHostPip(showPip);
+  showPip();
 
   const more = el("button", "om-nav-btn om-nav-more", "\u22ef");
   more.title = "Open Manager Menu";
