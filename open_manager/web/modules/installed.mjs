@@ -99,7 +99,8 @@ async function renderInstalled(container) {
     ["all", "All installed"],
     ["updates", "Updates available"],
     ["flagged", "Flagged or banned"],
-    ["conflicts", "Conflicts ComfyUI reports"],
+    ["conflicts", "Conflicts"],
+    ["disabled", "Disabled"],
     ["registry", "Registry"],
     ["github", "GitHub (from repo)"],
     ["disk", "Disk (local)"],
@@ -139,6 +140,7 @@ async function renderInstalled(container) {
       if (mode === "updates" && !isInstalledUpdatable(pack)) return false;
       if (mode === "flagged" && !["flagged", "banned"].includes((pack.status || "").toLowerCase())) return false;
       if (mode === "conflicts" && !conflictFor(pack, conflicts)) return false;
+      if (mode === "disabled" && !pack.disabled) return false;
       if (mode === "off-registry" && pack.registry_id) return false;
       if (["registry", "github", "disk"].includes(mode) && pack.source !== mode) return false;
       if (trustedBox.checked && !byTrustedAuthor(pack)) return false;

@@ -8,7 +8,7 @@ import { restartAndRequeue, tdrStatus } from "./stall.mjs";
 
 const MEMORY_HISTORY = 240;
 
-const memoryHistory = { cpu: [], ram: [], vram: [] };
+const memoryHistory = { cpu: [], ram: [], gpu: [], vram: [] };
 
 const READING_QUIET = 6000;
 
@@ -44,6 +44,7 @@ function recordReading(reading) {
   };
   push("cpu", reading.cpu);
   if (reading.ram?.total) push("ram", (reading.ram.used / reading.ram.total) * 100);
+  push("gpu", reading.vram?.util);
   if (reading.vram?.total) push("vram", (reading.vram.used / reading.vram.total) * 100);
 }
 
@@ -132,14 +133,17 @@ function buildGraphBlock(key, label, colour) {
            folded: () => box.classList.contains("om-mem-folded") };
 }
 
-const MEMORY_SECTIONS = ["cpu", "ram", "vram", "models"];
+const MEMORY_SECTIONS = ["cpu", "ram", "gpu", "vram", "models"];
 
 const SECTION_DRAG_TYPE = "application/x-om-mem-section";
 
 function sectionOrder() {
-  const saved = String(dlRecall("om-mem-order", "")).split(",")
-    .filter((key) => MEMORY_SECTIONS.includes(key));
-  return [...new Set([...saved, ...MEMORY_SECTIONS])];
+  const order = [...new Set(String(dlRecall("om-mem-order", "")).split(",")
+    .filter((key) => MEMORY_SECTIONS.includes(key)))];
+  for (const [at, key] of MEMORY_SECTIONS.entries()) {
+    if (!order.includes(key)) order.splice(order.indexOf(MEMORY_SECTIONS[at - 1]) + 1, 0, key);
+  }
+  return order;
 }
 
 function arrangeSections(body, sections) {
@@ -799,6 +803,7 @@ function openMemoryPanel() {
     buildGraphBlock("cpu", "CPU", "#58a6ff"),
     buildGraphBlock("ram", "System memory", "#3fb950"),
     buildGraphBlock("vram", "Graphics memory", "#a371f7"),
+    buildGraphBlock("gpu", "GPU", "#f0883e"),
   ];
   const tdrPill = el("span", "om-mem-tdr");
   tdrPill.hidden = true;
@@ -870,20 +875,22 @@ function openMemoryPanel() {
         `${bytesText(latest.ram.used)} of ${bytesText(latest.ram.total)} · ${bytesText(latest.ram.free)} free`;
     }
     if (latest.vram?.total) {
-      const busy = typeof latest.vram.util === "number"
-        ? ` · ${latest.vram.util}% busy`
-          + (typeof latest.vram.mem_util === "number"
-            ? `, ${latest.vram.mem_util}% memory traffic` : "")
-        : "";
-      const hot = typeof latest.vram.temp === "number" ? ` · ${latest.vram.temp}°C` : "";
       const others = (latest.devices || []).slice(1)
         .map((one) => `GPU${one.index} ${meterText(one.used, one.total)}`
                       + (typeof one.temp === "number" ? ` ${one.temp}°` : ""))
         .join(" · ");
       graphs[2].detail.textContent =
-        `${bytesText(latest.vram.used)} of ${bytesText(latest.vram.total)}${busy}${hot} · ${latest.vram.name}`
+        `${bytesText(latest.vram.used)} of ${bytesText(latest.vram.total)} · ${bytesText(latest.vram.free)} free · ${latest.vram.name}`
         + (others ? `. Also ${others}` : "");
     }
+    const card = latest.vram || {};
+    graphs[3].box.style.display = typeof card.util === "number" ? "" : "none";
+    graphs[3].detail.textContent = [
+      typeof card.mem_util === "number" ? `${card.mem_util}% memory traffic` : "",
+      card.watts == null ? ""
+        : `${Math.round(card.watts)} W${card.watt_limit ? ` of ${Math.round(card.watt_limit)} W` : ""}`,
+      typeof card.temp === "number" ? `${card.temp}°C` : "",
+    ].filter(Boolean).join(" · ");
     orb.tell(latest.activity);
     const cores = latest.cores?.length;
     const hottest = (latest.cpu_temps || [])[0];

@@ -10,6 +10,7 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 import sys
 import time
 from urllib.parse import quote, unquote
@@ -57,6 +58,7 @@ from . import (
     settingsfile,
     stall,
     tdr,
+    timing,
     usertheme,
     wallpaper,
 )
@@ -232,19 +234,12 @@ def _license_options(source: dict) -> "license_files.Options":
 def _reboot() -> None:
     """Re-exec the ComfyUI process with the same arguments it started with."""
     try:
-        argv = sys.argv.copy()
-        if "--windows-standalone-build" in argv:
-            argv.remove("--windows-standalone-build")
         if "__COMFY_CLI_SESSION__" in os.environ:
             open(os.environ["__COMFY_CLI_SESSION__"] + ".reboot", "w").close()
             os._exit(0)
-        if argv[0].endswith("__main__.py"):
-            module = os.path.basename(os.path.dirname(argv[0]))
-            command = [sys.executable, "-m", module] + argv[1:]
-        elif sys.platform.startswith("win32"):
-            command = ['"' + sys.executable + '"', '"' + argv[0] + '"'] + argv[1:]
-        else:
-            command = [sys.executable] + argv
+        command = stall._command()
+        if sys.platform.startswith("win32"):
+            command = [subprocess.list2cmdline([part]) for part in command]
         os.execv(sys.executable, command)
     except Exception as error:
         logger.error("restart failed (%s: %s)", type(error).__name__, error)
@@ -2108,6 +2103,27 @@ def register_routes() -> None:
             return web.json_response({"ok": False, "reason": "no workflow named"}, status=400)
         removed = await asyncio.to_thread(run_pause.discard, workflow_id)
         return web.json_response({"ok": True, "removed": removed})
+
+    timing.install()
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/timer")
+    async def timer_runs(_request: web.Request) -> web.Response:
+        """How long each node took in each recent run."""
+        return web.json_response({"ok": True, "available": timing.available(),
+                                  "runs": timing.runs()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/timer/label")
+    @_json_body
+    async def timer_label(_request: web.Request, body: dict) -> web.Response:
+        """Name the workflow tab a run was queued from."""
+        return web.json_response({"ok": timing.label(str(body.get("prompt") or ""),
+                                                     body.get("path"), body.get("name"))})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/timer/forget")
+    @_json_body
+    async def timer_forget(_request: web.Request, body: dict) -> web.Response:
+        """Drop one run's timings."""
+        return web.json_response({"ok": timing.forget(str(body.get("prompt") or ""))})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor/free")
     @_json_body

@@ -509,10 +509,11 @@ function fillStart(list, want) {
   const programs = managerDestinations()
     .filter((row) => row.kind === "program" && (!row.available || row.available()))
     .filter((row) => row.program?.surfaces?.start !== false);
-  const docs = deskDocs.slice();
-  const extras = [
+  const desk = desktopOn();
+  const docs = desk ? deskDocs.slice() : [];
+  const extras = desk ? [
     ["Trash", { kind: "mask", url: ICON_BIN }, () => openWastebasket()],
-  ];
+  ] : [];
 
   if (text) {
     const rows = [];

@@ -1,0 +1,27 @@
+{
+  "id": "timer",
+  "name": "Timer",
+  "hint": "How long each node takes, live, one tab per workflow",
+  "tags": [
+    "timer",
+    "timing",
+    "profile",
+    "performance",
+    "nodes",
+    "compare"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "timer.svg",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "green"
+  },
+  "capabilities": [
+    "Reads how long each node of a run took",
+    "Frames a node on the graph"
+  ]
+}

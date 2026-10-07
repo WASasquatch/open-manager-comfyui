@@ -8,7 +8,8 @@ import { dlPost, bytesText } from "./downloads.mjs";
 import { addNodeAt, canvasCentre, graphNodes, nodeDragFrom } from "./node-drag.mjs";
 import { TASK_GROUP_NAMES } from "./taskbar.mjs";
 import { deskProgramsOff, hideDesk } from "./desktop.mjs";
-import { loadWorkflow, openWorkflow } from "./workflows.mjs";
+import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow } from "./workflows.mjs";
+import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.mjs";
 
 const PROGRAM_BASE = new URL("./programs/", new URL("../", import.meta.url)).href;
 
@@ -461,6 +462,81 @@ function programAssets() {
   };
 }
 
+async function programFocus(id, { path = "", workflow = "" } = {}) {
+  const parts = parseNodePath(id);
+  if (!parts) return "missing";
+  hideDesk();
+  const here = path ? activePath() === path : !workflow || activeWorkflowId() === workflow;
+  if (!here) {
+    const flow = path ? openWorkflowByPath(path) : openWorkflowById(workflow);
+    if (!flow) return "closed";
+    await loadWorkflow(flow);
+    await nextFrame();
+  }
+  const found = locateNode(parts);
+  if (!found) return "missing";
+  await revealNode(found);
+  return "shown";
+}
+
+const TIMER_CHANNEL = "open_manager.timer";
+
+const timingWatchers = new Set();
+
+function tellTiming(detail) {
+  for (const fn of [...timingWatchers]) {
+    try { fn(detail); } catch {}
+  }
+}
+
+api.addEventListener(TIMER_CHANNEL, (event) => tellTiming(event.detail));
+api.addEventListener("reconnected", () => tellTiming(null));
+
+const LABEL_WAITS = [0, 150, 400, 1000, 2500];
+
+async function labelRun(promptId) {
+  if (!promptId) return;
+  for (const wait of LABEL_WAITS) {
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    const flow = workflowOfJob(promptId);
+    if (!flow) continue;
+    try {
+      await dlPost("/timer/label", { prompt: promptId, path: flow.path, name: flow.name });
+    } catch {
+    }
+    return;
+  }
+}
+
+api.addEventListener("execution_start", (event) => {
+  void labelRun(String(event.detail?.prompt_id || ""));
+});
+
+function programTiming() {
+  return {
+    read: async () => {
+      try {
+        const answer = await (await api.fetchApi(`${API}/timer`)).json();
+        if (answer?.ok) return answer;
+      } catch {
+      }
+      return { ok: false, available: false, runs: [] };
+    },
+    forget: async (run) => {
+      try {
+        return (await dlPost("/timer/forget", { prompt: String(run || "") }))?.ok === true;
+      } catch {
+        return false;
+      }
+    },
+    watch: (fn) => {
+      const held = (detail) => fn(detail);
+      timingWatchers.add(held);
+      return () => timingWatchers.delete(held);
+    },
+  };
+}
+
 async function runProgramById(id, carried) {
   const row = programRows.find((one) => one.key === id);
   if (!row) {
@@ -503,7 +579,13 @@ function programApi(entry, view = "main") {
       add: (type) => addNodeAt(String(type || ""), canvasCentre()),
       show: () => hideDesk(),
       open: (source, title) => loadWorkflow(source, { title: title ? String(title) : null }),
+      focus: (id, where = {}) => programFocus(String(id ?? ""), {
+        path: String(where?.path || ""), workflow: String(where?.workflow || ""),
+      }),
+      workflow: () => activeWorkflowPlace(),
+      watchWorkflow: (fn) => watchActiveWorkflow((place) => fn(place)),
     },
+    timing: programTiming(),
   };
 }
 

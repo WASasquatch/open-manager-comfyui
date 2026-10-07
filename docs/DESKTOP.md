@@ -56,13 +56,16 @@ taken off it again.
 
 ## Programs
 
-In the Start menu, and on the desktop where the program asks for it.
+In the Start menu, and on the desktop where the program asks for it. Desktop Mode is not needed:
+the Start menu comes with the taskbar, so programs open over the graph with only **Settings →
+Open Manager → Windows → Taskbar along the bottom** on.
 
 | Program | Does | Where |
 |---|---|---|
 | Gallery | Browse the images and videos this install has made | desktop, Start menu |
 | Nodes | Search every registered node type, drag one onto the graph | Start menu, ComfyUI |
 | Outputs | What this ComfyUI has made, newest first | Start menu, ComfyUI |
+| Timer | How long each node takes, live, run by run, workflow by workflow | Start menu |
 | Templates | ComfyUI's workflow templates, in a window | Start menu, ComfyUI |
 | ComfyUI Settings | Every ComfyUI setting, in a window you can leave open | Start menu, ComfyUI |
 | Scratch | A pad for short notes | Start menu |
@@ -75,6 +78,19 @@ Programs are directories under `open_manager/web/programs/`, each with a `manife
 a page: id, author, version, whether it opens one window or several, where it appears, and what
 it declares. The declaration is the author's own and is not verified. A program switched off
 there is not loaded at all.
+
+**Timer** measures every node on the server as it runs, including runs queued from elsewhere,
+and keeps the last 48 runs. Each workflow tab that has run gets a tab, and under it a chip for
+each of its runs, numbered #1, #2 and on. Bars grow while a node runs and rescale against the
+slowest node. Sort by workflow order, longest or shortest. The Timer follows the workflow open on
+the graph, showing its latest run, until you pick a run or a tab; **Follow** goes back to
+following.
+
+To compare, Shift-click or Ctrl-click runs: two runs of one workflow, or runs of several, since
+the comparison stays put while you switch workflow tabs to add more. Shift-clicking a workflow tab
+adds or removes its latest run. A comparison shows one bar per run on each node with the
+difference from the first one picked, and adds a sort by largest difference. Clicking a node
+frames it on the graph, switching to the workflow tab that ran it when that is open.
 
 ## Files and notes
 

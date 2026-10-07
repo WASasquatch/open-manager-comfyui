@@ -154,6 +154,90 @@ function workflowGraphById(workflowId) {
   return null;
 }
 
+function activeWorkflowId() {
+  try {
+    return String(app.graph?.id || "");
+  } catch {
+    return "";
+  }
+}
+
+function openWorkflowById(workflowId) {
+  if (!workflowId) return null;
+  const active = activeWorkflow();
+  if (active && activeWorkflowId() === workflowId) return active;
+  return openWorkflows().find((flow) => flow !== active
+    && String(flow?.activeState?.id || "") === workflowId) || null;
+}
+
+function openWorkflowByPath(path) {
+  if (!path) return null;
+  return openWorkflows().find((flow) => flow?.path === path) || null;
+}
+
+function workflowLabel(flow) {
+  return flow ? String(flow.filename || flow.key || flow.path || "") : "";
+}
+
+function activeWorkflowPlace() {
+  const flow = activeWorkflow();
+  return { id: activeWorkflowId(), path: String(flow?.path || ""), name: workflowLabel(flow) };
+}
+
+function executionStore() {
+  try {
+    return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
+      ?.get("execution") || null;
+  } catch {
+    return null;
+  }
+}
+
+function workflowOfJob(jobId) {
+  const store = executionStore();
+  if (!store || !jobId) return null;
+  try {
+    const flow = (store.queuedJobs?.[jobId] || store.queuedPrompts?.[jobId])?.workflow;
+    if (flow && typeof flow.path === "string" && flow.path) {
+      return { path: flow.path, name: workflowLabel(flow) };
+    }
+    const path = store.jobIdToSessionWorkflowPath?.get?.(jobId);
+    if (typeof path === "string" && path) {
+      const open = openWorkflowByPath(path);
+      return { path, name: open ? workflowLabel(open)
+        : path.split("/").pop().replace(/\.(app\.)?json$/i, "") };
+    }
+  } catch {
+  }
+  return null;
+}
+
+function watchActiveWorkflow(fn) {
+  const keyOf = (place) => `${place.path}\u0000${place.id}`;
+  let seen = keyOf(activeWorkflowPlace());
+  let frame = 0;
+  const check = () => {
+    frame = 0;
+    const now = activeWorkflowPlace();
+    if (keyOf(now) === seen) return;
+    seen = keyOf(now);
+    try { fn(now); } catch {}
+  };
+  const soon = () => { if (!frame) frame = requestAnimationFrame(check); };
+  let stop = null;
+  try {
+    const store = workflowStore();
+    if (typeof store?.$subscribe === "function") stop = store.$subscribe(soon, { detached: true });
+  } catch {
+  }
+  const timer = setInterval(check, 1000);
+  return () => {
+    try { stop?.(); } catch {}
+    clearInterval(timer);
+    if (frame) cancelAnimationFrame(frame);
+  };
+}
+
 function storedWorkflow(held) {
   return !!held && typeof held === "object" && typeof held.path === "string"
     && (typeof held.load === "function" || "activeState" in held);
@@ -221,4 +305,4 @@ async function openWorkflow(source, { label = "", title = null, ask = null, afte
   return true;
 }
 
-export { workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, workflowDocument, workflowGraphById, loadWorkflow, openWorkflow };
+export { workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, workflowDocument, workflowGraphById, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, loadWorkflow, openWorkflow };

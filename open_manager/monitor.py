@@ -96,6 +96,15 @@ def _nvml_readings() -> list[dict]:
             entry["mem_util"] = int(rates.memory)
         except Exception:
             pass
+        for version in (getattr(_nvml, "nvmlMemory_v2", None), None):
+            try:
+                memory = (_nvml.nvmlDeviceGetMemoryInfo(handle, version=version)
+                          if version else _nvml.nvmlDeviceGetMemoryInfo(handle))
+                entry["mem_total"] = int(memory.total)
+                entry["mem_used"] = int(memory.used)
+                break
+            except Exception:
+                continue
         try:
             entry["watts"] = round(_nvml.nvmlDeviceGetPowerUsage(handle) / 1000, 1)
         except Exception:
@@ -152,6 +161,20 @@ def _expire(now: float) -> None:
         _sync_watch()
 
 
+def _card_memory(mm, device, extra: dict | None) -> tuple[int, int]:
+    """Total and used bytes on a card as its driver counts them, not as ComfyUI budgets them."""
+    if extra and extra.get("mem_total"):
+        return extra["mem_total"], extra.get("mem_used") or 0
+    if device.type == "cuda":
+        try:
+            free, total = mm.torch.cuda.mem_get_info(device)
+            return int(total), int(total - free)
+        except Exception:
+            pass
+    total = mm.get_total_memory(device)
+    return total, total - mm.get_free_memory(device)
+
+
 def sample() -> dict:
     """One reading of the machine.
 
@@ -186,18 +209,21 @@ def sample() -> dict:
         for device in mm.get_all_torch_devices():
             if device.type == "cpu":
                 continue
-            vram_total = mm.get_total_memory(device)
-            vram_free = mm.get_free_memory(device)
+            name = mm.get_torch_device_name(device)
+            index = device.index if device.index is not None else 0
+            extra = extras.get(index)
+            if extra and extra.get("name") and extra["name"] not in name:
+                extra = None
+            vram_total, vram_used = _card_memory(mm, device, extra)
             entry = {
-                "name": mm.get_torch_device_name(device),
+                "name": name,
                 "type": device.type,
-                "index": device.index if device.index is not None else 0,
+                "index": index,
                 "total": vram_total,
-                "free": vram_free,
-                "used": vram_total - vram_free,
+                "free": vram_total - vram_used,
+                "used": vram_used,
             }
-            extra = extras.get(entry["index"])
-            if extra and (not extra.get("name") or extra["name"] in entry["name"]):
+            if extra:
                 for key in ("temp", "util", "mem_util", "watts", "watt_limit",
                             "clock_events"):
                     if key in extra:
