@@ -54,7 +54,7 @@ function byParts(left, right) {
 }
 
 export const program = {
-  open(api) {
+  open(api, carried) {
     const win = api.window({ size: "memory", title: "Timer" });
     const state = {
       available: true,
@@ -72,6 +72,7 @@ export const program = {
     let frame = 0;
     let queue = null;
     let loads = 0;
+    let wanted = null;
 
     const order = api.el("select", "om-side-select tm-order");
     for (const [value, label] of ORDERS) {
@@ -128,7 +129,12 @@ export const program = {
 
     const numberOf = (run) => runsOf(groupOf(run)).indexOf(run) + 1;
 
-    const labelOf = (run) => `${nameOf(run)} #${numberOf(run)}`;
+    const snapOf = (run) => (run.snapshot ? `${run.snapshot.name}${run.snapshot.edited ? "*" : ""}` : "");
+
+    const labelOf = (run) => {
+      const snap = snapOf(run);
+      return `${nameOf(run)} #${numberOf(run)}${snap ? ` · ${snap}` : ""}`;
+    };
 
     const isActive = (run) => {
       if (run.path) return run.path === state.active.path;
@@ -153,8 +159,9 @@ export const program = {
       const key = String(header.id);
       let run = state.runs.get(key);
       if (!run) {
-        run = { id: key, workflow: "", path: "", name: "", started: Number(header.started) || 0,
-                state: "running", elapsed: 0, anchor: clock(), seq: -1, nodes: new Map() };
+        run = { id: key, workflow: "", path: "", name: "", snapshot: null,
+                started: Number(header.started) || 0, state: "running", elapsed: 0,
+                anchor: clock(), seq: -1, nodes: new Map() };
         state.runs.set(key, run);
       }
       if ((Number(header.seq) || 0) >= run.seq) {
@@ -162,6 +169,9 @@ export const program = {
         run.workflow = String(header.workflow || "");
         run.path = String(header.path || "");
         run.name = String(header.name || "");
+        const snap = header.snapshot;
+        run.snapshot = snap && typeof snap === "object" && snap.id && snap.name
+          ? { id: String(snap.id), name: String(snap.name), edited: snap.edited === true } : null;
         run.state = String(header.state || "done");
         run.elapsed = Number(header.elapsed) || 0;
         run.anchor = clock() - run.elapsed;
@@ -212,8 +222,28 @@ export const program = {
       state.runs = new Map();
       for (const run of answer.runs || []) take(run, run.nodes);
       for (const detail of waiting) apply(detail);
+      pickWanted();
       dirty = true;
       wake();
+    };
+
+    const pickWanted = () => {
+      if (!wanted || queue) return;
+      const found = wanted.filter((key) => state.runs.has(key));
+      wanted = null;
+      if (!found.length) return;
+      state.chosen = found;
+      state.follow = false;
+      state.browse = groupOf(state.runs.get(found[found.length - 1]));
+      dirty = true;
+      wake();
+    };
+
+    const choose = (held) => {
+      const keys = Array.isArray(held?.runs) ? held.runs.map(String).filter(Boolean) : [];
+      if (!keys.length) return;
+      wanted = keys;
+      pickWanted();
     };
 
     const apply = (detail) => {
@@ -364,6 +394,8 @@ export const program = {
       return {
         lead: labelOf(run),
         facts: [
+          run.snapshot ? ["Snapshot", `${run.snapshot.name}${run.snapshot.edited ? " (edited)" : ""}`]
+            : null,
           ["Started", new Date(run.started * 1000).toLocaleTimeString()],
           ["Took", span(elapsedOf(run))],
           ["Nodes", String(run.nodes.size)],
@@ -407,13 +439,14 @@ export const program = {
       node.dataset.key = key;
       const dot = api.el("span", "tm-dot");
       const number = api.el("span", "tm-run-number");
+      const snap = api.el("span", "tm-run-snap");
       const time = api.el("span", "tm-run-time");
       const shut = api.el("button", "tm-tab-x", "×");
       shut.type = "button";
       shut.tabIndex = -1;
-      node.append(dot, number, time, shut);
+      node.append(dot, number, snap, time, shut);
       api.tip(node, runTip(key));
-      return { node, number, time, shut, text: "" };
+      return { node, number, snap, time, shut, text: "" };
     };
 
     const drawTabs = (series, browsed) => {
@@ -453,6 +486,8 @@ export const program = {
         const held = view.chips.get(run.id);
         const number = `#${at + 1}`;
         if (held.number.textContent !== number) held.number.textContent = number;
+        const snap = snapOf(run);
+        if (held.snap.textContent !== snap) held.snap.textContent = snap;
         held.shut.title = `Forget ${labelOf(run)}`;
         held.shut.setAttribute("aria-label", `Forget ${labelOf(run)}`);
         held.shut.hidden = run.state === "running";
@@ -886,6 +921,9 @@ export const program = {
       .tm-run-on { color: var(--om-text); border-color: var(--tm-c, var(--tm-accent));
         background: color-mix(in srgb, var(--tm-c, var(--tm-accent)) 16%, transparent); }
       .tm-run-number { font-weight: 600; }
+      .tm-run-snap { max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; }
+      .tm-run-snap:empty { display: none; }
       .tm-run-time { opacity: .8; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .tm-run-bad .tm-run-time { color: #f85149; opacity: 1; }
       .tm-run .tm-tab-x { width: 16px; height: 16px; border-radius: 8px; font-size: 12px; }
@@ -946,6 +984,8 @@ export const program = {
       wake();
     })();
     void load();
+    win.onCarry(choose);
+    choose(carried);
     wake();
     return win;
   },

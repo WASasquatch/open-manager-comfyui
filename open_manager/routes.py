@@ -2104,6 +2104,14 @@ def register_routes() -> None:
         removed = await asyncio.to_thread(run_pause.discard, workflow_id)
         return web.json_response({"ok": True, "removed": removed})
 
+    @PromptServer.instance.routes.post(f"{PREFIX}/pause/live")
+    @_json_body
+    async def pause_live(_request: web.Request, body: dict) -> web.Response:
+        """Record the controlled widgets of the prompt being saved as it runs."""
+        widgets = body.get("widgets")
+        return web.json_response({"ok": run_pause.live_widgets(
+            str(body.get("prompt") or ""), widgets if isinstance(widgets, list) else [])})
+
     timing.install()
 
     @PromptServer.instance.routes.get(f"{PREFIX}/timer")
@@ -2117,7 +2125,8 @@ def register_routes() -> None:
     async def timer_label(_request: web.Request, body: dict) -> web.Response:
         """Name the workflow tab a run was queued from."""
         return web.json_response({"ok": timing.label(str(body.get("prompt") or ""),
-                                                     body.get("path"), body.get("name"))})
+                                                     body.get("path"), body.get("name"),
+                                                     body.get("snapshot"))})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/timer/forget")
     @_json_body
@@ -2372,9 +2381,10 @@ def register_routes() -> None:
 
     @PromptServer.instance.routes.get(f"{PREFIX}/impact/" + "{node_id}/{version}")
     async def dependency_impact(request: web.Request) -> web.Response:
-        """Answer what installing one version would change in this environment."""
+        """Answer what installing one version would change here, under an install policy."""
         node_id = request.match_info.get("node_id", "")
         version = request.match_info.get("version", "")
+        policy = request.query.get("policy", "")
 
         async with aiohttp.ClientSession() as session:
             try:
@@ -2391,12 +2401,19 @@ def register_routes() -> None:
 
         import asyncio
 
-        report = await asyncio.to_thread(impact.analyse, list(entry.dependencies), ""
-        )
+        lines = list(entry.dependencies)
+        held: list[str] = []
+        if policy:
+            lines, held, _swapped, redirects = await asyncio.to_thread(
+                installer.plan_requirements, lines, installer.install_policy(policy), ""
+            )
+            held = held + redirects
+        report = await asyncio.to_thread(impact.analyse, lines, "")
         return web.json_response(
             {
                 "pack": node_id,
                 "version": version,
+                "held": held,
                 "checked": report.checked,
                 "failure": report.failure,
                 "additive_only": report.is_additive,

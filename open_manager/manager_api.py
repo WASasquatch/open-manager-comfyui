@@ -9,7 +9,6 @@ state. Every task goes through the same gates, ban checks and install policy as 
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 import uuid
 from datetime import datetime, timezone
@@ -17,7 +16,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from . import catalog, gates, installer, log, paths
+from . import catalog, gates, installer, log, settingsfile
 from . import health as pack_health
 
 __all__ = ["register"]
@@ -56,29 +55,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _setting(key: str, default):
-    """One of the user's ComfyUI settings, read without writing the file.
-
-    Args:
-        key: Setting id.
-        default: Value where the setting is absent or unreadable.
-
-    Returns:
-        The stored value, or ``default``.
-    """
-    root = paths.user_root()
-    if root is None:
-        return default
-    try:
-        held = json.loads((root / "default" / "comfy.settings.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
-    return held.get(key, default) if isinstance(held, dict) else default
-
-
 def _policy() -> str:
     """The install policy the user chose for requirement changes."""
-    return installer.install_policy(_setting("openManager.installPolicy", "new"))
+    return installer.install_policy(settingsfile.value("openManager.installPolicy", "new"))
 
 
 def _fold(name: str) -> str:

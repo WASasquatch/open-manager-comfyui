@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import log, paths
 
-__all__ = ["NAME", "ensure", "found", "readable", "repair", "status"]
+__all__ = ["NAME", "ensure", "found", "readable", "repair", "status", "value"]
 
 NAME = "comfy.settings.json"
 
@@ -40,6 +40,26 @@ def found(user_dir: Path | str | None = None) -> list[Path]:
     if (root / NAME).is_file():
         here.append(root / NAME)
     return here
+
+
+def value(key: str, default):
+    """One of the user's ComfyUI settings, read without writing the file.
+
+    Args:
+        key: Setting id.
+        default: Value where the setting is absent or unreadable.
+
+    Returns:
+        The stored value, or ``default``.
+    """
+    root = paths.user_root()
+    if root is None:
+        return default
+    try:
+        held = json.loads((root / "default" / NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return held.get(key, default) if isinstance(held, dict) else default
 
 
 def readable(path: Path) -> bool:

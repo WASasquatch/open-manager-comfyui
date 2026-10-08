@@ -10,6 +10,7 @@ import { TASK_GROUP_NAMES } from "./taskbar.mjs";
 import { deskProgramsOff, hideDesk } from "./desktop.mjs";
 import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow } from "./workflows.mjs";
 import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.mjs";
+import { runSnapshot } from "./snapshot-store.mjs";
 
 const PROGRAM_BASE = new URL("./programs/", new URL("../", import.meta.url)).href;
 
@@ -500,8 +501,9 @@ async function labelRun(promptId) {
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     const flow = workflowOfJob(promptId);
     if (!flow) continue;
+    const snapshot = await runSnapshot(promptId);
     try {
-      await dlPost("/timer/label", { prompt: promptId, path: flow.path, name: flow.name });
+      await dlPost("/timer/label", { prompt: promptId, path: flow.path, name: flow.name, snapshot });
     } catch {
     }
     return;

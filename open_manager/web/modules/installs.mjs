@@ -11,19 +11,26 @@ import { isRelease, updateInstalled, isHeld, toggleHold, isInstalledUpdatable, t
 import { sinceText, allowBanned, browseTopic } from "./registry.mjs";
 import { dlPost } from "./downloads.mjs";
 
-async function appendImpact(packId, version, slot, gate) {
+async function appendImpact(packId, version, slot, gate, policy, base) {
+  const ticket = (slot._omTicket || 0) + 1;
+  slot._omTicket = ticket;
+  gate.textContent = base.label;
+  gate.className = base.cls;
   slot.replaceChildren(el("div", "om-why", "Checking dependencies..."));
   let report;
   try {
     const answer = await api.fetchApi(
       `${API}/impact/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`
+      + `?${new URLSearchParams({ policy })}`
     );
     report = await answer.json();
     if (!answer.ok) throw new Error(report.detail || `HTTP ${answer.status}`);
   } catch (error) {
+    if (slot._omTicket !== ticket) return;
     slot.replaceChildren(el("div", "om-why", `Dependency impact unavailable: ${error.message}`));
     return;
   }
+  if (slot._omTicket !== ticket) return;
 
   slot.replaceChildren();
   if (report.additive_only) {
@@ -31,6 +38,7 @@ async function appendImpact(packId, version, slot, gate) {
   } else {
     for (const finding of report.findings || []) slot.appendChild(findingCard(finding));
   }
+  if (report.held?.length) slot.appendChild(heldList(report.held));
   if (report.dependencies?.length) slot.appendChild(dependencyList(report.dependencies));
   const replacements = report.replacements || [];
   if (replacements.some((item) => item.abi)) {
@@ -49,6 +57,17 @@ const DEP_STATE = {
   vcs: { label: "from git URL", color: "#d29922" },
   unparsed: { label: "unreadable", color: "var(--om-muted)" },
 };
+
+function heldList(held) {
+  const wrap = el("div", "om-deps");
+  wrap.appendChild(el("div", "om-deps-head", `Held back (${held.length})`));
+  for (const line of held) {
+    const row = el("div", "om-dep");
+    row.appendChild(el("span", "om-dep-name", line));
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
 
 function dependencyList(dependencies) {
   const wrap = el("div", "om-deps");
@@ -156,9 +175,10 @@ function confirmInstall(packId, entry, change) {
       ? { downgrade: "Downgrade and install", upgrade: "Upgrade", reinstall: "Reinstall" }[change.direction]
       : (assessment.findings.length ? "Install anyway" : "Install");
     const danger = change?.direction === "downgrade" || assessment.severity === "critical";
+    const base = { label, cls: `om-btn ${danger ? "om-danger" : "om-go"}` };
     const foot = el("div", "om-foot");
     const cancel = el("button", "om-btn", "Cancel");
-    const go = el("button", `om-btn ${danger ? "om-danger" : "om-go"}`, label);
+    const go = el("button", base.cls, label);
     cancel.onclick = () => { backdrop.remove(); resolve(null); };
     go.onclick = () => { backdrop.remove(); resolve(policyPick.value); };
     foot.appendChild(cancel);
@@ -169,7 +189,9 @@ function confirmInstall(packId, entry, change) {
     document.body.appendChild(backdrop);
     closeOn(backdrop, () => { backdrop.remove(); resolve(null); });
 
-    appendImpact(packId, entry.version, impactSlot, go);
+    const check = () => appendImpact(packId, entry.version, impactSlot, go, policyPick.value, base);
+    policyPick.addEventListener("change", check);
+    check();
   });
 }
 

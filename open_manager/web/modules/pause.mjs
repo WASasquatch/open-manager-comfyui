@@ -4,7 +4,7 @@ import { API } from "./base.mjs";
 import { el, toast, notify, openRowMenu } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
 import { dlPost, bytesText } from "./downloads.mjs";
-import { workflowGraphById } from "./workflows.mjs";
+import { workflowGraph, workflowGraphById, workflowOfJob, openWorkflowByPath } from "./workflows.mjs";
 
 const pauseState = {
   running: false, busy: false, fixed: null, queued: new Set(), wired: false, resumable: null,
@@ -14,6 +14,14 @@ const RUN_MENU_WAIT = 1500;
 
 function pauseOn() {
   return panelSetting("openManager.pauseButton", true) !== false;
+}
+
+function liveOn() {
+  return panelSetting("openManager.pauseLive", false) === true;
+}
+
+function resumeOn() {
+  return pauseOn() || liveOn();
 }
 
 function pauseTemplate(type) {
@@ -112,7 +120,7 @@ async function readPause(workflowId) {
 
 async function refreshResume() {
   const workflowId = String(app.graph?.id || "");
-  const record = pauseOn() && workflowId ? await readPause(workflowId) : null;
+  const record = resumeOn() && workflowId ? await readPause(workflowId) : null;
   if (record === undefined) return null;
   if (String(app.graph?.id || "") !== workflowId) return null;
   pauseState.resumable = record;
@@ -128,7 +136,7 @@ async function restorePauseForGraph() {
 function paintResume() {
   const group = document.querySelector(".queue-button-group");
   const record = pauseState.resumable;
-  const on = !!record && pauseOn() && !pauseState.running && !pauseState.busy
+  const on = !!record && resumeOn() && !pauseState.running && !pauseState.busy
     && record.workflow_id === String(app.graph?.id || "");
   for (const other of document.querySelectorAll(".om-resume")) {
     if (other !== group) other.classList.remove("om-resume");
@@ -239,6 +247,20 @@ async function runningWorkflowId() {
   }
 }
 
+function jobGraph(promptId) {
+  const flow = workflowOfJob(promptId);
+  const open = flow ? openWorkflowByPath(flow.path) : null;
+  return open ? workflowGraph(open) : null;
+}
+
+async function recordLiveWidgets(promptId) {
+  if (!liveOn() || !promptId) return;
+  const state = jobGraph(promptId) || workflowGraphById(await runningWorkflowId());
+  const widgets = state ? controlledFromState(state) : [];
+  if (!widgets.length) return;
+  await dlPost("/pause/live", { prompt: promptId, widgets }).catch(() => null);
+}
+
 async function pauseRun(mode) {
   if (pauseState.busy) return;
   pauseState.busy = true;
@@ -346,13 +368,19 @@ function wirePause() {
     mountPauseButton();
     if (ended) refreshResume();
   };
-  api.addEventListener("execution_start", () => settle(true));
+  api.addEventListener("execution_start", (event) => {
+    settle(true);
+    void recordLiveWidgets(String(event.detail?.prompt_id || ""));
+  });
   api.addEventListener("execution_success", () => settle(false));
   api.addEventListener("execution_error", () => settle(false));
   api.addEventListener("execution_interrupted", () => settle(false));
   api.addEventListener("status", (event) => {
-    if (event.detail?.exec_info?.queue_remaining === 0) settle(false);
+    if (event.detail?.exec_info?.queue_remaining !== 0) return;
+    settle(false);
+    if (liveOn()) restorePauseForGraph();
   });
+  api.addEventListener("reconnected", () => restorePauseForGraph());
   api.addEventListener("promptQueued", () => {
     const workflowId = String(app.graph?.id || "");
     if (pauseState.pendingWorkflow && pauseState.pendingWorkflow === workflowId) {

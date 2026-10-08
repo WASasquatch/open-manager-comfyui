@@ -1,6 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
-import { refreshExtras, registerThemes, repairLinkMode, watchThemeExtras } from "../themes.js";
+import { mendNodeBodies, refreshExtras, registerThemes, repairLinkMode, watchThemeExtras } from "../themes.js";
 import "./styles.mjs";
 import { API } from "./base.mjs";
 import { toast, notify, askText } from "./ui.mjs";
@@ -34,6 +34,7 @@ import { qolSettings, startQolPatches, qolNodeMenuItems, qolCanvasMenuItems } fr
 import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
+import { snapshotCommands, watchSnapshots, applySnapshotSetting } from "./snapshots.mjs";
 
 let lastMissingTypes = null;
 
@@ -594,6 +595,54 @@ app.registerExtension({
         + "keeps a node's widget values under a name, in your library and in the workflow.",
     },
     {
+      id: "openManager.snapshots",
+      onChange: () => applySnapshotSetting(),
+      name: "Workflow snapshots",
+      category: ["Open Manager", "Snapshots", "snapshots"],
+      type: "boolean",
+      defaultValue: true,
+      tooltip: "Adds a snapshot list to each workflow tab. A snapshot keeps the whole graph "
+        + "under a name, and choosing one puts it back on the canvas. A saved workflow's "
+        + "snapshots are kept in your user data; an unsaved tab's are kept once it is saved.",
+    },
+    {
+      id: "openManager.snapshotEvery",
+      name: "Minutes between automatic snapshots",
+      category: ["Open Manager", "Snapshots", "snapshotEvery"],
+      type: "slider",
+      attrs: { min: 0, max: 60, step: 1 },
+      defaultValue: 0,
+      tooltip: "A snapshot of the open workflow every so many minutes, taken only when the graph "
+        + "has changed since the last one. 0 is off.",
+    },
+    {
+      id: "openManager.snapshotOnSave",
+      name: "Take a snapshot when a workflow is saved",
+      category: ["Open Manager", "Snapshots", "snapshotOnSave"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Save and Save As. Autosave does not take one.",
+    },
+    {
+      id: "openManager.snapshotOnRun",
+      name: "Take a snapshot at each run",
+      category: ["Open Manager", "Snapshots", "snapshotOnRun"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "None is taken when the graph matches a snapshot already kept. A seed set to "
+        + "change after each run does not count as a change. The Timer names the snapshot "
+        + "each run was queued from either way.",
+    },
+    {
+      id: "openManager.snapshotKeep",
+      name: "Automatic snapshots kept per workflow",
+      category: ["Open Manager", "Snapshots", "snapshotKeep"],
+      type: "number",
+      defaultValue: 20,
+      tooltip: "Past this many, the oldest automatic snapshot is removed. Snapshots you take "
+        + "or rename are kept. Clamped to 1-100.",
+    },
+    {
       id: "openManager.enrichMetadata",
       name: "Read pack README and repository metadata",
       category: ["Open Manager", "Registry", "enrichMetadata"],
@@ -860,6 +909,16 @@ app.registerExtension({
         + "workflow, in this session or a later one, continues from there.",
     },
     {
+      id: "openManager.pauseLive",
+      name: "Save each run as it goes",
+      category: ["Open Manager", "Monitor", "pauseLive"],
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "Each node's outputs, without models, are written to disk as the run reaches it. "
+        + "After a crash or an error, the next Run of that workflow continues from the last "
+        + "node written. A run that finishes or is cancelled leaves nothing on disk.",
+    },
+    {
       id: "openManager.runBar",
       onChange: () => remountTopbar(),
       name: "Run progress bar above the header",
@@ -1057,6 +1116,7 @@ app.registerExtension({
     },
     presetCommand,
     alignCommand,
+    ...snapshotCommands,
   ],
   getCanvasMenuItems(canvas) {
     return [...groupAlignMenuItems(canvas), ...qolCanvasMenuItems(canvas)];
@@ -1091,6 +1151,9 @@ app.registerExtension({
       items.push(...patched);
     }
     return items;
+  },
+  beforeConfigureGraph(graphData) {
+    mendNodeBodies(graphData);
   },
   afterConfigureGraph(missingNodeTypes) {
     lastMissingTypes = Array.isArray(missingNodeTypes)
@@ -1134,6 +1197,7 @@ app.registerExtension({
     watchStalls();
     watchManagerBridge();
     watchPresetLabels();
+    watchSnapshots();
     registerThemes().catch(() => {});
     watchThemeExtras();
     refreshPackThemes().then((updated) => {

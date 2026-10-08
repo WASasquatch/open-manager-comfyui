@@ -810,9 +810,24 @@ function paintBodyWash(colour, alpha, next) {
 
 function bodyColour(node) {
   const lg = window.LiteGraph;
-  const own = Object.prototype.hasOwnProperty.call(node, "bgcolor") ? node.bgcolor : "";
+  const own = node.bgcolor && node.bgcolor !== "transparent" ? node.bgcolor : "";
   const stated = own || lg?.NODE_DEFAULT_BGCOLOR || node.constructor?.bgcolor || "#171b16";
   return asRendered(stated);
+}
+
+export function mendNodeBodies(graph) {
+  const pairs = new Map(Object.values(window.LGraphCanvas?.node_colors || {})
+    .map((option) => [option?.color, option?.bgcolor]));
+  const groups = [graph?.nodes, ...(graph?.definitions?.subgraphs || []).map((sub) => sub?.nodes)];
+  for (const nodes of groups) {
+    if (!Array.isArray(nodes)) continue;
+    for (const node of nodes) {
+      if (node?.bgcolor !== "transparent") continue;
+      const paired = pairs.get(node.color);
+      if (paired) node.bgcolor = paired;
+      else delete node.bgcolor;
+    }
+  }
 }
 
 function paintNodeBody(spec, image, alpha, inherited) {
@@ -972,13 +987,12 @@ function installDrawHook() {
     }
 
     const solidity = bodySolidity(extras);
-    const savedBg = node.bgcolor;
-    const hadBg = Object.prototype.hasOwnProperty.call(node, "bgcolor");
+    const ownFill = Object.getOwnPropertyDescriptor(node, "renderingBgColor");
     const washed = solidity < 1 && !this.low_quality && !node.flags?.collapsed
-      && (node.mode === undefined || node.mode === 0);
+      && (node.mode === undefined || node.mode === 0) && ownFill?.configurable !== false;
     if (washed) {
       painter = paintBodyWash(bodyColour(node), solidity, painter);
-      node.bgcolor = "transparent";
+      Object.defineProperty(node, "renderingBgColor", { value: "transparent", configurable: true });
     }
     const paintedBody = painter !== savedBody;
     const hadBody = paintedBody
@@ -1006,8 +1020,8 @@ function installDrawHook() {
         else delete node.onDrawBackground;
       }
       if (washed) {
-        if (hadBg) node.bgcolor = savedBg;
-        else delete node.bgcolor;
+        if (ownFill) Object.defineProperty(node, "renderingBgColor", ownFill);
+        else delete node.renderingBgColor;
       }
     }
   };
@@ -1266,9 +1280,7 @@ function paintVueNode(root, extras) {
   const artSpec = gates.nodeArt ? facetFor(extras, node, "body") : undefined;
   const arted = !!(artSpec && artSpec !== "none" && artSpec.image);
   const solidity = bodySolidity(extras);
-  const ownBody = Object.prototype.hasOwnProperty.call(node, "bgcolor")
-    && !!node.bgcolor && node.bgcolor !== "transparent";
-  const washable = (solidity < 1 || arted) && !node.flags?.collapsed && !ownBody
+  const washable = (solidity < 1 || arted) && !node.flags?.collapsed
     && (node.mode === undefined || node.mode === 0);
   if (washable) {
     const [red, green, blue] = channels(asRendered(bodyColour(node)));

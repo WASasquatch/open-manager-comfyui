@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import re
 import threading
 import time
 
@@ -22,6 +23,10 @@ LABELS_KEPT = 64
 PATH_CAP = 400
 
 NAME_CAP = 120
+
+SNAPSHOT_NAME_CAP = 80
+
+SNAPSHOT_ID = re.compile(r"^[0-9a-f]{8,32}$")
 
 NODE_PLACES = ("server", "dynprompt", "caches", "current_item", "extra_data", "executed",
                "prompt_id", "execution_list", "pending_subgraph_results", "pending_async_nodes")
@@ -57,7 +62,7 @@ def _header(run: dict, now: float) -> dict:
     elapsed = now - run["_clock"] if run["state"] == "running" else run["elapsed"]
     return {"id": run["id"], "workflow": run["workflow"], "path": run["path"],
             "name": run["name"], "started": run["started"], "elapsed": round(elapsed, 4),
-            "state": run["state"], "seq": run["seq"]}
+            "state": run["state"], "seq": run["seq"], "snapshot": run.get("snapshot")}
 
 
 def _shown(entry: dict) -> dict:
@@ -112,8 +117,9 @@ def _run_begin(args: tuple, kwargs: dict) -> str:
     prompt = _pick(_run_places, args, kwargs, "prompt")
     workflow = _workflow_id(_pick(_run_places, args, kwargs, "extra_data"))
     with _lock:
-        path, name = _labels.pop(prompt_id, ("", ""))
+        path, name, snapshot = _labels.pop(prompt_id, ("", "", None))
         run = {"id": prompt_id, "workflow": workflow, "path": path, "name": name,
+               "snapshot": snapshot,
                "started": time.time(), "elapsed": 0.0, "state": "running", "seq": 0,
                "nodes": {}, "_clock": time.perf_counter(),
                "_prompt": prompt if isinstance(prompt, dict) else {}, "_calls": {}}
@@ -409,29 +415,44 @@ def forget(prompt_id: str) -> bool:
     return True
 
 
-def label(prompt_id: str, path: object, name: object) -> bool:
+def _snapshot(value: object) -> dict | None:
+    """The snapshot a run was queued from, as the browser named it, or None."""
+    if not isinstance(value, dict):
+        return None
+    snapshot_id = str(value.get("id") or "")
+    name = value.get("name")
+    name = " ".join(name.split())[:SNAPSHOT_NAME_CAP] if isinstance(name, str) else ""
+    if not SNAPSHOT_ID.match(snapshot_id) or not name:
+        return None
+    return {"id": snapshot_id, "name": name, "edited": value.get("edited") is True}
+
+
+def label(prompt_id: str, path: object, name: object, snapshot: object = None) -> bool:
     """Name the workflow tab a run was queued from.
 
     Args:
         prompt_id: The run.
         path: The workflow's path in the browser that queued it.
         name: The name that workflow shows.
+        snapshot: The snapshot the tab held when it was queued: id, name, and whether the
+            graph had changed since.
 
     Returns:
         Whether the run was found or is still to start.
     """
     path = " ".join(str(path or "").split())[:PATH_CAP] if isinstance(path, str) else ""
     name = " ".join(str(name or "").split())[:NAME_CAP] if isinstance(name, str) else ""
+    snapshot = _snapshot(snapshot)
     if not prompt_id or not (path or name):
         return False
     with _lock:
         run = next((one for one in _runs if one["id"] == prompt_id), None)
         if run is None:
-            _labels[prompt_id] = (path, name)
+            _labels[prompt_id] = (path, name, snapshot)
             while len(_labels) > LABELS_KEPT:
                 del _labels[next(iter(_labels))]
             return True
-        run["path"], run["name"] = path, name
+        run["path"], run["name"], run["snapshot"] = path, name, snapshot
         run["seq"] += 1
         payload = {"run": _header(run, time.perf_counter()), "nodes": []}
     _push(payload)

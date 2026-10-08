@@ -8,6 +8,7 @@ import { openDownloadManager } from "./downloads.mjs";
 import { filesOn, programRows } from "./programs.mjs";
 import { buildMonitorStrip, startMonitor, stopMonitor } from "./monitor.mjs";
 import { mountTabMarks } from "./tab-marks.mjs";
+import { mountSnapshotTabs } from "./snapshots.mjs";
 import { taskbarSync } from "./taskbar.mjs";
 import { draftNote, openNote } from "./desk-docs.mjs";
 import { runBar, mountRunBar } from "./runbar.mjs";
@@ -166,6 +167,7 @@ function mountTopbar(attempt = 0) {
   mountMonitor(slot);
   mountRunBar();
   mountTabMarks();
+  mountSnapshotTabs();
   wirePause();
   mountPauseButton();
   return true;
