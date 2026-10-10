@@ -242,7 +242,8 @@ already fixed, stands down and says so in the browser console.
 | Patch | Default | Effect |
 |---|---|---|
 | Nodes Manager fits its contents | On | The Nodes Manager's frame fits its contents. On screens 3000px wide and over it otherwise cuts off the right side, close button and filters |
-| Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the previews promoted to it |
+| Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the latest preview promoted to it |
+| Subgraph nodes keep their saved values | On | A subgraph node whose promoted widgets ComfyUI migrated loads with its saved values instead of the values they had at migration |
 | Custom widgets follow their node's width | On | Custom and DOM widgets keep following their node once it has been shown in the properties panel |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
@@ -250,6 +251,7 @@ already fixed, stands down and says so in the browser console.
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
 | No frontend_only badge | On | Nodes with no Python side carry no source badge |
 | Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
+| Node search narrows every match | On | In the node search box, a category or the Comfy, Partner or Extensions filter lists every match it holds, not only those among the top 64 |
 
 ### Network
 

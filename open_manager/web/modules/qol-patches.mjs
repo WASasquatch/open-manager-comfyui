@@ -1,6 +1,7 @@
 import { app } from "../../../scripts/app.js";
 import managerModal from "./qol-manager-modal.mjs";
 import subgraphPreviews from "./qol-subgraph-previews.mjs";
+import subgraphValues from "./qol-subgraph-values.mjs";
 import widgetWidth from "./qol-widget-width.mjs";
 import partnerNodes from "./qol-partner-nodes.mjs";
 import stillWhileRunning from "./qol-still-while-running.mjs";
@@ -8,11 +9,12 @@ import goToNode from "./qol-go-to-node.mjs";
 import middleClickPaste from "./qol-middle-click-paste.mjs";
 import frontendOnlyBadge from "./qol-frontend-only-badge.mjs";
 import nameBox from "./qol-name-box.mjs";
+import searchWithinCategory from "./qol-search-within-category.mjs";
 import { el } from "./ui.mjs";
 
 const QOL_PATCHES = [
-  managerModal, subgraphPreviews, widgetWidth, partnerNodes,
-  stillWhileRunning, goToNode, middleClickPaste, frontendOnlyBadge, nameBox,
+  managerModal, subgraphPreviews, subgraphValues, widgetWidth, partnerNodes,
+  stillWhileRunning, goToNode, middleClickPaste, frontendOnlyBadge, nameBox, searchWithinCategory,
 ];
 
 const wanted = new Map();

@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { api } from "../../../scripts/api.js";
 
 const PREVIEW_NAME = "$$canvas-image-preview";
 
@@ -17,6 +18,12 @@ const images = new Map();
 const WIDGET_NAME = "om_subgraph_preview";
 
 const hosts = new Map();
+
+let states = new WeakMap();
+
+const started = new Map();
+
+let sequence = 0;
 
 const STORE_SHAPES = {
   previewExposure: ["getExposures", "addExposure", "removeExposure"],
@@ -73,20 +80,51 @@ function sourcesOf(exposures, host, hostExecution, only, depth) {
   return found;
 }
 
-function previewUrls(host) {
+function stateOf(host) {
+  let state = states.get(host);
+  if (!state) {
+    state = { seen: new Map(), active: null, held: [] };
+    states.set(host, state);
+  }
+  return state;
+}
+
+function onExecuting(event) {
+  if (event.detail != null) started.set(String(event.detail), ++sequence);
+}
+
+function sourceUrls(outputs, source) {
+  const byRun = source.execution
+    ? outputs.getNodeImageUrlsByExecutionId?.(source.execution, source.node)
+    : null;
+  return (byRun?.length ? byRun : outputs.getNodeImageUrls(source.node)) || [];
+}
+
+function previewUrls(host, state) {
   const exposures = frontendStore("previewExposure");
   const outputs = frontendStore("nodeOutput");
   if (!exposures || !outputs) return [];
   const hostExecution = host.graph?.isRootGraph ? String(host.id) : null;
-  const urls = [];
+  const current = new Map();
+  let fresh = null;
   for (const source of sourcesOf(exposures, host, hostExecution, null, 0)) {
-    const byRun = source.execution
-      ? outputs.getNodeImageUrlsByExecutionId?.(source.execution, source.node)
-      : null;
-    const found = byRun?.length ? byRun : outputs.getNodeImageUrls(source.node);
-    if (found?.length) urls.push(...found);
+    const key = source.execution || `${source.node.graph?.id}:${source.node.id}`;
+    const urls = sourceUrls(outputs, source);
+    const signature = urls.map(imageKey).join("\n");
+    if (signature && state.seen.get(key) !== signature
+      && (!fresh || (started.get(key) || 0) >= (started.get(fresh) || 0))) fresh = key;
+    current.set(key, urls);
+    state.seen.set(key, signature);
   }
-  return urls;
+  for (const key of state.seen.keys()) {
+    if (!current.has(key)) state.seen.delete(key);
+  }
+  if (fresh) state.active = fresh;
+  if (!current.has(state.active)) {
+    state.active = [...current.keys()].findLast((key) => current.get(key).length) ?? null;
+    state.held = [];
+  }
+  return current.get(state.active) || [];
 }
 
 function imageKey(url) {
@@ -121,8 +159,11 @@ function nativelyDrawn(host, mine) {
 }
 
 function loadedPreviews(host) {
-  return previewUrls(host).map(imageFor)
-    .filter((image) => image.complete && image.naturalWidth > 0);
+  const state = stateOf(host);
+  const wanted = previewUrls(host, state).map(imageFor);
+  const ready = wanted.filter((image) => image.complete && image.naturalWidth > 0);
+  if (ready.length && (ready.length === wanted.length || !state.held.length)) state.held = ready;
+  return state.held;
 }
 
 function drawGrid(ctx, shown, left, top, width, height) {
@@ -234,7 +275,7 @@ function redraw(list) {
 export default {
   key: "qolSubgraphPreviews",
   name: "Subgraph nodes show promoted previews",
-  tooltip: "On the classic canvas, draws the previews promoted to a subgraph node on that "
+  tooltip: "On the classic canvas, draws the latest preview promoted to a subgraph node on that "
     + "node. Any node inside a subgraph that makes images can promote its preview from its "
     + "right-click menu.",
   issues: ["Comfy-Org/ComfyUI_frontend#9859", "Comfy-Org/ComfyUI_frontend#14597"],
@@ -263,11 +304,15 @@ export default {
     track(() => {
       if (canvas.onDrawForeground === mine) canvas.onDrawForeground = before;
     });
+    api.addEventListener("executing", onExecuting);
+    track(() => api.removeEventListener("executing", onExecuting));
     active = true;
     track(() => {
       active = false;
       releaseHosts();
       images.clear();
+      states = new WeakMap();
+      started.clear();
       app.graph?.setDirtyCanvas(true, true);
     });
     app.graph?.setDirtyCanvas(true, true);
