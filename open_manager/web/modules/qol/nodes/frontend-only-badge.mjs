@@ -1,13 +1,9 @@
-import { app } from "../../../scripts/app.js";
+import { app } from "../../../../../scripts/app.js";
+import { piniaStores } from "../shared.mjs";
 
 const MODULE = "custom_nodes.frontend_only";
 
 const cleared = new Map();
-
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
-}
 
 function defStore() {
   const store = piniaStores()?.get("nodeDef");

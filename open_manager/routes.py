@@ -55,6 +55,7 @@ from . import (
     gates,
     marks,
     programs as desk_programs,
+    qol as qol_patches,
     settingsfile,
     stall,
     tdr,
@@ -1131,6 +1132,11 @@ def register_routes() -> None:
     async def desktop_programs(_request: web.Request) -> web.Response:
         """Every desktop program this install ships, read from their manifests."""
         return web.json_response(await asyncio.to_thread(desk_programs.listing))
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/qol")
+    async def qol_listing(_request: web.Request) -> web.Response:
+        """Every Quality of Life patch this install ships, by category."""
+        return web.json_response(await asyncio.to_thread(qol_patches.listing))
 
     @PromptServer.instance.routes.get(f"{PREFIX}/programs/store")
     async def program_store_read(request: web.Request) -> web.Response:

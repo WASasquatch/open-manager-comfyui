@@ -1,14 +1,11 @@
+import { piniaStores } from "../shared.mjs";
+
 const FILTER_ID = "openManager.hidePartnerNodes";
 
 const PARTNER_NAV = "partner-nodes";
 
 const PARTNER_CSS = `
 [data-testid="login-button"] { display: none !important; }`;
-
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
-}
 
 function isPartnerNode(def) {
   return def?.api_node === true || String(def?.python_module || "").startsWith("comfy_api_nodes");

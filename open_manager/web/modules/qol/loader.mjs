@@ -1,21 +1,66 @@
-import { app } from "../../../scripts/app.js";
-import managerModal from "./qol-manager-modal.mjs";
-import subgraphPreviews from "./qol-subgraph-previews.mjs";
-import subgraphValues from "./qol-subgraph-values.mjs";
-import widgetWidth from "./qol-widget-width.mjs";
-import partnerNodes from "./qol-partner-nodes.mjs";
-import stillWhileRunning from "./qol-still-while-running.mjs";
-import goToNode from "./qol-go-to-node.mjs";
-import middleClickPaste from "./qol-middle-click-paste.mjs";
-import frontendOnlyBadge from "./qol-frontend-only-badge.mjs";
-import nameBox from "./qol-name-box.mjs";
-import searchWithinCategory from "./qol-search-within-category.mjs";
-import { el } from "./ui.mjs";
+import { app } from "../../../../scripts/app.js";
+import { api } from "../../../../scripts/api.js";
+import { API } from "../base.mjs";
+import { el } from "../ui.mjs";
+import { piniaStores } from "./shared.mjs";
 
-const QOL_PATCHES = [
-  managerModal, subgraphPreviews, subgraphValues, widgetWidth, partnerNodes,
-  stillWhileRunning, goToNode, middleClickPaste, frontendOnlyBadge, nameBox, searchWithinCategory,
-];
+const PATCH_FILE = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*\.mjs$/;
+
+const SETUP_WAIT_MS = 10000;
+
+const IMPORT_WAIT_MS = 5000;
+
+function complete(patch) {
+  return typeof patch?.key === "string" && typeof patch.name === "string"
+    && typeof patch.check === "function" && typeof patch.on === "function";
+}
+
+async function listedPatches() {
+  try {
+    const answer = await (await api.fetchApi(`${API}/qol`)).json();
+    for (const problem of answer?.problems || []) {
+      console.warn(`[Open Manager] Quality of Life patch skipped: ${problem}`);
+    }
+    return (answer?.patches || []).filter((file) => PATCH_FILE.test(file));
+  } catch (error) {
+    console.warn("[Open Manager] Quality of Life patches could not be listed", error);
+    return [];
+  }
+}
+
+function giveUp(ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`no answer after ${ms / 1000} s`)), ms);
+  });
+}
+
+async function importPatch(file) {
+  try {
+    const patch = (await Promise.race([import(`./${file}`), giveUp(IMPORT_WAIT_MS)])).default;
+    if (complete(patch)) return patch;
+    console.warn(`[Open Manager] Quality of Life patch skipped: ${file} does not export `
+      + "key, name, check and on");
+  } catch (error) {
+    console.warn(`[Open Manager] Quality of Life patch skipped: ${file} failed to load`, error);
+  }
+  return null;
+}
+
+async function loadPatches() {
+  const loaded = await Promise.all((await listedPatches()).map(importPatch));
+  const keys = new Set();
+  return loaded.filter((patch) => {
+    if (!patch) return false;
+    if (keys.has(patch.key)) {
+      console.warn(`[Open Manager] Quality of Life patch skipped: ${patch.key} is used twice`);
+      return false;
+    }
+    keys.add(patch.key);
+    return true;
+  });
+}
+
+let QOL_PATCHES = [];
 
 const wanted = new Map();
 
@@ -99,6 +144,22 @@ function qolSettings() {
   }));
 }
 
+function registerSettings() {
+  const store = piniaStores()?.get("setting");
+  if (typeof store?.addSetting !== "function") {
+    console.warn("[Open Manager] Quality of Life patches: ComfyUI's settings are not reachable, "
+      + "so each patch runs at its default");
+    return;
+  }
+  for (const setting of qolSettings()) {
+    try {
+      store.addSetting(setting);
+    } catch (error) {
+      console.warn(`[Open Manager] ${setting.name}: setting not registered`, error);
+    }
+  }
+}
+
 function issueLink(issue) {
   const [repo, number] = issue.split("#");
   const link = el("a", "om-qol-issue", `#${number}`);
@@ -131,11 +192,14 @@ function watchIssueLinks() {
 }
 
 function startQolPatches() {
-  started = true;
-  watchIssueLinks();
-  for (const patch of QOL_PATCHES) {
-    if (patchWanted(patch)) startPatch(patch);
-  }
+  const begun = loaded.then(() => {
+    started = true;
+    watchIssueLinks();
+    for (const patch of QOL_PATCHES) {
+      if (patchWanted(patch)) startPatch(patch);
+    }
+  });
+  return Promise.race([begun, new Promise((resolve) => setTimeout(resolve, SETUP_WAIT_MS))]);
 }
 
 function menuItems(hook, target) {
@@ -159,4 +223,9 @@ function qolCanvasMenuItems(canvas) {
   return menuItems("canvasMenu", canvas);
 }
 
-export { qolSettings, startQolPatches, qolNodeMenuItems, qolCanvasMenuItems };
+const loaded = loadPatches().then((patches) => {
+  QOL_PATCHES = patches;
+  registerSettings();
+});
+
+export { startQolPatches, qolNodeMenuItems, qolCanvasMenuItems };

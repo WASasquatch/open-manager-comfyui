@@ -1,6 +1,7 @@
-import { app } from "../../../scripts/app.js";
-import { askText, toast } from "./ui.mjs";
-import { parseNodePath, locateNode, revealNode } from "./node-focus.mjs";
+import { app } from "../../../../../scripts/app.js";
+import { askText, toast } from "../../ui.mjs";
+import { parseNodePath, locateNode, revealNode } from "../../node-focus.mjs";
+import { piniaStores } from "../shared.mjs";
 
 const COMMAND_ID = "openManager.goToNode";
 
@@ -11,11 +12,6 @@ const LABEL = "Go to Node";
 let enabled = false;
 
 let fault = null;
-
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
-}
 
 function commandStore() {
   const store = piniaStores()?.get("command");

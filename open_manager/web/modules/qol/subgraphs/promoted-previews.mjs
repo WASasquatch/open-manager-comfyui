@@ -1,5 +1,6 @@
-import { app } from "../../../scripts/app.js";
-import { api } from "../../../scripts/api.js";
+import { app } from "../../../../../scripts/app.js";
+import { api } from "../../../../../scripts/api.js";
+import { piniaStores } from "../shared.mjs";
 
 const PREVIEW_NAME = "$$canvas-image-preview";
 
@@ -31,11 +32,6 @@ const STORE_SHAPES = {
 };
 
 const warned = new Set();
-
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
-}
 
 function frontendStore(id) {
   const store = piniaStores()?.get(id);

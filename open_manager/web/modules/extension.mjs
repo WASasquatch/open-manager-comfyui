@@ -30,7 +30,7 @@ import { patchResize } from "./node-resize.mjs";
 import { watchJump } from "./socket-jump.mjs";
 import { groupAlignMenuItems, alignCommand, alignToolboxCommands, watchAlignPress } from "./group-align.mjs";
 import { watchCoreManager } from "./core-manager.mjs";
-import { qolSettings, startQolPatches, qolNodeMenuItems, qolCanvasMenuItems } from "./qol-patches.mjs";
+import { startQolPatches, qolNodeMenuItems, qolCanvasMenuItems } from "./qol/loader.mjs";
 import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
@@ -474,7 +474,6 @@ app.registerExtension({
         + "Discovery. 'classic' always opens the menu. Use ComfyUI's Nodes Manager overrides "
         + "this while it is on.",
     },
-    ...qolSettings(),
     {
       id: "openManager.coreManagerUi",
       name: "Use ComfyUI's Nodes Manager",
@@ -1193,7 +1192,7 @@ app.registerExtension({
     watchJump();
     watchAlignPress();
     watchCoreManager();
-    startQolPatches();
+    const qolStarted = startQolPatches();
     watchStalls();
     watchManagerBridge();
     watchPresetLabels();
@@ -1219,6 +1218,7 @@ app.registerExtension({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ policy, stale_days: staleDays, ...syncOptions() }),
     }).catch(() => {});
+    return qolStarted;
   },
 });
 

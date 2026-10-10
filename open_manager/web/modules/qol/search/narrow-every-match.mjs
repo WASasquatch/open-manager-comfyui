@@ -1,7 +1,4 @@
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
-}
+import { piniaStores } from "../shared.mjs";
 
 function searchService() {
   return piniaStores()?.get("nodeDef")?.nodeSearchService || null;
