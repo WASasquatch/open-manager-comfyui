@@ -440,12 +440,22 @@ def _names_in(node, found: set, depth: int = 0) -> None:
     if depth > 24 or len(found) > 20_000:
         return
     if isinstance(node, dict):
-        for value in node.values():
-            _names_in(value, found, depth + 1)
+        children = node.values()
     elif isinstance(node, list):
-        for value in node:
+        children = node
+    else:
+        _name_in(node, found)
+        return
+    for value in children:
+        if isinstance(value, (dict, list)):
             _names_in(value, found, depth + 1)
-    elif isinstance(node, str) and 3 < len(node) < 256:
+        elif depth < 24 and len(found) <= 20_000:
+            _name_in(value, found)
+
+
+def _name_in(node, found: set) -> None:
+    """Keep one value where it looks like a model filename."""
+    if isinstance(node, str) and 3 < len(node) < 256 and "." in node:
         if os.path.splitext(node)[1].lower() in KNOWN_FORMATS:
             found.add(node.replace("\\", "/").rsplit("/", 1)[-1].lower())
 
@@ -493,14 +503,55 @@ def declared_models(document: object, limit: int = MAX_DECLARED) -> list[dict]:
             if isinstance(properties, dict) and isinstance(properties.get("models"), list):
                 take(properties["models"], str(node.get("type") or node.get("id") or ""))
             for value in node.values():
-                walk(value, depth + 1)
+                if isinstance(value, (dict, list)):
+                    walk(value, depth + 1)
         elif isinstance(node, list):
             for value in node:
-                walk(value, depth + 1)
+                if isinstance(value, (dict, list)):
+                    walk(value, depth + 1)
 
     walk(document)
     if isinstance(document, dict) and isinstance(document.get("models"), list):
         take(document["models"], "")
+    return found
+
+
+_saved_reads: dict[str, tuple] = {}
+
+
+def _saved_workflow(path: Path) -> tuple[frozenset, list] | None:
+    """The model names and declared models in one saved workflow, read again only when it changes.
+
+    Returns:
+        ``(names, declared)``, or ``None`` where the file is too large or cannot be read.
+    """
+    try:
+        held = path.stat()
+    except OSError:
+        return None
+    if held.st_size > MAX_WORKFLOW_BYTES:
+        return None
+    key = str(path)
+    known = _saved_reads.get(key)
+    if known is not None and known[0] == held.st_mtime_ns and known[1] == held.st_size:
+        return known[2]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        names: set = set()
+        _names_in(document, names)
+        read = (frozenset(names), declared_models(document))
+    except (OSError, ValueError, RecursionError):
+        read = None
+    _saved_reads[key] = (held.st_mtime_ns, held.st_size, read)
+    return read
+
+
+def _saved_paths(where: Path) -> list[Path]:
+    """Every saved workflow under ``where``, forgetting reads of any no longer there."""
+    found = sorted(where.rglob("*.json"))[:MAX_WORKFLOWS]
+    kept = {str(path) for path in found}
+    for stale in [key for key in _saved_reads if key not in kept]:
+        _saved_reads.pop(stale, None)
     return found
 
 
@@ -548,24 +599,21 @@ def references(open_documents: list | None = None) -> dict:
                 "models": asked,
             })
     if where is not None:
-        for path in sorted(where.rglob("*.json"))[:MAX_WORKFLOWS]:
+        for path in _saved_paths(where):
             try:
                 named = path.relative_to(where).as_posix()
             except ValueError:
                 named = path.name
             if named in live:
                 continue
-            try:
-                if path.stat().st_size > MAX_WORKFLOW_BYTES:
-                    unreadable += 1
-                    continue
-                document = json.loads(path.read_text(encoding="utf-8"))
-                _names_in(document, names)
-                read += 1
-            except (OSError, ValueError, RecursionError):
+            saved = _saved_workflow(path)
+            if saved is None:
                 unreadable += 1
                 continue
-            asked = declared_models(document)
+            if len(names) <= 20_000:
+                names |= saved[0]
+            read += 1
+            asked = saved[1]
             if asked:
                 declared.append({"workflow": named, "path": str(path), "open": False,
                                  "modified": False, "models": asked})
@@ -594,18 +642,13 @@ def referrers(name: str) -> dict:
     read = 0
     unreadable = 0
     if wanted and where is not None:
-        for path in sorted(where.rglob("*.json"))[:MAX_WORKFLOWS]:
-            try:
-                if path.stat().st_size > MAX_WORKFLOW_BYTES:
-                    unreadable += 1
-                    continue
-                names: set = set()
-                _names_in(json.loads(path.read_text(encoding="utf-8")), names)
-                read += 1
-            except (OSError, ValueError, RecursionError):
+        for path in _saved_paths(where):
+            saved = _saved_workflow(path)
+            if saved is None:
                 unreadable += 1
                 continue
-            if any(one.lower() == wanted for one in names):
+            read += 1
+            if wanted in saved[0]:
                 try:
                     found.append(str(path.relative_to(where)))
                 except ValueError:

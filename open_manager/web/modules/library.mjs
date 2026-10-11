@@ -1005,13 +1005,17 @@ function openModelLibrary() {
     try {
       libIndex = await libGet(`/library${rescanNow ? "?refresh=1" : ""}`);
       if (!panel.el.isConnected) return;
-      libRefs = await libPost("/library/references", { open: openWorkflowDocuments() });
+      const [refs, dupes, storage, discover] = await Promise.all([
+        libPost("/library/references", { open: openWorkflowDocuments() }),
+        libGet("/library/duplicates?level=names"),
+        libGet("/library/storage"),
+        libGet("/library/discover"),
+      ]);
       if (!panel.el.isConnected) return;
-      libDupes = await libGet("/library/duplicates?level=names");
-      if (!panel.el.isConnected) return;
-      libStorage = await libGet("/library/storage");
-      if (!panel.el.isConnected) return;
-      libDiscover = await libGet("/library/discover");
+      libRefs = refs;
+      libDupes = dupes;
+      libStorage = storage;
+      libDiscover = discover;
     } catch {
       summary.textContent = "The model folders could not be read";
       return;

@@ -636,21 +636,42 @@ function themeImage(raw, slot) {
 const artCache = new Map();
 const patternCache = new Map();
 
+const ART_KEEPS_ELEMENT = /svg|gif/i;
+
+function artSettled() {
+  try { app.canvas?.setDirty(true, false); } catch {}
+  try { scheduleVuePaint(); } catch {}
+}
+
+function artDecoded(entry, src) {
+  if (ART_KEEPS_ELEMENT.test(src) || typeof createImageBitmap !== "function") {
+    entry.ready = true;
+    artSettled();
+    return;
+  }
+  createImageBitmap(entry.image).then((bitmap) => {
+    entry.bitmap = bitmap;
+  }, () => {}).finally(() => {
+    if (artCache.get(src) !== entry) return;
+    entry.ready = true;
+    artSettled();
+  });
+}
+
 function artFor(src, slot) {
   let entry = artCache.get(src);
   if (!entry) {
-    entry = { image: new Image(), ready: false, failed: false };
+    entry = { image: new Image(), bitmap: null, ready: false, failed: false };
     entry.image.onload = () => {
       const limit = ART_PIXELS[slot] || ART_PIXELS.icon;
       if (entry.image.naturalWidth > limit || entry.image.naturalHeight > limit) {
         entry.failed = true;
         console.warn(`[Open Manager] theme image ${src.slice(0, 80)} is `
           + `${entry.image.naturalWidth}x${entry.image.naturalHeight}, over the ${limit}px limit`);
-      } else {
-        entry.ready = true;
+        artSettled();
+        return;
       }
-      try { app.canvas?.setDirty(true, false); } catch {}
-      try { scheduleVuePaint(); } catch {}
+      artDecoded(entry, src);
     };
     entry.image.onerror = () => {
       entry.failed = true;
@@ -661,7 +682,7 @@ function artFor(src, slot) {
     artCache.set(src, entry);
   }
   if (entry.failed || !entry.ready) return null;
-  return entry.image;
+  return entry.bitmap || entry.image;
 }
 
 const RASTER_EDGE = 128;
@@ -852,9 +873,11 @@ function paintNodeBody(spec, image, alpha, inherited) {
     ctx.globalAlpha *= alpha;
     if (spec.blend) ctx.globalCompositeOperation = spec.blend;
     if (spec.fit === "cover") {
-      const ratio = Math.max(w / image.naturalWidth, h / image.naturalHeight);
-      const dw = image.naturalWidth * ratio;
-      const dh = image.naturalHeight * ratio;
+      const iw = image.naturalWidth || image.width;
+      const ih = image.naturalHeight || image.height;
+      const ratio = Math.max(w / iw, h / ih);
+      const dw = iw * ratio;
+      const dh = ih * ratio;
       ctx.drawImage(image, (w - dw) / 2, (h - dh) / 2, dw, dh);
     } else {
       const pattern = artPattern(ctx, spec.image, image);
@@ -1401,8 +1424,8 @@ function paintVueIcon(root, extras, node) {
     let boxWide = cap;
     let boxTall = cap;
     if (art) {
-      const wide = art.naturalWidth || cap;
-      const tall = art.naturalHeight || cap;
+      const wide = art.naturalWidth || art.width || cap;
+      const tall = art.naturalHeight || art.height || cap;
       const ratio = Math.min(cap / wide, cap / tall) || 1;
       boxWide = Math.round(wide * ratio);
       boxTall = Math.round(tall * ratio);

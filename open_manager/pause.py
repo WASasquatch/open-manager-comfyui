@@ -33,6 +33,8 @@ _lock = threading.Lock()
 _executor_ref: "weakref.ReferenceType | None" = None
 _provider = None
 _installed = False
+_lifecycle = False
+_registered = False
 _running: dict = {}
 _armed: dict = {}
 _pending: dict = {}
@@ -510,66 +512,121 @@ def _make_provider():
             return CacheValue(outputs=outputs, ui=ui)
 
         def on_prompt_start(self, prompt_id):
-            item = _running_item(prompt_id)
-            workflow_id = _workflow_id(item[3]) if item is not None else ""
-            saved: dict = {}
-            for folder in ((_live_dir(workflow_id), _dir(workflow_id)) if workflow_id else ()):
-                manifest = _manifest_at(folder)
-                if manifest is not None:
-                    saved.update({digest: {**record, "dir": str(folder)}
-                                  for digest, record in manifest["nodes"].items()})
-            live = _live_begin(prompt_id, item, workflow_id)
-            with _lock:
-                _running.clear()
-                _running.update(prompt_id=prompt_id, workflow_id=workflow_id)
-                if live is not None:
-                    _running["live"] = live
-                _armed.clear()
-                if saved:
-                    _armed.update(prompt_id=prompt_id, workflow_id=workflow_id, nodes=saved)
-                    logger.info("pause: resuming %s with %d saved nodes", workflow_id, len(saved))
+            if not _lifecycle:
+                _prompt_start(prompt_id)
 
         def on_prompt_end(self, prompt_id):
-            with _lock:
-                pending = dict(_pending) if _pending.get("prompt_id") == prompt_id else None
-                armed = dict(_armed) if _armed.get("prompt_id") == prompt_id else None
-                live = _running.get("live") if _running.get("prompt_id") == prompt_id else None
-                if live is not None:
-                    _settling.add(live["workflow_id"])
-                _running.clear()
-                _armed.clear()
-            executor = _executor()
-            succeeded = bool(getattr(executor, "success", False))
-            if live is not None and pending is None:
-                _live_settle(live, keep=not succeeded and not _interrupted(executor))
-            if pending is not None:
-                item = _running_item(prompt_id)
-                if succeeded:
-                    answer = {"ok": False, "finished": True,
-                              "reason": "the run finished before it could pause"}
-                elif item is None:
-                    answer = {"ok": False, "reason": "the running prompt could not be read"}
-                else:
-                    try:
-                        answer = _snapshot(prompt_id, item[2], item[3], pending.get("widgets"))
-                    except Exception as error:  # noqa: BLE001
-                        logger.exception("pause: could not be written")
-                        answer = {"ok": False, "reason": f"it could not be written ({error})"}
-                if live is not None:
-                    _live_settle(live, keep=not answer.get("ok") and not succeeded)
-                with _lock:
-                    if _pending.get("prompt_id") == prompt_id:
-                        _pending["answer"] = answer
-                        _pending["event"].set()
-            elif armed is not None and succeeded:
-                discard(armed["workflow_id"])
+            if not _lifecycle:
+                _prompt_end(prompt_id)
 
     return PauseProvider()
 
 
+def _want_provider(wanted: bool) -> None:
+    """Register the provider only while a run needs it. Call with ``_lock`` held."""
+    global _registered
+    if not _lifecycle or _provider is None or wanted == _registered:
+        return
+    from comfy_execution.cache_provider import register_cache_provider, unregister_cache_provider
+
+    if wanted:
+        register_cache_provider(_provider)
+    else:
+        unregister_cache_provider(_provider)
+    _registered = wanted
+
+
+def _prompt_start(prompt_id: str) -> None:
+    item = _running_item(prompt_id)
+    workflow_id = _workflow_id(item[3]) if item is not None else ""
+    saved: dict = {}
+    for folder in ((_live_dir(workflow_id), _dir(workflow_id)) if workflow_id else ()):
+        manifest = _manifest_at(folder)
+        if manifest is not None:
+            saved.update({digest: {**record, "dir": str(folder)}
+                          for digest, record in manifest["nodes"].items()})
+    live = _live_begin(prompt_id, item, workflow_id)
+    with _lock:
+        _running.clear()
+        _running.update(prompt_id=prompt_id, workflow_id=workflow_id)
+        if live is not None:
+            _running["live"] = live
+        _armed.clear()
+        if saved:
+            _armed.update(prompt_id=prompt_id, workflow_id=workflow_id, nodes=saved)
+            logger.info("pause: resuming %s with %d saved nodes", workflow_id, len(saved))
+        _want_provider(bool(saved) or live is not None)
+
+
+def _prompt_end(prompt_id: str) -> None:
+    with _lock:
+        pending = dict(_pending) if _pending.get("prompt_id") == prompt_id else None
+        armed = dict(_armed) if _armed.get("prompt_id") == prompt_id else None
+        live = _running.get("live") if _running.get("prompt_id") == prompt_id else None
+        if live is not None:
+            _settling.add(live["workflow_id"])
+        _running.clear()
+        _armed.clear()
+        _want_provider(False)
+    executor = _executor()
+    succeeded = bool(getattr(executor, "success", False))
+    if live is not None and pending is None:
+        _live_settle(live, keep=not succeeded and not _interrupted(executor))
+    if pending is not None:
+        item = _running_item(prompt_id)
+        if succeeded:
+            answer = {"ok": False, "finished": True,
+                      "reason": "the run finished before it could pause"}
+        elif item is None:
+            answer = {"ok": False, "reason": "the running prompt could not be read"}
+        else:
+            try:
+                answer = _snapshot(prompt_id, item[2], item[3], pending.get("widgets"))
+            except Exception as error:  # noqa: BLE001
+                logger.exception("pause: could not be written")
+                answer = {"ok": False, "reason": f"it could not be written ({error})"}
+        if live is not None:
+            _live_settle(live, keep=not answer.get("ok") and not succeeded)
+        with _lock:
+            if _pending.get("prompt_id") == prompt_id:
+                _pending["answer"] = answer
+                _pending["event"].set()
+    elif armed is not None and succeeded:
+        discard(armed["workflow_id"])
+
+
+def _wrap_lifecycle(executor_class) -> bool:
+    """Follow each prompt's start and end without being a registered provider."""
+    original = getattr(executor_class, "_notify_prompt_lifecycle", None)
+    if not callable(original):
+        return False
+    if getattr(original, "_om_pause", False):
+        return True
+
+    def lifecycle(self, event, prompt_id):
+        if event == "start":
+            _follow(_prompt_start, event, prompt_id)
+        try:
+            return original(self, event, prompt_id)
+        finally:
+            if event == "end":
+                _follow(_prompt_end, event, prompt_id)
+
+    lifecycle._om_pause = True
+    executor_class._notify_prompt_lifecycle = lifecycle
+    return True
+
+
+def _follow(step, event: str, prompt_id: str) -> None:
+    try:
+        step(prompt_id)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("pause: prompt %s failed (%s: %s)", event, type(error).__name__, error)
+
+
 def install() -> bool:
-    """Register the provider with ComfyUI and keep hold of its executor. Safe to call again."""
-    global _installed, _provider
+    """Hook ComfyUI's runs and keep hold of its executor. Safe to call again."""
+    global _installed, _provider, _lifecycle
     if _installed:
         return True
     try:
@@ -589,7 +646,9 @@ def install() -> bool:
         execution.PromptExecutor.__init__ = init
 
     _provider = _make_provider()
-    register_cache_provider(_provider)
+    _lifecycle = _wrap_lifecycle(execution.PromptExecutor)
+    if not _lifecycle:
+        register_cache_provider(_provider)
     _installed = True
     return True
 
@@ -623,6 +682,8 @@ def request(mode: str = "boundary", widgets: list | None = None) -> dict:
             _pending.clear()
             _pending.update(prompt_id=prompt_id, mode="now" if mode == "now" else "boundary",
                             widgets=list(widgets or []), event=event)
+        if _pending["mode"] == "boundary":
+            _want_provider(True)
     if mode == "now":
         import nodes
 

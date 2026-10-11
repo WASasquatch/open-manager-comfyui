@@ -227,13 +227,27 @@ def _attr(obj: object, name: str, default=None):
         return default
 
 
+_resolved_files: dict[str, Path] = {}
+
+
+def _resolved(where: object) -> Path:
+    """A loaded module's file with links followed, worked out once per file."""
+    if not isinstance(where, str):
+        return Path(where).resolve()
+    known = _resolved_files.get(where)
+    if known is None:
+        known = Path(where).resolve()
+        _resolved_files[where] = known
+    return known
+
+
 def _pack_of(module: object, root: Path) -> str:
     """Which pack directory a module was loaded from, or empty for anything else."""
     where = _attr(module, "__file__", "") or ""
     if not where:
         return ""
     try:
-        parts = Path(where).resolve().relative_to(root).parts
+        parts = _resolved(where).relative_to(root).parts
     except (ValueError, OSError):
         return ""
     return parts[0] if parts else ""
