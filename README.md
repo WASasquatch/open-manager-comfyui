@@ -169,7 +169,7 @@ What ships off is opened with its own:
 |---|---|---|
 | `OPEN_MANAGER_ENABLE_DESKTOP` | Desktop Mode can be switched on in the settings | Desktop Mode is hidden |
 | `OPEN_MANAGER_ENABLE_FILES` | The file browser can be switched on in the settings | The file browser is hidden |
-| `OPEN_MANAGER_FILE_WRITES` | The file browser renames, moves, copies and deletes files, makes folders, and saves text files and pictures | The file browser only reads |
+| `OPEN_MANAGER_FILE_WRITES` | The file browser renames, moves, copies and deletes files, makes folders, and saves text files and pictures. Media Assets can delete output files | The file browser only reads |
 | `OPEN_MANAGER_ALLOW_BANNED` | Versions the registry has banned install, whatever the setting says | The setting decides |
 | `OPEN_MANAGER_REPO_DOWNLOADS` | Whole Hugging Face repositories in ComfyUI-Manager's model list download, configs included | Only single model files download |
 
@@ -241,6 +241,10 @@ already fixed, stands down and says so in the browser console.
 
 | Patch | Default | Effect |
 |---|---|---|
+| Media Assets keep generation time | On | Runs write their generation time, node and subfolder onto their assets |
+| Media Assets open workflows from files | On | A job no longer in history opens the workflow saved in its file |
+| Media Assets show files found by scans | On | Files an asset scan adds appear in Media Assets |
+| Media Assets delete files | Off | Deleting an output also deletes its file. Needs `OPEN_MANAGER_FILE_WRITES=1` |
 | Nodes Manager fits its contents | On | The Nodes Manager's frame fits its contents. On screens 3000px wide and over it otherwise cuts off the right side, close button and filters |
 | Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the latest preview promoted to it |
 | Subgraph nodes keep their saved values | On | A subgraph node whose promoted widgets ComfyUI migrated loads with its saved values instead of the values they had at migration |
@@ -250,8 +254,12 @@ already fixed, stands down and says so in the browser console.
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
 | No frontend_only badge | On | Nodes with no Python side carry no source badge |
+| Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
+| API jobs open as workflows | On | Jobs queued with only an API prompt open as a laid-out workflow |
 | Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
 | Node search narrows every match | On | In the node search box, a category or the Comfy, Partner or Extensions filter lists every match it holds, not only those among the top 64 |
+| Node search draws only the rows in view | On | Results build as they scroll into view |
+| Node search waits for a pause in typing | On | Slow searches run once typing pauses |
 
 ### Network
 

@@ -6,7 +6,9 @@ import base64
 import hashlib
 import json
 import os
+import secrets
 import signal
+import socket
 import ssl
 import subprocess
 import sys
@@ -14,6 +16,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from . import gates, log, monitor, paths
 
@@ -112,6 +115,10 @@ _last: dict = {}
 
 _busy = {"on": False}
 
+_keeper: dict = {}
+
+_kept: dict = {"index": None}
+
 _started = False
 
 
@@ -161,15 +168,22 @@ def configure(mode: str | None = None, minutes=None) -> dict:
         return dict(_config)
 
 
-def state() -> dict:
-    """The settings, any run waiting on an answer, and the last restart this made."""
-    return {
+def state(keeper: bool = False) -> dict:
+    """The settings, any run waiting on an answer, and the last restart this made.
+
+    Args:
+        keeper: Include where to ask for a restart while ComfyUI does not answer.
+    """
+    found = {
         "config": dict(_config),
         "alert": dict(_alert),
         "last": dict(_last),
         "restarting": _busy["on"],
         "can_restart": gates.RESTART,
     }
+    if keeper and _keeper.get("token"):
+        found["keeper"] = {"port": _keeper["port"], "token": _keeper["token"]}
+    return found
 
 
 def dismiss(prompt_id: str) -> dict:
@@ -239,12 +253,20 @@ def _remember(fingerprint: str) -> None:
     _write("attempts.json", kept)
 
 
-def _base_url() -> tuple[str, ssl.SSLContext | None]:
-    port, host, secure = 8188, "127.0.0.1", False
+def _port() -> int:
     try:
         from comfy.cli_args import args
 
-        port = int(args.port)
+        return int(args.port)
+    except Exception:  # noqa: BLE001
+        return 8188
+
+
+def _base_url() -> tuple[str, ssl.SSLContext | None]:
+    port, host, secure = _port(), "127.0.0.1", False
+    try:
+        from comfy.cli_args import args
+
         listen = str(args.listen or "").split(",")[0].strip()
         if listen and listen not in ("0.0.0.0", "::", "*"):
             host = listen
@@ -337,8 +359,8 @@ def _interrupt() -> None:
 def _command() -> list:
     """The command line this ComfyUI was started with, to start it again."""
     argv = sys.argv.copy()
-    if "--windows-standalone-build" in argv:
-        argv.remove("--windows-standalone-build")
+    if "--windows-standalone-build" in argv and "--disable-auto-launch" not in argv:
+        argv.append("--disable-auto-launch")
     flags = ["-s"] if sys.flags.no_user_site else []
     if argv and argv[0].endswith("__main__.py"):
         module = os.path.basename(os.path.dirname(argv[0]))
@@ -356,19 +378,96 @@ def _helper() -> str:
     return str(path)
 
 
-def _spawn_helper() -> None:
-    command = base64.b64encode(json.dumps(_command()).encode("utf-8")).decode("ascii")
-    args = [sys.executable, _helper(), str(os.getpid()), os.getcwd(), command,
-            str(EXIT_WAIT), str(_file("restart.log"))]
+def _encoded_command() -> str:
+    return base64.b64encode(json.dumps(_command()).encode("utf-8")).decode("ascii")
+
+
+def _spawn(args: list, env: dict | None = None, fds: tuple = ()) -> None:
+    """Start a process that outlives this one."""
     if os.name == "nt":
         detached = 0x00000008 | 0x00000200
         try:
-            subprocess.Popen(args, creationflags=detached | 0x01000000, close_fds=True)
+            subprocess.Popen(args, env=env, creationflags=detached | 0x01000000, close_fds=True)
         except OSError:
-            subprocess.Popen(args, creationflags=detached, close_fds=True)
+            subprocess.Popen(args, env=env, creationflags=detached, close_fds=True)
         return
-    subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True,
+                     pass_fds=fds)
+
+
+def _spawn_helper() -> None:
+    _spawn([sys.executable, _helper(), str(os.getpid()), os.getcwd(), _encoded_command(),
+            str(EXIT_WAIT), str(_file("restart.log"))])
+
+
+def _job_key(prompt_id: str) -> str:
+    return hashlib.sha256(prompt_id.encode("utf-8")).hexdigest()[:24]
+
+
+def _keep_queue(running, pending) -> None:
+    """Keep the queue on disk, one file per job, for the keeper to queue again."""
+    jobs = _jobs(running, pending)
+    index = [[_job_key(job["prompt_id"]), job["stalled"]] for job in jobs]
+    if index == _kept["index"]:
+        return
+    folder = _keeper["jobs"]
+    try:
+        folder.mkdir(exist_ok=True)
+        wanted = {key for key, _stalled in index}
+        for path in folder.glob("*.json"):
+            if path.stem not in wanted:
+                path.unlink()
+        for (key, _stalled), job in zip(index, jobs):
+            path = folder / f"{key}.json"
+            if not path.is_file():
+                saved = {name: value for name, value in job.items() if name != "stalled"}
+                path.write_text(json.dumps(saved, default=str), "utf-8")
+        _keeper["index"].write_text(json.dumps(index), "utf-8")
+    except (OSError, TypeError, ValueError) as error:
+        logger.debug("queue not kept (%s: %s)", type(error).__name__, error)
+        return
+    _kept["index"] = index
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _start_keeper() -> None:
+    """Start the process that restarts ComfyUI when ComfyUI no longer answers."""
+    instance = _port()
+    _keeper.update(index=_file(f"queue-{instance}.json"), jobs=_file(f"queue-{instance}"))
+    _keep_queue(*monitor._queue_state())
+    token = secrets.token_urlsafe(24)
+    config = {
+        "port": _free_port(),
+        "pid": os.getpid(),
+        "index": str(_keeper["index"]),
+        "jobs": str(_keeper["jobs"]),
+        "requeue": str(_file("requeue.json")),
+        "helper": _helper(),
+        "cwd": os.getcwd(),
+        "command": _encoded_command(),
+        "log": str(_file("restart.log")),
+    }
+    fds: tuple = ()
+    if os.name != "nt":
+        read_end, write_end = os.pipe()
+        config["fd"] = read_end
+        fds = (read_end,)
+        _keeper["pipe"] = write_end
+    encoded = base64.b64encode(json.dumps(config).encode("utf-8")).decode("ascii")
+    keeper = str(Path(__file__).with_name("keeper.py"))
+    env = dict(os.environ, OPEN_MANAGER_KEEPER_TOKEN=token)
+    try:
+        _spawn([sys.executable, "-I", keeper, encoded], env, fds)
+    finally:
+        for fd in fds:
+            os.close(fd)
+    _keeper.update(port=config["port"], token=token)
 
 
 def _die() -> None:
@@ -389,14 +488,7 @@ def _die() -> None:
 
 def _restart(jobs: list, reason: str) -> None:
     """Save the queue and start ComfyUI over."""
-    now = time.time()
-    tried = _attempts(now)
-    for job in jobs:
-        if job["stalled"]:
-            job["fingerprint"] = _fingerprint(job["prompt"])
-            if job["fingerprint"] in tried:
-                job["skip"] = "it stopped answering again after the last restart"
-    _write("requeue.json", {"at": now, "reason": reason, "jobs": jobs})
+    _write("requeue.json", {"at": time.time(), "reason": reason, "jobs": jobs})
     logger.warning("restarting ComfyUI: %s. %d job(s) saved to queue again", reason, len(jobs))
     for handler in list(getattr(logger, "handlers", [])):
         try:
@@ -492,7 +584,9 @@ def unstick(grace: float, reason: str, now: bool = False) -> dict:
 
 
 def _tick(now: float) -> None:
-    running, _pending = monitor._queue_state()
+    running, pending = monitor._queue_state()
+    if _keeper.get("token"):
+        _keep_queue(running, pending)
     if not running:
         _watch.update(prompt="", mark=None, moved=0.0)
         if _alert:
@@ -561,17 +655,19 @@ def _requeue_saved() -> None:
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(2.0)
+        tried = _attempts(time.time())
         for job in jobs:
-            if job.get("skip"):
-                record["skipped"].append(str(job.get("skip")))
+            fingerprint = _fingerprint(job.get("prompt")) if job.get("stalled") else ""
+            if fingerprint in tried:
+                record["skipped"].append("it stopped answering again after the last restart")
                 continue
             why = _queue_job(base, context, job)
             if why:
                 record["failed"].append(why)
                 continue
             record["requeued"] += 1
-            if job.get("stalled") and job.get("fingerprint"):
-                _remember(str(job["fingerprint"]))
+            if fingerprint:
+                _remember(fingerprint)
     _last.clear()
     _last.update(record)
     _write("last.json", _last)
@@ -591,4 +687,9 @@ def start() -> None:
     if isinstance(last, dict):
         _last.update(last)
     threading.Thread(target=_requeue_saved, daemon=True, name="om-requeue").start()
+    if gates.RESTART:
+        try:
+            _start_keeper()
+        except Exception as error:  # noqa: BLE001
+            logger.warning("could not start the keeper (%s: %s)", type(error).__name__, error)
     threading.Thread(target=_watchdog, daemon=True, name="om-stall-watch").start()

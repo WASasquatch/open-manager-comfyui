@@ -3,32 +3,37 @@ import { piniaStores } from "../shared.mjs";
 
 const MODULE = "custom_nodes.frontend_only";
 
+const ADDS = new Set(["updateNodeDefs", "addNodeDef"]);
+
 const cleared = new Map();
 
 function defStore() {
   const store = piniaStores()?.get("nodeDef");
   return store?.nodeDefsByName && typeof store.nodeDefsByName === "object"
     && typeof store.$onAction === "function"
+    && [...ADDS].every((name) => typeof store[name] === "function")
     ? store
     : null;
 }
 
 function clearBadges(store) {
+  const defs = store.nodeDefsByName;
+  const raw = defs.__v_raw || defs;
   let changed = false;
-  for (const def of Object.values(store.nodeDefsByName)) {
-    if (def?.python_module !== MODULE) continue;
-    const source = def.nodeSource;
+  for (const name of Object.keys(raw)) {
+    const source = raw[name]?.python_module === MODULE ? raw[name].nodeSource : null;
     if (!source?.badgeText || cleared.has(source)) continue;
-    cleared.set(source, source.badgeText);
-    source.badgeText = "";
+    const shown = defs[name].nodeSource;
+    cleared.set(source, [shown, source.badgeText]);
+    shown.badgeText = "";
     changed = true;
   }
   if (changed) app.canvas?.setDirty?.(true, true);
 }
 
 function restoreBadges() {
-  for (const [source, text] of cleared) {
-    try { source.badgeText = text; } catch {}
+  for (const [shown, text] of cleared.values()) {
+    try { shown.badgeText = text; } catch {}
   }
   cleared.clear();
   app.canvas?.setDirty?.(true, true);
@@ -42,14 +47,16 @@ export default {
     + "hidden. On, those nodes carry no source badge.",
   issues: ["Comfy-Org/ComfyUI_frontend#7618"],
   defaultValue: true,
-  verified: "1.54.8",
+  verified: "1.55.17",
   check() {
     if (!defStore()) return "ComfyUI's nodeDef store has changed";
     return "";
   },
   on(track, standDown) {
     const store = defStore();
+    let due = false;
     const sweep = () => {
+      due = false;
       try {
         clearBadges(store);
       } catch (error) {
@@ -57,7 +64,12 @@ export default {
       }
     };
     const stop = store.$onAction(({ name, after }) => {
-      if (/nodedef/i.test(String(name))) after(sweep);
+      if (!ADDS.has(name)) return;
+      after(() => {
+        if (due) return;
+        due = true;
+        queueMicrotask(sweep);
+      });
     });
     track(() => {
       stop?.();

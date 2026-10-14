@@ -3,6 +3,7 @@ import { api } from "../../../../scripts/api.js";
 import { API } from "../base.mjs";
 import { el } from "../ui.mjs";
 import { piniaStores } from "./shared.mjs";
+import "./early-events.mjs";
 
 const PATCH_FILE = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*\.mjs$/;
 

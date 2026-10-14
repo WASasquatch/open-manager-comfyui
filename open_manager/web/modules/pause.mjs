@@ -8,9 +8,14 @@ import { workflowGraph, workflowGraphById, workflowOfJob, openWorkflowByPath } f
 
 const pauseState = {
   running: false, busy: false, fixed: null, queued: new Set(), wired: false, resumable: null,
+  prompts: new Map(), edited: false, checkTimer: 0,
 };
 
 const RUN_MENU_WAIT = 1500;
+
+const EDIT_CHECK_MS = 250;
+
+const SILENT_MODES = new Set([2, 4]);
 
 function pauseOn() {
   return panelSetting("openManager.pauseButton", true) !== false;
@@ -65,7 +70,7 @@ function controlledFromState(state) {
   return found;
 }
 
-function liveWidget(executionId, name) {
+function liveNode(executionId) {
   const parts = String(executionId).split(":");
   let graph = app.graph;
   let node = null;
@@ -74,7 +79,104 @@ function liveWidget(executionId, name) {
     if (!node) return null;
     if (index < parts.length - 1) graph = node.subgraph;
   }
-  return (node?.widgets || []).find((one) => one.name === name) || null;
+  return node;
+}
+
+function liveWidget(executionId, name) {
+  return (liveNode(executionId)?.widgets || []).find((one) => one.name === name) || null;
+}
+
+function same(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => same(a[key], b[key]));
+}
+
+function samePrompt(now, then) {
+  const ids = Object.keys(now || {});
+  if (ids.length !== Object.keys(then || {}).length) return false;
+  return ids.every((id) => now[id]?.class_type === then[id]?.class_type
+    && same(now[id]?.inputs || {}, then[id]?.inputs || {}));
+}
+
+function pausedPrompt(record) {
+  const key = pauseKey(record);
+  if (!pauseState.prompts.has(key)) {
+    pauseState.prompts.set(key, api.fetchApi(
+      `${API}/pause/prompt?workflow=${encodeURIComponent(record.workflow_id)}`)
+      .then((answer) => answer.json()).then((answer) => answer?.prompt || null)
+      .catch(() => null));
+  }
+  return pauseState.prompts.get(key);
+}
+
+function looksEdited(paused) {
+  for (const [id, data] of Object.entries(paused)) {
+    const node = liveNode(id);
+    if (!node || node.type !== data?.class_type || SILENT_MODES.has(node.mode)) return true;
+    for (const [name, value] of Object.entries(data.inputs || {})) {
+      if (Array.isArray(value)) continue;
+      const widget = node.widgets?.find((one) => one.name === name);
+      if (!widget || widget.serializeValue || widget.options?.serialize === false) continue;
+      if (!same(widget.value, value)) return true;
+    }
+  }
+  return false;
+}
+
+function checkEdited() {
+  clearTimeout(pauseState.checkTimer);
+  pauseState.checkTimer = setTimeout(async () => {
+    const record = pauseState.resumable;
+    const paused = record && record.workflow_id === String(app.graph?.id || "")
+      ? await pausedPrompt(record) : null;
+    const edited = !!paused && pauseState.resumable === record && looksEdited(paused);
+    if (edited === pauseState.edited) return;
+    pauseState.edited = edited;
+    paintResume();
+  }, EDIT_CHECK_MS);
+}
+
+function setWorkflowValue(workflow, executionId, name, value) {
+  const parts = String(executionId).split(":");
+  const definitions = new Map(
+    (workflow?.definitions?.subgraphs || []).map((one) => [String(one.id), one]));
+  let nodes = workflow?.nodes;
+  let node = null;
+  for (let index = 0; index < parts.length; index++) {
+    node = (nodes || []).find((one) => String(one.id) === parts[index]);
+    if (!node) return;
+    if (index < parts.length - 1) nodes = definitions.get(String(node.type))?.nodes;
+  }
+  const template = pauseTemplate(node.type);
+  const at = template ? template.findIndex((one) => one.name === name) : -1;
+  if (at >= 0 && Array.isArray(node.widgets_values)
+    && template.length === node.widgets_values.length) node.widgets_values[at] = value;
+}
+
+async function runAsNew(data) {
+  const record = pauseState.resumable;
+  if (!record || !data?.output || record.workflow_id !== String(data.workflow?.id || "")) return;
+  if (pauseState.queued.has(pauseKey(record))) return;
+  const paused = await pausedPrompt(record);
+  if (!paused || samePrompt(data.output, paused)) return;
+  let changed = false;
+  for (const item of record.widgets || []) {
+    const inputs = data.output[item.node]?.inputs;
+    if (!inputs || !same(inputs[item.widget], item.run) || item.canvas === undefined
+      || same(item.canvas, item.run)) continue;
+    inputs[item.widget] = item.canvas;
+    setWorkflowValue(data.workflow, item.node, item.widget, item.canvas);
+    const widget = liveWidget(item.node, item.widget);
+    if (widget && same(widget.value, item.run)) widget.value = item.canvas;
+    changed = true;
+  }
+  pauseState.queued.add(pauseKey(record));
+  pauseState.edited = true;
+  if (changed) app.graph?.setDirtyCanvas(true, true);
+  paintResume();
 }
 
 function pauseKey(record) {
@@ -123,8 +225,12 @@ async function refreshResume() {
   const record = resumeOn() && workflowId ? await readPause(workflowId) : null;
   if (record === undefined) return null;
   if (String(app.graph?.id || "") !== workflowId) return null;
+  if (!record || !pauseState.resumable || pauseKey(record) !== pauseKey(pauseState.resumable)) {
+    pauseState.edited = false;
+  }
   pauseState.resumable = record;
   paintResume();
+  if (record) checkEdited();
   return record;
 }
 
@@ -137,7 +243,7 @@ function paintResume() {
   const group = document.querySelector(".queue-button-group");
   const record = pauseState.resumable;
   const on = !!record && resumeOn() && !pauseState.running && !pauseState.busy
-    && record.workflow_id === String(app.graph?.id || "");
+    && !pauseState.edited && record.workflow_id === String(app.graph?.id || "");
   for (const other of document.querySelectorAll(".om-resume")) {
     if (other !== group) other.classList.remove("om-resume");
   }
@@ -283,8 +389,12 @@ async function pauseRun(mode) {
     const record = await (await api.fetchApi(
       `${API}/pause?workflow=${encodeURIComponent(answer.workflow_id)}`)).json().catch(() => null);
     if (record?.pause) {
-      if (record.pause.workflow_id === String(app.graph?.id || "")) pauseState.resumable = record.pause;
+      if (record.pause.workflow_id === String(app.graph?.id || "")) {
+        pauseState.resumable = record.pause;
+        pauseState.edited = false;
+      }
       restorePausedWidgets(record.pause);
+      checkEdited();
     }
   } catch (error) {
     notify("Not paused", error.message || "The run could not be paused.");
@@ -381,6 +491,22 @@ function wirePause() {
     if (liveOn()) restorePauseForGraph();
   });
   api.addEventListener("reconnected", () => restorePauseForGraph());
+  api.addEventListener("graphChanged", () => {
+    if (pauseState.resumable) checkEdited();
+  });
+  const plain = api.queuePrompt;
+  if (typeof plain === "function" && !plain.__omPause) {
+    const queuePrompt = async function queuePrompt(number, data, ...rest) {
+      try {
+        await runAsNew(data);
+      } catch (error) {
+        console.warn("[Open Manager] Pause: run not checked against the pause", error);
+      }
+      return plain.call(this, number, data, ...rest);
+    };
+    queuePrompt.__omPause = true;
+    api.queuePrompt = queuePrompt;
+  }
   api.addEventListener("promptQueued", () => {
     const workflowId = String(app.graph?.id || "");
     if (pauseState.pendingWorkflow && pauseState.pendingWorkflow === workflowId) {

@@ -53,7 +53,9 @@ from . import (
     docs as documents,
     files as host_files,
     gates,
+    generation,
     marks,
+    media,
     programs as desk_programs,
     qol as qol_patches,
     settingsfile,
@@ -2016,9 +2018,11 @@ def register_routes() -> None:
     stall.start()
 
     @PromptServer.instance.routes.get(f"{PREFIX}/stall")
-    async def stall_state(_request: web.Request) -> web.Response:
+    async def stall_state(request: web.Request) -> web.Response:
         """What happens when a run stops answering, and anything waiting on an answer."""
-        return web.json_response({"ok": True, **stall.state()})
+        peer = request.transport.get_extra_info("peername") if request.transport else None
+        local = (peer[0] if peer else "") in _LOOPBACK
+        return web.json_response({"ok": True, **stall.state(keeper=local)})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/stall/config")
     @_json_body
@@ -2100,6 +2104,13 @@ def register_routes() -> None:
         return web.json_response({"ok": True, "available": run_pause.available(),
                                   "pause": found})
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/pause/prompt")
+    async def pause_prompt(request: web.Request) -> web.Response:
+        """The prompt a workflow's pause was taken from."""
+        workflow_id = request.query.get("workflow", "").strip()
+        found = await asyncio.to_thread(run_pause.prompt_of, workflow_id) if workflow_id else None
+        return web.json_response({"ok": True, "prompt": found})
+
     @PromptServer.instance.routes.post(f"{PREFIX}/pause/discard")
     @_json_body
     async def pause_discard(request: web.Request, body: dict) -> web.Response:
@@ -2139,6 +2150,40 @@ def register_routes() -> None:
     async def timer_forget(_request: web.Request, body: dict) -> web.Response:
         """Drop one run's timings."""
         return web.json_response({"ok": timing.forget(str(body.get("prompt") or ""))})
+
+    generation.install()
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/generation")
+    async def generation_state(_request: web.Request) -> web.Response:
+        """Whether runs write their generation time onto their assets."""
+        return web.json_response({"ok": True, **generation.state()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/generation")
+    @_json_body
+    async def generation_switch(_request: web.Request, body: dict) -> web.Response:
+        """Turn writing generation time onto assets on or off."""
+        return web.json_response({"ok": True, **generation.configure(_flag(body.get("on")))})
+
+    media.install()
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/media-assets")
+    async def media_state(_request: web.Request) -> web.Response:
+        """Whether deleting an output in Media Assets also deletes its file."""
+        return web.json_response({"ok": True, **media.state()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/media-assets")
+    @_json_body
+    async def media_switch(_request: web.Request, body: dict) -> web.Response:
+        """Turn deleting output files with their assets on or off."""
+        return web.json_response({"ok": True,
+                                  **media.configure(_flag(body.get("delete_files")))})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/media-assets/job-files")
+    async def media_job_files(request: web.Request) -> web.Response:
+        """The output and temp files a job made."""
+        job = request.query.get("job", "").strip()
+        files = await asyncio.to_thread(media.job_files, job)
+        return web.json_response({"ok": True, "files": files})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/monitor/free")
     @_json_body

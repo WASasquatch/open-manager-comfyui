@@ -17,7 +17,8 @@ from pathlib import Path
 
 from . import log, paths, settingsfile
 
-__all__ = ["available", "discard", "install", "listing", "live_widgets", "read", "request"]
+__all__ = ["available", "discard", "install", "listing", "live_widgets", "prompt_of", "read",
+           "request"]
 
 logger = log.get_logger("pause")
 
@@ -721,6 +722,22 @@ def _in_flight(workflow_id: str) -> bool:
         return workflow_id in _settling or (live is not None and live["workflow_id"] == workflow_id)
 
 
+def _saved(workflow_id: str) -> list[dict]:
+    return [manifest for manifest in (
+        _manifest(workflow_id),
+        None if _in_flight(workflow_id) else _manifest_at(_live_dir(workflow_id)),
+    ) if manifest is not None]
+
+
+def prompt_of(workflow_id: str) -> dict | None:
+    """The prompt the newer of a workflow's pause and its live save was taken from."""
+    found = _saved(workflow_id)
+    if not found:
+        return None
+    prompt = max(found, key=lambda one: float(one.get("created_at") or 0)).get("prompt")
+    return prompt if isinstance(prompt, dict) else None
+
+
 def read(workflow_id: str) -> dict | None:
     """A workflow's pause and what its last unfinished run saved, without the prompt.
 
@@ -728,10 +745,7 @@ def read(workflow_id: str) -> dict | None:
         ``{workflow_id, prompt_id, bytes, widgets, created_at, nodes}``, prompt, widgets and
         time from the newer of the two, or None where there is neither.
     """
-    found = [manifest for manifest in (
-        _manifest(workflow_id),
-        None if _in_flight(workflow_id) else _manifest_at(_live_dir(workflow_id)),
-    ) if manifest is not None]
+    found = _saved(workflow_id)
     if not found:
         return None
     newest = max(found, key=lambda one: float(one.get("created_at") or 0))

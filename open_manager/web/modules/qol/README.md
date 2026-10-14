@@ -9,6 +9,7 @@ Settings > Open Manager > Quality of Life Patches.
 |---|---|
 | `loader.mjs` | Lists, imports and runs the patches, and registers their settings |
 | `shared.mjs` | Helpers more than one patch uses |
+| `assets/` | The Media Assets panel and the assets behind it |
 | `canvas/` | Canvas input and navigation |
 | `interface/` | Menus, dialogs and the rest of ComfyUI's chrome |
 | `nodes/` | Node bodies, widgets, badges and node lists |

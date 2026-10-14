@@ -634,7 +634,7 @@ function dropTaskbar() {
 function mountTaskbar() {
   if (taskBar?.isConnected) return;
   const where = taskbarHost();
-  taskBar = el("div", `om-task${where.flow ? "" : " om-task-pinned"}`);
+  taskBar = el("div", "om-task");
   taskBar.setAttribute("role", "toolbar");
   taskBar.setAttribute("aria-label", "Open Manager windows");
   taskBar.setAttribute("aria-orientation", "horizontal");
@@ -682,7 +682,7 @@ function paintTaskbar() {
   taskStrip.replaceChildren(...entries.map((entry) => (entry.members.length > 1
     ? buildTaskGroup(entry)
     : buildTaskOne(entry.members[0]))));
-  setTaskRoom(taskBar.getBoundingClientRect().height);
+  placeTaskbar();
   const front = taskStrip.querySelector('[aria-current="true"]')
     || taskStrip.firstElementChild || taskStart;
   for (const one of taskWalk()) one.tabIndex = one === front ? 0 : -1;
@@ -725,6 +725,13 @@ function taskbarHides() {
 function taskbarShow(on) {
   if (!taskBar) return;
   taskBar.classList.toggle("om-task-hidden", taskbarHides() && !on);
+}
+
+function placeTaskbar() {
+  if (!taskBar) return;
+  const hides = taskbarHides();
+  taskBar.classList.toggle("om-task-pinned", hides || !taskbarHost().flow);
+  setTaskRoom(hides ? 0 : taskBar.getBoundingClientRect().height);
 }
 
 function watchTaskbarEdge() {

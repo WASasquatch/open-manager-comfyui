@@ -11,9 +11,19 @@ const UP_EVERY = 1500;
 
 const REQUEUE_TRIES = 40;
 
+const ANSWER_WAIT = 5000;
+
+const UP_ANSWER_WAIT = 10000;
+
+const LOCAL_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
+
 let watching = false;
 
 let lastShown = 0;
+
+let lastAt = 0;
+
+let keeper = null;
 
 let alertToast = null;
 
@@ -21,12 +31,22 @@ let alertFor = "";
 
 let pending = null;
 
-async function stallCall(path, body) {
+async function stallCall(path, body, wait = 0) {
   const options = body === undefined ? {} : {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   };
+  if (wait) options.signal = AbortSignal.timeout(wait);
   const answer = await api.fetchApi(`${API}/stall${path}`, options);
   return answer.json();
+}
+
+async function stallState(wait = 0) {
+  const found = await stallCall("", undefined, wait);
+  if (found) {
+    keeper = found.keeper || null;
+    if (found.last?.at) lastAt = found.last.at;
+  }
+  return found;
 }
 
 function pushStallConfig() {
@@ -55,7 +75,8 @@ function minutesText(seconds) {
 
 async function serverUp() {
   try {
-    const answer = await api.fetchApi("/system_stats", { cache: "no-store" });
+    const answer = await api.fetchApi("/system_stats",
+      { cache: "no-store", signal: AbortSignal.timeout(UP_ANSWER_WAIT) });
     return answer.ok;
   } catch {
     return false;
@@ -67,7 +88,7 @@ async function awaitRequeue(note, before) {
     if (pending !== note) return;
     let found = null;
     try {
-      found = await stallCall("");
+      found = await stallState();
     } catch {
       found = null;
     }
@@ -146,7 +167,7 @@ function stopNote() {
 async function unstickNow() {
   let before = 0;
   try {
-    before = (await stallCall(""))?.last?.at || 0;
+    before = (await stallState())?.last?.at || 0;
   } catch {
     before = 0;
   }
@@ -165,15 +186,47 @@ async function unstickNow() {
   awaitRestart(note, before);
 }
 
+async function forceRestart() {
+  const before = lastAt;
+  let answer;
+  try {
+    const reply = await fetch(`http://127.0.0.1:${keeper.port}/restart`,
+      { method: "POST", body: keeper.token, signal: AbortSignal.timeout(ANSWER_WAIT) });
+    answer = await reply.json();
+  } catch {
+    answer = { ok: false, reason: "" };
+  }
+  if (!answer?.ok) {
+    notify("Not restarted", answer?.reason || "");
+    return;
+  }
+  const note = stopNote();
+  note.restarting();
+  pending = note;
+  awaitRestart(note, before);
+}
+
 async function restartAndRequeue() {
   let current = null;
   try {
-    current = await stallCall("");
+    current = await stallState(ANSWER_WAIT);
   } catch {
     current = null;
   }
   if (current && current.can_restart === false) {
     notify("Restart is switched off", "This machine is set not to restart from Open Manager.");
+    return;
+  }
+  if (!current && keeper && LOCAL_HOSTS.includes(location.hostname)) {
+    const force = await chooseAction("ComfyUI is not answering", "",
+      [{ key: "go", label: "Restart and requeue", primary: true }], {
+        wide: true,
+        facts: [
+          ["First", "Ends ComfyUI's process and starts it again"],
+          ["Then", "Queues the running job and every waiting job again"],
+        ],
+      });
+    if (force) forceRestart();
     return;
   }
   const go = await chooseAction("Restart and requeue?", "",
@@ -258,10 +311,12 @@ function watchStalls() {
     if (data.unstuck) showUnstuck(data.unstuck);
     if (data.unsticking?.working) pending?.working();
   });
-  stallCall("").then((found) => {
+  const refresh = () => stallState().then((found) => {
     if (found?.alert?.prompt_id) showAlert(found.alert);
     if (found?.last) showLast(found.last);
   }).catch(() => {});
+  api.addEventListener("reconnected", refresh);
+  refresh();
 }
 
 export { pushStallConfig, restartAndRequeue, tdrStatus, watchStalls };
