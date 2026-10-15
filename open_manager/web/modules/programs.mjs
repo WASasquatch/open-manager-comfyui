@@ -1,16 +1,18 @@
+import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { API, ICON_PROGRAM } from "./base.mjs";
 import { el, safeArt, toast, liveTip, notify, askText, confirmAction, openRowMenu, countNote } from "./ui.mjs";
-import { WINDOW_SIZES, windowSize, createFloatingPanel, floatingPanel } from "./windows.mjs";
+import { WINDOW_SIZES, windowSize, createFloatingPanel, floatingPanel, taskbarOn } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
 import { whenText } from "./installed.mjs";
 import { dlPost, bytesText } from "./net.mjs";
-import { addNodeAt, canvasCentre, graphNodes, nodeDragFrom } from "./node-drag.mjs";
+import { addNodeAt, canvasCentre, graphNodes, nodeDragFrom, nodeCard } from "./node-drag.mjs";
 import { TASK_GROUP_NAMES } from "./taskbar.mjs";
 import { deskProgramsOff, hideDesk } from "./desktop.mjs";
 import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow } from "./workflows.mjs";
 import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.mjs";
 import { runSnapshot } from "./snapshot-store.mjs";
+import { sessionReady } from "./session.mjs";
 
 const PROGRAM_BASE = new URL("./programs/", new URL("../", import.meta.url)).href;
 
@@ -127,12 +129,20 @@ function programHolder(entry, view, carry) {
   return panel;
 }
 
+function focusShown(panel) {
+  const node = panel?._omFocus;
+  if (!sessionReady || !node?.isConnected) return;
+  node.focus({ preventScroll: true });
+  node.select?.();
+}
+
 async function runProgram(entry, carried, wanted = "") {
   const view = wanted || programView(entry);
   const open = floatingPanel(`${entry.id}:${view}`);
   if (open) {
     open.present();
     if (carried !== undefined && typeof open._omCarry === "function") open._omCarry(carried);
+    focusShown(open);
     return open;
   }
   let made = programModules.get(entry.id) || null;
@@ -175,6 +185,77 @@ async function loadPrograms() {
     .filter((one) => !programOff(one.id))
     .map(programRow);
   for (const row of programRows) TASK_GROUP_NAMES[row.key] = row.label;
+  makeProgramCommands();
+}
+
+const PROGRAM_COMMAND = "openmanager.program.";
+
+let programCommands = false;
+
+function keybindingStore() {
+  try {
+    return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties
+      ?.$pinia?._s?.get("keybinding") || null;
+  } catch {
+    return null;
+  }
+}
+
+function keyCombo(text) {
+  const parts = String(text || "").split("+");
+  const key = parts.pop();
+  if (!key) return null;
+  return { key, ctrl: parts.includes("ctrl"), alt: parts.includes("alt"),
+           shift: parts.includes("shift") };
+}
+
+function comboTaken(combo) {
+  const want = `${combo.key.toUpperCase()}:${combo.ctrl}:${combo.alt}:${combo.shift}`;
+  try {
+    return (keybindingStore()?.keybindings || [])
+      .some((one) => one?.combo?.serialize?.() === want);
+  } catch {
+    return false;
+  }
+}
+
+function makeProgramCommands() {
+  if (programCommands || !programRows.length || typeof app.registerExtension !== "function") return;
+  programCommands = true;
+  const rows = programRows.filter((row) => row.program.surfaces?.start
+    || row.program.surfaces?.desktop);
+  const keybindings = [];
+  for (const row of rows) {
+    const combo = keyCombo(row.program.keys);
+    if (combo && !comboTaken(combo)) {
+      keybindings.push({ commandId: `${PROGRAM_COMMAND}${row.key}`, combo });
+    }
+  }
+  try {
+    app.registerExtension({
+      name: "openmanager.programs",
+      commands: rows.map((row) => ({
+        id: `${PROGRAM_COMMAND}${row.key}`,
+        label: `Open Manager: open ${row.label}`,
+        icon: "pi pi-window-maximize",
+        function: () => runProgramById(row.key),
+      })),
+      keybindings,
+    });
+  } catch {
+  }
+}
+
+function programKeysText(id) {
+  try {
+    const combo = keybindingStore()?.getKeybindingByCommandId?.(`${PROGRAM_COMMAND}${id}`)?.combo;
+    if (!combo?.key) return "";
+    const key = combo.key.length === 1 ? combo.key.toUpperCase() : combo.key;
+    return [combo.ctrl && "Ctrl", combo.alt && "Alt", combo.shift && "Shift", key]
+      .filter(Boolean).join("+");
+  } catch {
+    return "";
+  }
 }
 
 let scopeAnswer = null;
@@ -231,20 +312,26 @@ function programStore(id) {
         return fallback;
       }
     },
-    set: async (name, value) => {
-      try {
-        const answer = await (await api.fetchApi(
-          `${API}/programs/store?id=${encodeURIComponent(id)}`)).json();
-        const held = answer?.ok ? (answer.data || {}) : {};
-        held[name] = value;
-        const kept = await dlPost("/programs/store", { id, data: held });
-        return kept?.ok === true;
-      } catch {
-        return false;
-      }
+    set: (name, value) => {
+      const run = (storeWrites.get(id) || Promise.resolve()).then(async () => {
+        try {
+          const answer = await (await api.fetchApi(
+            `${API}/programs/store?id=${encodeURIComponent(id)}`)).json();
+          const held = answer?.ok ? (answer.data || {}) : {};
+          held[name] = value;
+          const kept = await dlPost("/programs/store", { id, data: held });
+          return kept?.ok === true;
+        } catch {
+          return false;
+        }
+      });
+      storeWrites.set(id, run);
+      return run;
     },
   };
 }
+
+const storeWrites = new Map();
 
 function programWindow(entry, options = {}) {
   const view = String(options.view || "main").replace(/[^a-z0-9-]/gi, "").slice(0, 24) || "main";
@@ -264,10 +351,15 @@ function programWindow(entry, options = {}) {
     setTitle: (text) => panel.setTitle(String(text || "").slice(0, 80)),
     setBadge: (text) => panel.setBadge(String(text || "").slice(0, 24)),
     present: () => panel.present(),
+    minimise: () => (taskbarOn() ? panel.minimise() : panel.fold()),
     close: () => panel.destroy(),
     isOpen: () => panel.el.isConnected,
     onClose: (fn) => { panel.el.addEventListener("om-prog-close", fn, { once: true }); },
     onCarry: (fn) => { panel._omCarry = fn; },
+    autofocus: (node) => {
+      panel._omFocus = node;
+      requestAnimationFrame(() => focusShown(panel));
+    },
     onKey: (fn) => {
       panel.el.addEventListener("keydown", (event) => {
         const on = event.target;
@@ -497,6 +589,20 @@ function programAssets() {
   };
 }
 
+function placeNode(type) {
+  hideDesk();
+  const made = addNodeAt(type, canvasCentre(), { centred: true });
+  if (!made) return false;
+  const canvas = app.canvas;
+  canvas?.deselectAll?.();
+  canvas?.selectNode?.(made);
+  canvas?.setDirty?.(true, true);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    canvas?.canvas?.focus?.({ preventScroll: true });
+  }));
+  return true;
+}
+
 async function programFocus(id, { path = "", workflow = "" } = {}) {
   const parts = parseNodePath(id);
   if (!parts) return "missing";
@@ -611,8 +717,11 @@ function programApi(entry, view = "main") {
     canWrite: () => deskGates.writes === true,
     graph: {
       nodes: () => graphNodes(),
-      drag: (node, entry) => nodeDragFrom(node, entry),
+      drag: (node, entry, options = {}) => nodeDragFrom(node, entry,
+        { add: typeof options.add === "function" ? options.add : null }),
+      card: (entry) => nodeCard(entry),
       add: (type) => addNodeAt(String(type || ""), canvasCentre()),
+      place: (type) => placeNode(String(type || "")),
       show: () => hideDesk(),
       open: (source, title) => loadWorkflow(source, { title: title ? String(title) : null }),
       focus: (id, where = {}) => programFocus(String(id ?? ""), {
@@ -625,4 +734,4 @@ function programApi(entry, view = "main") {
   };
 }
 
-export { deskGates, loadGates, filesOn, filesWritable, programRows, programOff, programIconArt, runProgram, loadPrograms, SHOWN_KINDS, EDITS_HERE, suffixOf, viewRootOf, assetThumbUrl, runProgramById };
+export { deskGates, loadGates, filesOn, filesWritable, programRows, programOff, programIconArt, runProgram, loadPrograms, SHOWN_KINDS, EDITS_HERE, suffixOf, viewRootOf, assetThumbUrl, runProgramById, programKeysText };

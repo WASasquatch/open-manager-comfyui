@@ -611,6 +611,7 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     reflow: onResize,
     showMinimise: () => { shrink.hidden = modal || !taskbarOn(); },
     present: () => { setMinimised(false); setFolded(false); raise(); },
+    fold: () => setFolded(true),
     setMaskIcon: (url, { bar = true, tint = "" } = {}) => {
       const text = safeArt(url);
       art = text ? { kind: "mask", url: text, bar, tint: TAB_HEX.test(tint) ? tint : "" } : null;

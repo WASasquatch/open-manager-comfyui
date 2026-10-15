@@ -63,7 +63,7 @@ Open Manager → Windows → Taskbar along the bottom** on.
 | Program | Does | Where |
 |---|---|---|
 | Gallery | Browse the images and videos this install has made | desktop, Start menu |
-| Nodes | Search every registered node type, drag one onto the graph | Start menu, ComfyUI |
+| Nodes | Search every registered node type, preview one, drag or add it to the graph | Start menu, ComfyUI, Alt+Q |
 | Outputs | What this ComfyUI has made, newest first | Start menu, ComfyUI |
 | Timer | How long each node takes, live, run by run, workflow by workflow | Start menu |
 | Templates | ComfyUI's workflow templates, in a window | Start menu, ComfyUI |
@@ -78,6 +78,23 @@ Programs are directories under `open_manager/web/programs/`, each with a `manife
 a page: id, author, version, whether it opens one window or several, where it appears, and what
 it declares. The declaration is the author's own and is not verified. A program switched off
 there is not loaded at all.
+
+Each program on the Start menu or the desktop has a command, **Open Manager: open** and its
+name, to bind under **Settings → Keybinding**. A manifest's `keys`, such as `"Alt+Q"`, is its
+default shortcut, shown beside it on the Start menu; it needs Ctrl or Alt, and is skipped when
+the combination is already taken.
+
+**Nodes** opens with the search focused, and the shortcut brings it back with the search
+selected. Results rank exact names first, then names that start with what is typed. Core,
+Partner and Custom narrow by source. Arrow keys or a click select a node and slide out its
+preview: the node as the graph draws it, with its sockets named and coloured by type, its widgets
+at their defaults, and its description. Double-click, Enter or **Add to graph** puts the node at
+the centre of the graph view, selects it and minimises Nodes; dragging drops it where it lands.
+Escape closes the preview, then clears the search.
+
+**Video Player** plays what it opens and stops at the end. **Loop** or **Play next** carries
+on instead, one at a time, and is remembered. Left and right arrows change file, except on the
+seek bar, where they seek five seconds. Space plays and pauses; double-click goes full screen.
 
 **Timer** measures every node on the server as it runs, including runs queued from elsewhere,
 and keeps the last 48 runs. Each workflow tab that has run gets a tab, and under it a chip for

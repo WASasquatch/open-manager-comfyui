@@ -649,17 +649,24 @@ function deskSidebar() {
 }
 
 function fitDeskTab() {
-  if (!deskTab?.isConnected) return;
+  if (!deskTab?.isConnected) return false;
   const side = deskSidebar()?.getBoundingClientRect();
   const wide = side && side.width >= 24 ? Math.round(side.width) : 38;
+  const pad = parseFloat(getComputedStyle(deskTab.parentElement).paddingLeft) || 0;
+  deskTab.style.marginLeft = pad ? `${-pad}px` : "";
+  const was = deskTab.style.width;
   deskTab.style.width = `${wide}px`;
+  return deskTab.style.width !== was;
 }
 
 function watchDeskTabWidth() {
   const side = deskSidebar();
   if (!side || !window.ResizeObserver) return;
   deskSideRoom?.disconnect();
-  deskSideRoom = new ResizeObserver(() => { fitDeskTab(); deskFit(); });
+  deskSideRoom = new ResizeObserver(() => {
+    if (fitDeskTab()) taskbarSync();
+    deskFit();
+  });
   deskSideRoom.observe(side);
 }
 
@@ -734,7 +741,7 @@ function mountDeskTab() {
   }));
   deskTab.onclick = () => { if (deskShown) hideDesk(); else showDesk(); };
   strip.insertBefore(deskTab, strip.firstChild);
-  fitDeskTab();
+  if (fitDeskTab()) taskbarSync();
   watchDeskTabWidth();
   paintDeskTab();
 }

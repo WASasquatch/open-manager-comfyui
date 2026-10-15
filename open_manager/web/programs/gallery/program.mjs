@@ -246,7 +246,8 @@ export const program = {
       };
       fact("Kind", KIND_WORD[item.kind] || "File");
       fact("Size", api.bytes(item.size));
-      fact("Made", api.when(new Date(item.at * 1000)));
+      fact("Modified", new Date(item.at * 1000).toLocaleString(undefined,
+                                                               { dateStyle: "medium", timeStyle: "medium" }));
       if (item.sub) fact("In", item.sub);
       const flow = fact("Workflow", "Reading");
       drawerBody.appendChild(facts);
@@ -593,7 +594,7 @@ export const program = {
       .gal-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
       .gal-facts { display: flex; flex-direction: column; gap: 4px; }
       .gal-fact { display: flex; gap: 8px; font-size: 12px; }
-      .gal-fact-key { flex: none; width: 66px; color: var(--om-muted); }
+      .gal-fact-key { flex: none; width: 70px; color: var(--om-muted); }
       .gal-fact-value { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .gal-tools { flex: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px;
         border-top: 1px solid var(--om-border); background: var(--om-surface); }

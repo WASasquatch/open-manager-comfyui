@@ -633,6 +633,32 @@ sidebarStyle.textContent = `
 .om-node-ghost-body { position: relative; background: var(--om-ghost-body, #353535); }
 .om-node-ghost-slot { position: absolute; width: 7px; height: 7px; border-radius: 50%;
   background: var(--om-ghost-slot, #9a9a9a); }
+.om-node-card { border-radius: 8px; overflow: hidden; background: var(--om-card-body);
+  color: var(--om-card-text); font: 12px/1.3 system-ui, sans-serif;
+  border: 1px solid color-mix(in srgb, var(--om-card-title) 45%, transparent);
+  box-shadow: 0 6px 16px rgba(0,0,0,.35); }
+.om-node-card-bar { padding: 7px 10px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; background: var(--om-card-title); color: var(--om-card-title-text); }
+.om-node-card-body { display: flex; flex-direction: column; gap: 3px; padding: 7px 0 9px; }
+.om-node-card-empty { min-height: 18px; }
+.om-node-card-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
+  align-items: center; min-height: 19px; }
+.om-node-card-slot { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.om-node-card-in { padding-left: 7px; }
+.om-node-card-out { justify-content: flex-end; padding-right: 7px; text-align: right; }
+.om-node-card-dot { width: 9px; height: 9px; flex: none; border-radius: 50%;
+  background: var(--om-dot); }
+.om-node-card-dot-optional { background: transparent; box-shadow: inset 0 0 0 2px var(--om-dot); }
+.om-node-card-dot-list { border-radius: 2px; }
+.om-node-card-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.om-node-card-type { margin-left: 5px; font-size: 10px; opacity: .55; }
+.om-node-card-widget { display: flex; align-items: center; gap: 8px; margin: 1px 8px;
+  padding: 3px 10px; border-radius: 8px; background: var(--om-card-widget);
+  border: 1px solid var(--om-card-widget-line); color: var(--om-card-widget-text); }
+.om-node-card-wname { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--om-card-widget-dim); }
+.om-node-card-wvalue { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; text-align: right; }
 .om-node-name { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
 .om-wf-item { display: flex; align-items: baseline; gap: 10px; text-align: left;
   background: var(--om-surface); border: 1px solid var(--om-border); border-radius: 8px; padding: 8px 12px;
@@ -1006,6 +1032,7 @@ body.om-aero .om-float-tools::after {
 .om-start-img { width: 17px; height: 17px; flex: none; object-fit: contain; }
 .om-start-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
+.om-start-keys { flex: none; color: var(--om-muted); font-size: 11px; }
 .om-start-pin { flex: none; padding: 2px 7px; border: 1px solid var(--om-border);
   border-radius: 5px; background: transparent; color: var(--om-muted); font: inherit;
   font-size: 11px; cursor: pointer; visibility: hidden; }

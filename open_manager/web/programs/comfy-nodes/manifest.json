@@ -13,6 +13,7 @@
   "author": "Open Manager",
   "icon": "comfy-nodes.svg",
   "group": "ComfyUI",
+  "keys": "Alt+Q",
   "surfaces": {
     "desktop": false,
     "start": true

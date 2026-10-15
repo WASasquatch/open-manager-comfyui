@@ -19,7 +19,7 @@ function shownGraph() {
   return app.canvas?.graph || app.graph || null;
 }
 
-function addNodeAt(type, at) {
+function addNodeAt(type, at, { centred = false } = {}) {
   const lg = window.LiteGraph;
   if (!nodeTypeHere({ name: type })) {
     notify("Not added", `${type} is not registered in this ComfyUI, so it cannot be created.`);
@@ -40,6 +40,10 @@ function addNodeAt(type, at) {
   if (!made) {
     notify("Not added", `${type} could not be created.`);
     return null;
+  }
+  if (centred && made.pos?.length >= 2 && made.size?.length >= 2) {
+    made.pos[0] = Math.round(where[0] - made.size[0] / 2);
+    made.pos[1] = Math.round(where[1] - made.size[1] / 2);
   }
   canvas.emitBeforeChange?.();
   try {
@@ -140,34 +144,145 @@ function carryNode(event, type, entry) {
   requestAnimationFrame(() => ghost.remove());
 }
 
+const CARD_WIDGETS = new Set(["INT", "FLOAT", "STRING", "BOOLEAN", "COMBO"]);
+
+function slotTint(type) {
+  const canvas = app.canvas;
+  const shared = canvas?.constructor?.link_type_colors || {};
+  return canvas?.default_connection_color_byType?.[type] || shared[type]
+    || canvas?.default_link_color || "#9a9a9a";
+}
+
+function widgetValue(spec) {
+  const held = spec?.default;
+  if (spec?.type === "COMBO") {
+    const first = held ?? (Array.isArray(spec.options) ? spec.options[0] : undefined);
+    if (first && typeof first === "object") return String(first.content ?? first.name ?? "");
+    return String(first ?? "");
+  }
+  if (spec?.type === "BOOLEAN") return held ? "true" : "false";
+  if (held === undefined || held === null) return "";
+  return String(held).split("\n")[0];
+}
+
+function cardSlot(name, type, side, { optional = false, list = false } = {}) {
+  const slot = el("span", `om-node-card-slot om-node-card-${side}`);
+  const dot = el("span", "om-node-card-dot");
+  dot.classList.toggle("om-node-card-dot-optional", optional);
+  dot.classList.toggle("om-node-card-dot-list", list);
+  dot.style.setProperty("--om-dot", slotTint(type));
+  const label = el("span", "om-node-card-label", name || type);
+  if (name && name !== type) label.appendChild(el("span", "om-node-card-type", type));
+  if (side === "in") slot.append(dot, label);
+  else slot.append(label, dot);
+  return slot;
+}
+
+function nodeCard(entry) {
+  const lg = window.LiteGraph || {};
+  const def = lg.registered_node_types?.[entry?.name]?.nodeData || null;
+  const card = el("div", "om-node-card");
+  const paint = {
+    "--om-card-title": lg.NODE_DEFAULT_COLOR || "#333",
+    "--om-card-body": lg.NODE_DEFAULT_BGCOLOR || "#353535",
+    "--om-card-title-text": lg.NODE_TITLE_COLOR || "#e6edf3",
+    "--om-card-text": lg.NODE_TEXT_COLOR || "#aaa",
+    "--om-card-widget": lg.WIDGET_BGCOLOR || "#222",
+    "--om-card-widget-text": lg.WIDGET_TEXT_COLOR || "#ddd",
+    "--om-card-widget-line": lg.WIDGET_OUTLINE_COLOR || "#666",
+    "--om-card-widget-dim": lg.WIDGET_SECONDARY_TEXT_COLOR || "#999",
+  };
+  for (const [name, value] of Object.entries(paint)) card.style.setProperty(name, value);
+  card.appendChild(el("div", "om-node-card-bar", entry?.display_name || entry?.name || ""));
+  const body = el("div", "om-node-card-body");
+  const specs = def ? Object.values(def.inputs || {})
+    : (entry?.takes || []).map((one) => ({ name: one.name, type: one.type,
+                                           isOptional: one.optional }));
+  const sockets = specs.filter((one) => one && !CARD_WIDGETS.has(one.type));
+  const widgets = specs.filter((one) => one && CARD_WIDGETS.has(one.type));
+  const outs = def ? (def.outputs || [])
+    : (entry?.outputs || []).map((type) => ({ name: type, type }));
+  const rows = Math.max(sockets.length, outs.length);
+  for (let at = 0; at < rows; at += 1) {
+    const line = el("div", "om-node-card-row");
+    const given = sockets[at];
+    const made = outs[at];
+    line.appendChild(given
+      ? cardSlot(String(given.name || ""), String(given.type || ""), "in",
+                 { optional: given.isOptional === true })
+      : el("span"));
+    line.appendChild(made
+      ? cardSlot(String(made.name || ""), String(made.type || ""), "out",
+                 { list: made.is_list === true })
+      : el("span"));
+    body.appendChild(line);
+  }
+  for (const spec of widgets) {
+    const line = el("div", "om-node-card-widget");
+    line.appendChild(el("span", "om-node-card-wname", String(spec.name || "")));
+    line.appendChild(el("span", "om-node-card-wvalue", widgetValue(spec)));
+    body.appendChild(line);
+  }
+  if (!rows && !widgets.length) body.classList.add("om-node-card-empty");
+  card.appendChild(body);
+  return card;
+}
+
+function nodeSourceOf(def) {
+  if (def?.api_node === true) return "partner";
+  const kind = def?.nodeSource?.type;
+  if (kind === "custom_nodes") return "custom";
+  if (!kind || kind === "core" || kind === "essentials") return "core";
+  return String(kind);
+}
+
+const nodeEntries = new WeakMap();
+
 function graphNodes() {
   const types = window.LiteGraph?.registered_node_types || {};
   const made = [];
   for (const [type, held] of Object.entries(types)) {
     const def = held?.nodeData;
+    const owner = def && typeof def === "object" ? def : held;
+    const keyed = !!owner && (typeof owner === "object" || typeof owner === "function");
+    const kept = keyed ? nodeEntries.get(owner) : null;
+    if (kept && kept.name === type) {
+      made.push(kept);
+      continue;
+    }
     const ports = def?.inputs && typeof def.inputs === "object" ? Object.values(def.inputs) : [];
-    made.push({
+    let need = 0;
+    let spare = 0;
+    for (const one of ports) {
+      if (!one) continue;
+      if (one.isOptional) spare += 1;
+      else need += 1;
+    }
+    const entry = {
       name: type,
       display_name: def?.display_name || held?.title || type,
       category: def?.category || held?.category || "",
       module: def?.python_module || "",
+      source: nodeSourceOf(def),
+      pack: String(def?.nodeSource?.displayText || ""),
       description: def?.description || "",
       deprecated: def?.deprecated === true,
       experimental: def?.experimental === true,
-      inputs: {
-        required: ports.filter((one) => one && !one.isOptional).length,
-        optional: ports.filter((one) => one && one.isOptional).length,
+      inputs: { required: need, optional: spare },
+      get takes() {
+        return ports.map((one) => ({ name: String(one?.name || ""),
+                                     type: String(one?.type || ""),
+                                     optional: one?.isOptional === true }));
       },
-      takes: ports.map((one) => ({ name: String(one?.name || ""),
-                                   type: String(one?.type || ""),
-                                   optional: one?.isOptional === true })),
       outputs: (def?.outputs || []).map((one) => String(one?.type || one?.name || "")),
-    });
+    };
+    if (keyed) nodeEntries.set(owner, entry);
+    made.push(entry);
   }
   return made;
 }
 
-function nodeDragFrom(item, entry) {
+function nodeDragFrom(item, entry, { add = null } = {}) {
   const type = nodeTypeHere(entry);
   if (!type) {
     item.classList.add("om-node-absent");
@@ -194,8 +309,9 @@ function nodeDragFrom(item, entry) {
   });
   item.ondblclick = (event) => {
     event.stopPropagation();
-    addNodeAt(type, canvasCentre());
+    if (add) add();
+    else addNodeAt(type, canvasCentre());
   };
 }
 
-export { addNodeAt, canvasCentre, guardWindowDrags, graphNodes, nodeDragFrom };
+export { addNodeAt, canvasCentre, guardWindowDrags, graphNodes, nodeDragFrom, nodeCard };

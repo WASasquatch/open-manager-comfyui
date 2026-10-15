@@ -37,6 +37,11 @@ _ID = re.compile(r"^[a-z][a-z0-9-]{1,30}$")
 
 _TINT = re.compile(r"^(?:[a-z]{3,12}|#[0-9a-f]{6})$")
 
+_KEY = re.compile(r"^(?:[a-z0-9]|f(?:[1-9]|1[0-2])|[`\-=\[\];',./\\])$")
+
+_KEY_MODS = {"ctrl": "ctrl", "control": "ctrl", "meta": "ctrl", "cmd": "ctrl", "alt": "alt",
+             "option": "alt", "shift": "shift"}
+
 
 def folder() -> Path:
     """Where the programs this repository ships live."""
@@ -111,6 +116,24 @@ def _surfaces(value: object) -> dict:
     }
 
 
+def _keys(value: object) -> str:
+    """The shortcut a program opens with, as ``ctrl+alt+shift+key``, or nothing. Needs Ctrl or Alt."""
+    if not isinstance(value, str) or len(value) > 40:
+        return ""
+    parts = [one.strip().lower() for one in value.split("+")]
+    key = parts.pop() if parts else ""
+    if not _KEY.match(key):
+        return ""
+    held = set()
+    for part in parts:
+        if part not in _KEY_MODS:
+            return ""
+        held.add(_KEY_MODS[part])
+    if not held & {"ctrl", "alt"}:
+        return ""
+    return "+".join([one for one in ("ctrl", "alt", "shift") if one in held] + [key])
+
+
 def _read(home: Path, taken: set) -> tuple[dict, str]:
     """One program's manifest, or the sentence naming why it was refused."""
     try:
@@ -154,6 +177,7 @@ def _read(home: Path, taken: set) -> tuple[dict, str]:
         "group": _text(data.get("group"), NAME_CAP),
         "surfaces": _surfaces(data.get("surfaces")),
         "multiple": data.get("multiple") is True,
+        "keys": _keys(data.get("keys")),
         "look": _look(data.get("look")),
         "capabilities": [_text(one, 40) for one in (data.get("capabilities") or [])
                          if isinstance(one, str)][:12],

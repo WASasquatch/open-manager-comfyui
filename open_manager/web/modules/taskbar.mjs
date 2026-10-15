@@ -7,6 +7,7 @@ import { guardWindowDrags } from "./node-drag.mjs";
 import { DESK_TAB_ID, START_ART, desktopOn } from "./desktop.mjs";
 import { deskDocs, loadDeskDocs, docArt, openDoc, openWastebasket } from "./desk-docs.mjs";
 import { pinnedOn, pinDesk, unpinDesk, deskOpenRow } from "./desk-icons.mjs";
+import { programKeysText } from "./programs.mjs";
 
 const TASK_GROUP_NAMES = {
   pack: "Custom nodes",
@@ -405,12 +406,16 @@ function closeStart(back) {
   if (back) taskStart?.focus();
 }
 
-function startRow(art, label, { pin = null, pinned = false, open }) {
+function startRow(art, label, { pin = null, pinned = false, open, keys = "" }) {
   const row = el("div", "om-start-row");
   row.tabIndex = -1;
   row.setAttribute("role", "menuitem");
   row.appendChild(omIcon(art, { name: label, cls: "om-start-art", img: "om-start-img" }));
   row.appendChild(el("span", "om-start-name", label));
+  if (keys) {
+    row.appendChild(el("span", "om-start-keys", keys));
+    row.setAttribute("aria-keyshortcuts", keys);
+  }
   if (pin) {
     const mark = el("button", "om-start-pin", pinned ? "On the desktop" : "Pin");
     mark.type = "button";
@@ -458,6 +463,7 @@ function startProgramRow(row) {
       open: () => deskOpenRow(row),
       pinned: pinnedOn(row.key),
       pin: desktopOn() ? (on) => (on ? pinDesk(row.key) : unpinDesk(row.key)) : null,
+      keys: row.program ? programKeysText(row.key) : "",
     },
   );
 }
