@@ -7,61 +7,25 @@ import "./early-events.mjs";
 
 const PATCH_FILE = /^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*\.mjs$/;
 
+const PATCH_KEY = /^qol[A-Za-z0-9]{1,60}$/;
+
 const SETUP_WAIT_MS = 10000;
 
-const IMPORT_WAIT_MS = 5000;
+const STATUS_WAIT_MS = 3000;
 
-function complete(patch) {
-  return typeof patch?.key === "string" && typeof patch.name === "string"
-    && typeof patch.check === "function" && typeof patch.on === "function";
-}
+const IMPORT_TRIES = 3;
 
-async function listedPatches() {
-  try {
-    const answer = await (await api.fetchApi(`${API}/qol`)).json();
-    for (const problem of answer?.problems || []) {
-      console.warn(`[Open Manager] Quality of Life patch skipped: ${problem}`);
-    }
-    return (answer?.patches || []).filter((file) => PATCH_FILE.test(file));
-  } catch (error) {
-    console.warn("[Open Manager] Quality of Life patches could not be listed", error);
-    return [];
-  }
-}
+const RETRY_MS = 1500;
 
-function giveUp(ms) {
-  return new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`no answer after ${ms / 1000} s`)), ms);
-  });
-}
+const LISTING_KEY = "om-qol-listing";
 
-async function importPatch(file) {
-  try {
-    const patch = (await Promise.race([import(`./${file}`), giveUp(IMPORT_WAIT_MS)])).default;
-    if (complete(patch)) return patch;
-    console.warn(`[Open Manager] Quality of Life patch skipped: ${file} does not export `
-      + "key, name, check and on");
-  } catch (error) {
-    console.warn(`[Open Manager] Quality of Life patch skipped: ${file} failed to load`, error);
-  }
-  return null;
-}
+const patches = new Map();
 
-async function loadPatches() {
-  const loaded = await Promise.all((await listedPatches()).map(importPatch));
-  const keys = new Set();
-  return loaded.filter((patch) => {
-    if (!patch) return false;
-    if (keys.has(patch.key)) {
-      console.warn(`[Open Manager] Quality of Life patch skipped: ${patch.key} is used twice`);
-      return false;
-    }
-    keys.add(patch.key);
-    return true;
-  });
-}
+const byFile = new Map();
 
-let QOL_PATCHES = [];
+const failed = new Map();
+
+const notes = new Map();
 
 const wanted = new Map();
 
@@ -69,96 +33,197 @@ const running = new Map();
 
 let started = false;
 
-function settingId(patch) {
-  return `openManager.${patch.key}`;
+function declared(meta) {
+  return !!meta && typeof meta.key === "string" && PATCH_KEY.test(meta.key)
+    && typeof meta.name === "string" && meta.name !== "" && typeof meta.defaultValue === "boolean";
 }
 
-function patchWanted(patch) {
-  if (wanted.has(patch.key)) return wanted.get(patch.key) !== false;
+function metaOf(module) {
+  const meta = {
+    key: module?.key, name: module?.name, tooltip: String(module?.tooltip || ""),
+    issues: Array.isArray(module?.issues) ? module.issues : [],
+    defaultValue: module?.defaultValue === true, verified: String(module?.verified || ""),
+  };
+  return declared(meta) ? meta : null;
+}
+
+function acts(module) {
+  return typeof module?.check === "function" && typeof module.on === "function";
+}
+
+async function listing() {
   try {
-    const value = app.extensionManager?.setting?.get?.(settingId(patch));
-    return value === undefined || value === null ? patch.defaultValue : value !== false;
+    const answer = await (await api.fetchApi(`${API}/qol`)).json();
+    if (Array.isArray(answer?.patches)) {
+      for (const problem of answer.problems || []) {
+        console.warn(`[Open Manager] Quality of Life patch: ${problem}`);
+      }
+      try {
+        localStorage.setItem(LISTING_KEY,
+          JSON.stringify({ patches: answer.patches, meta: answer.meta || {} }));
+      } catch {}
+      return answer;
+    }
+  } catch (error) {
+    console.warn("[Open Manager] Quality of Life patches could not be listed", error);
+  }
+  try {
+    const kept = JSON.parse(localStorage.getItem(LISTING_KEY) || "null");
+    if (Array.isArray(kept?.patches)) return kept;
+  } catch {}
+  return { patches: [], meta: {} };
+}
+
+function settingId(held) {
+  return `openManager.${held.key}`;
+}
+
+function patchWanted(held) {
+  if (wanted.has(held.key)) return wanted.get(held.key) !== false;
+  try {
+    const value = app.extensionManager?.setting?.get?.(settingId(held));
+    return value === undefined || value === null ? held.meta.defaultValue : value !== false;
   } catch {
-    return patch.defaultValue;
+    return held.meta.defaultValue;
   }
 }
 
-function stopPatch(patch) {
-  const undo = running.get(patch.key);
+function stopPatch(held) {
+  const undo = running.get(held.key);
   if (!undo) return;
-  running.delete(patch.key);
+  running.delete(held.key);
   for (const step of undo.reverse()) {
     try {
       step();
     } catch (error) {
-      console.warn(`[Open Manager] ${patch.name}: a part could not be removed`, error);
+      console.warn(`[Open Manager] ${held.meta.name}: a part could not be removed`, error);
     }
   }
 }
 
-function standDown(patch, undo, reason) {
-  if (running.get(patch.key) !== undo) return;
-  console.info(`[Open Manager] ${patch.name}: stood down, ${reason?.message || reason}`);
+function standDown(held, undo, reason) {
+  if (running.get(held.key) !== undo) return;
+  console.info(`[Open Manager] ${held.meta.name}: stood down, ${reason?.message || reason}`);
+  notes.set(held.key, { state: "down", reason: String(reason?.message || reason || "") });
   queueMicrotask(() => {
-    if (running.get(patch.key) === undo) stopPatch(patch);
+    if (running.get(held.key) === undo) stopPatch(held);
   });
 }
 
-function startPatch(patch) {
-  if (running.has(patch.key)) return;
+function startPatch(held) {
+  if (!held.module || running.has(held.key)) return;
   let reason = "";
   try {
-    reason = patch.check() || "";
+    reason = held.module.check() || "";
   } catch (error) {
     reason = error?.message || String(error);
   }
   if (reason) {
-    console.info(`[Open Manager] ${patch.name}: not applied, ${reason}`);
+    console.info(`[Open Manager] ${held.meta.name}: not applied, ${reason}`);
+    notes.set(held.key, { state: "skipped", reason: String(reason) });
     return;
   }
+  notes.delete(held.key);
   const undo = [];
-  running.set(patch.key, undo);
+  running.set(held.key, undo);
   try {
-    patch.on((step) => undo.push(step), (why) => standDown(patch, undo, why));
+    held.module.on((step) => undo.push(step), (why) => standDown(held, undo, why));
   } catch (error) {
-    console.warn(`[Open Manager] ${patch.name}: failed and was removed`, error);
-    stopPatch(patch);
+    console.warn(`[Open Manager] ${held.meta.name}: failed and was removed`, error);
+    notes.set(held.key, { state: "failed", reason: String(error?.message || error || "") });
+    stopPatch(held);
   }
 }
 
-function setQolPatch(patch, value) {
-  wanted.set(patch.key, value);
+function setQolPatch(held, value) {
+  wanted.set(held.key, value);
   if (!started) return;
-  if (value === false) stopPatch(patch);
-  else startPatch(patch);
+  if (value === false) stopPatch(held);
+  else startPatch(held);
 }
 
-function qolSettings() {
-  return QOL_PATCHES.map((patch) => ({
-    id: settingId(patch),
-    name: patch.name,
-    category: ["Open Manager", "Quality of Life Patches", patch.key],
-    type: "boolean",
-    defaultValue: patch.defaultValue,
-    onChange: (value) => setQolPatch(patch, value),
-    tooltip: patch.tooltip,
-  }));
-}
+let unreachable = false;
 
-function registerSettings() {
+function register(held) {
   const store = piniaStores()?.get("setting");
   if (typeof store?.addSetting !== "function") {
-    console.warn("[Open Manager] Quality of Life patches: ComfyUI's settings are not reachable, "
-      + "so each patch runs at its default");
+    if (!unreachable) {
+      unreachable = true;
+      console.warn("[Open Manager] Quality of Life patches: ComfyUI's settings are not "
+        + "reachable, so each patch runs at its default");
+    }
     return;
   }
-  for (const setting of qolSettings()) {
+  try {
+    store.addSetting({
+      id: settingId(held),
+      name: held.meta.name,
+      category: ["Open Manager", "Quality of Life Patches", held.key],
+      type: "boolean",
+      defaultValue: held.meta.defaultValue,
+      onChange: (value) => setQolPatch(held, value),
+      tooltip: held.meta.tooltip,
+    });
+  } catch (error) {
+    console.warn(`[Open Manager] ${held.meta.name}: setting not registered`, error);
+  }
+}
+
+function record(file, meta) {
+  if (patches.has(meta.key)) {
+    console.warn(`[Open Manager] Quality of Life patch skipped: ${meta.key} is used twice`);
+    failed.set(file, `${meta.key} is used twice`);
+    return null;
+  }
+  const held = { key: meta.key, file, meta, module: null, folder: file.split("/")[0] };
+  patches.set(held.key, held);
+  byFile.set(file, held);
+  register(held);
+  return held;
+}
+
+function arrive(file, module) {
+  let held = byFile.get(file);
+  if (!held) {
+    const meta = metaOf(module);
+    if (!meta) {
+      failed.set(file, "does not export key, name and defaultValue");
+      console.warn(`[Open Manager] Quality of Life patch skipped: ${file} does not export key, `
+        + "name and defaultValue");
+      return;
+    }
+    held = record(file, meta);
+    if (!held) return;
+  }
+  if (!acts(module)) {
+    notes.set(held.key, { state: "failed", reason: "does not export check and on" });
+    console.warn(`[Open Manager] Quality of Life patch skipped: ${file} does not export check `
+      + "and on");
+    return;
+  }
+  held.module = module;
+  if (started && patchWanted(held)) startPatch(held);
+}
+
+async function importPatch(file) {
+  let last = null;
+  for (let attempt = 0; attempt < IMPORT_TRIES; attempt += 1) {
     try {
-      store.addSetting(setting);
+      const module = await import(attempt ? `./${file}?retry=${attempt}` : `./${file}`);
+      arrive(file, module.default);
+      return;
     } catch (error) {
-      console.warn(`[Open Manager] ${setting.name}: setting not registered`, error);
+      last = error;
+      if (attempt + 1 < IMPORT_TRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS * (attempt + 1)));
+      }
     }
   }
+  const reason = String(last?.message || last || "failed to load");
+  const held = byFile.get(file);
+  if (held) notes.set(held.key, { state: "failed", reason });
+  else failed.set(file, reason);
+  console.warn(`[Open Manager] Quality of Life patch not loaded: ${file}`, last);
 }
 
 function issueLink(issue) {
@@ -173,11 +238,11 @@ function issueLink(issue) {
 }
 
 function linkIssues() {
-  for (const patch of QOL_PATCHES) {
-    if (!patch.issues?.length) continue;
-    const label = document.getElementById(`${settingId(patch)}-label`);
+  for (const held of patches.values()) {
+    if (!held.meta.issues?.length) continue;
+    const label = document.getElementById(`${settingId(held)}-label`);
     if (!label || label.querySelector(".om-qol-issue")) continue;
-    for (const issue of patch.issues) label.appendChild(issueLink(issue));
+    for (const issue of held.meta.issues) label.appendChild(issueLink(issue));
   }
 }
 
@@ -206,25 +271,34 @@ function watchIssueLinks() {
   look();
 }
 
+const listed = listing().then((found) => {
+  const files = (found.patches || []).filter((file) => PATCH_FILE.test(file));
+  for (const file of files) {
+    const meta = found.meta?.[file];
+    if (declared(meta)) record(file, meta);
+  }
+  return files;
+});
+
+const loaded = listed.then((files) => Promise.allSettled(files.map(importPatch)));
+
 function startQolPatches() {
-  const begun = loaded.then(() => {
-    started = true;
-    watchIssueLinks();
-    for (const patch of QOL_PATCHES) {
-      if (patchWanted(patch)) startPatch(patch);
-    }
-  });
-  return Promise.race([begun, new Promise((resolve) => setTimeout(resolve, SETUP_WAIT_MS))]);
+  started = true;
+  watchIssueLinks();
+  for (const held of patches.values()) {
+    if (patchWanted(held)) startPatch(held);
+  }
+  return Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, SETUP_WAIT_MS))]);
 }
 
 function menuItems(hook, target) {
   const items = [];
-  for (const patch of QOL_PATCHES) {
-    if (!running.has(patch.key) || typeof patch[hook] !== "function") continue;
+  for (const held of patches.values()) {
+    if (!running.has(held.key) || typeof held.module?.[hook] !== "function") continue;
     try {
-      items.push(...(patch[hook](target) || []));
+      items.push(...(held.module[hook](target) || []));
     } catch (error) {
-      console.warn(`[Open Manager] ${patch.name}: menu failed`, error);
+      console.warn(`[Open Manager] ${held.meta.name}: menu failed`, error);
     }
   }
   return items;
@@ -238,9 +312,30 @@ function qolCanvasMenuItems(canvas) {
   return menuItems("canvasMenu", canvas);
 }
 
-const loaded = loadPatches().then((patches) => {
-  QOL_PATCHES = patches;
-  registerSettings();
-});
+async function qolStatus() {
+  await listed;
+  await Promise.race([loaded, new Promise((resolve) => setTimeout(resolve, STATUS_WAIT_MS))]);
+  const rows = [...patches.values()].map((held) => {
+    const note = notes.get(held.key);
+    const on = patchWanted(held);
+    const live = running.has(held.key);
+    return {
+      key: held.key,
+      id: settingId(held),
+      name: held.meta.name,
+      tooltip: held.meta.tooltip || "",
+      issues: held.meta.issues || [],
+      folder: held.folder,
+      wanted: on,
+      state: !on ? "off" : live ? "on" : note?.state || "waiting",
+      reason: on && !live ? note?.reason || "" : "",
+    };
+  });
+  for (const [file, reason] of failed) {
+    rows.push({ key: file, id: "", name: file, tooltip: "", issues: [],
+                folder: file.split("/")[0], wanted: true, state: "failed", reason });
+  }
+  return rows;
+}
 
-export { startQolPatches, qolNodeMenuItems, qolCanvasMenuItems };
+export { startQolPatches, qolNodeMenuItems, qolCanvasMenuItems, qolStatus, issueLink };

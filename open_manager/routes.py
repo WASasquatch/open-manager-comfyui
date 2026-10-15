@@ -1941,21 +1941,8 @@ def register_routes() -> None:
 
     @PromptServer.instance.routes.get(f"{PREFIX}/keys")
     async def list_keys(_request: web.Request) -> web.Response:
-        """Which access keys are held, and what each is for."""
+        """Which access keys the environment supplies, and what each is for."""
         return web.json_response(keys.listing())
-
-    @PromptServer.instance.routes.post(f"{PREFIX}/keys")
-    @_json_body
-    async def set_key(request: web.Request, body: dict) -> web.Response:
-        """Keep an access key, or forget one."""
-        if not gates.KEYS:
-            return web.json_response(gates.refuse('keys'), status=403)
-        name = str(body.get("name") or "")
-        if _flag(body.get("forget")):
-            answer = keys.forget(name)
-        else:
-            answer = keys.store(name, str(body.get("value") or ""))
-        return web.json_response(answer, status=200 if answer.get("ok") else 400)
 
     @PromptServer.instance.routes.get(f"{PREFIX}/collisions")
     async def node_collisions(_request: web.Request) -> web.Response:
@@ -2016,6 +2003,7 @@ def register_routes() -> None:
         return web.json_response(await asyncio.to_thread(tdr.status, refresh))
 
     stall.start()
+    keys.retire()
 
     @PromptServer.instance.routes.get(f"{PREFIX}/stall")
     async def stall_state(request: web.Request) -> web.Response:
@@ -2214,6 +2202,39 @@ def register_routes() -> None:
         """How Open Manager is installed here, and what updating it takes."""
         check = _flag(request.query.get("check"))
         return web.json_response(await asyncio.to_thread(selfupdate.state, check))
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/self/remote")
+    async def self_remote(request: web.Request) -> web.Response:
+        """The version Open Manager's main branch declares, against the running copy."""
+        check = _flag(request.query.get("check"))
+        return web.json_response(await asyncio.to_thread(selfupdate.remote, check))
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/self/update")
+    @_json_body
+    async def self_update(_request: web.Request, _body: dict) -> web.Response:
+        """Install the newest Open Manager over the running copy. A restart loads it."""
+        if not gates.INSTALL:
+            return web.json_response(gates.refuse("install"), status=403)
+        if not gates.GITHUB:
+            return web.json_response(gates.refuse("github"), status=403)
+        answer = await asyncio.to_thread(selfupdate.update)
+        return web.json_response(answer, status=200 if answer["ok"] else 409)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/self/official/uninstall")
+    @_json_body
+    async def self_official_uninstall(_request: web.Request, _body: dict) -> web.Response:
+        """Remove the official ComfyUI-Manager installed beside Open Manager as the manager."""
+        from . import official
+
+        if not gates.INSTALL:
+            return web.json_response(gates.refuse("install"), status=403)
+        info = await asyncio.to_thread(selfupdate.state)
+        if info.get("mode") != "package":
+            return web.json_response({"ok": False, "removed": [], "output": "",
+                                      "reason": "Open Manager is not installed as the manager"},
+                                     status=409)
+        answer = await asyncio.to_thread(official.uninstall)
+        return web.json_response(answer, status=200 if answer["ok"] else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/pack/toggle")
     @_json_body

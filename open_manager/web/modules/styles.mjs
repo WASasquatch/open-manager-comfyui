@@ -1604,6 +1604,9 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
   background: var(--om-surface); display: flex; flex-direction: column; gap: 6px; }
 .om-keys-line { display: flex; gap: 8px; align-items: center; }
 .om-keys-input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; }
+.om-keys-body { display: flex; flex-direction: column; gap: 10px; }
+.om-keys-body .om-keys { margin: 2px 0 0; }
+.om-keys-grow { flex: 1; min-width: 0; }
 .om-mon-v { align-items: center; }
 .om-mon-both { display: inline-flex; gap: 4px; align-items: baseline; }
 .om-mon-compact { position: relative; }

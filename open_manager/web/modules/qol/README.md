@@ -7,7 +7,7 @@ Settings > Open Manager > Quality of Life Patches.
 
 | Path | Holds |
 |---|---|
-| `loader.mjs` | Lists, imports and runs the patches, and registers their settings |
+| `loader.mjs` | Registers the settings from the server's list, then imports and runs the patches |
 | `shared.mjs` | Helpers more than one patch uses |
 | `assets/` | The Media Assets panel and the assets behind it |
 | `canvas/` | Canvas input and navigation |
@@ -40,10 +40,18 @@ The file's default export:
 | `on(track, standDown)` | Applies it. Pass every undo step to `track`; call `standDown(reason)` when ComfyUI turns out to have changed or fixed it |
 | `menu(node)`, `canvasMenu(canvas)` | Optional extra items for the node and canvas menus |
 
-A file that fails to load, takes longer than 5 seconds to, exports without `key`, `name`, `check`
-and `on`, or reuses another patch's `key` is skipped with a warning in the browser console. The
-other patches still load. A patch must not await anything at its top level: ComfyUI's startup
-waits up to 10 seconds for the patches before carrying on without them.
+The server reads `key`, `name`, `tooltip`, `issues`, `defaultValue` and `verified` from the file
+without running it, and every setting is registered from that list before any patch loads, so a
+slow or broken patch never costs its switch. Write them as plain values: `true` or `false`,
+strings in double quotes joined with `+`, a top-level `const NAME = "..."` string, or a list of
+strings. A field the server cannot read is warned about in the browser console, and that
+patch's setting then waits for the file to load.
+
+Each file is imported with no time limit and retried twice. One that still fails, exports
+without `check` and `on`, or reuses another patch's `key` keeps its switch, shows as Failed in
+Open Manager Settings, and leaves the other patches running. A patch must not await anything at
+its top level: ComfyUI's startup waits up to 10 seconds for the patches before carrying on, and
+any that arrive later start then.
 
 ## Retiring a patch
 

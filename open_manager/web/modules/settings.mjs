@@ -1,10 +1,9 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
-import { el, closeOn, toast, notify, chooseAction } from "./ui.mjs";
+import { el, closeOn, toast, notify } from "./ui.mjs";
 import { foldId } from "./installs.mjs";
 import { openPack } from "./packs.mjs";
-import { dlPost } from "./net.mjs";
 
 const keysHeld = { huggingface: false, github: false, virustotal: false };
 
@@ -21,27 +20,21 @@ async function loadKeys() {
 }
 
 async function migrateKeys() {
-  const moving = [
-    ["openManager.virusTotalKey", "virustotal", "VirusTotal key"],
-    ["openManager.githubToken", "github", "GitHub token"],
+  const legacy = [
+    ["openManager.virusTotalKey", "VIRUS_TOTAL_KEY"],
+    ["openManager.githubToken", "GITHUB_TOKEN"],
   ];
-  const moved = [];
-  for (const [id, name, label] of moving) {
+  const cleared = [];
+  for (const [id, variable] of legacy) {
     let value = "";
     try { value = String(app.extensionManager.setting.get(id) || "").trim(); } catch { continue; }
     if (!value) continue;
-    const answer = await dlPost("/keys", { name, value });
-    if (!answer?.ok) continue;
-    try { await app.extensionManager.setting.set(id, ""); } catch {}
-    keysHeld[name] = true;
-    moved.push(label);
-    if (answer.warning) {
-      notify("Key stored, with a caveat", `${label}: ${answer.warning}.`);
-    }
+    try { await app.extensionManager.setting.set(id, ""); } catch { continue; }
+    cleared.push(variable);
   }
-  if (moved.length) {
-    toast(`${moved.join(" and ")} moved from ComfyUI's settings to Access keys in the Open Manager menu.`,
-          { kind: "ok", sticky: true });
+  if (cleared.length) {
+    toast(`Keys removed from ComfyUI's settings. Set ${cleared.join(" and ")} instead.`,
+          { kind: "warn", sticky: true });
   }
 }
 
@@ -155,96 +148,46 @@ async function openAboutDialog() {
 }
 
 async function openKeysDialog() {
-  const found = await loadKeys();
   const backdrop = el("div", "om-backdrop");
   const box = el("div", "om-note om-note-wide");
-  box.appendChild(el("div", "om-note-title", "Access keys"));
-  box.appendChild(el("div", "om-dl-note",
-    "Kept unencrypted in Open Manager's own file, restricted to this account and used only "
-    + "by this server. Never written to ComfyUI's settings, sent in a URL or shown back."));
-  box.appendChild(el("div", "om-dl-note",
-    "Where an environment variable is set, it is used instead."));
-  if (found?.warning) box.appendChild(el("div", "om-dl-note om-dl-bad", found.warning));
-
-  const rows = el("div", "om-keys");
-  for (const [name, entry] of Object.entries(found?.keys || {})) {
-    const label = entry.label || name;
-    const placeholder = entry.placeholder || "";
-    const why = entry.purpose || "";
-    const fromEnv = entry.source === "environment";
-    const row = el("div", "om-keys-row");
-    const head = el("div", "om-dl-top");
-    head.appendChild(el("span", "om-dl-name", label));
-    const state = el("span", "om-dl-src", entry.set
-      ? `${fromEnv ? "from the environment" : "held"} ${entry.hint}` : "not set");
-    if (fromEnv) state.title = `Read from ${entry.env}.`;
-    head.appendChild(state);
-    row.appendChild(head);
-    row.appendChild(el("div", "om-dl-note", why));
-    if (fromEnv) {
-      row.appendChild(el("div", "om-dl-note om-dl-bad",
-        `${entry.env} is set, so that is the key in use. `
-        + `${entry.shadowed ? "What is stored here is" : "Anything saved here is"} ignored `
-        + "until the variable is unset."));
-    }
-
-    const line = el("div", "om-keys-line");
-    const input = el("input", "om-search om-keys-input");
-    input.type = "password";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.placeholder = entry.set ? "Replace it: paste a new one" : (placeholder || "Paste it here");
-    line.appendChild(input);
-
-    const save = el("button", "om-btn om-go", "Save");
-    save.onclick = async () => {
-      const value = input.value.trim();
-      if (!value) return;
-      save.disabled = true;
-      const answer = await dlPost("/keys", { name, value });
-      input.value = "";
-      save.disabled = false;
-      if (!answer?.ok) { notify("Not saved", answer?.reason || "It could not be written."); return; }
-      keysHeld[name] = true;
-      state.textContent = fromEnv ? `from the environment ${entry.hint}` : `held ${answer.hint}`;
-      forget.style.display = "";
-      toast(`${label} key saved.`, { kind: "ok" });
-      if (answer.warning) notify("Saved, with a caveat", `${label}: ${answer.warning}.`);
-    };
-    line.appendChild(save);
-
-    const forget = el("button", "om-btn", "Forget");
-    forget.style.display = entry.set ? "" : "none";
-    forget.onclick = async () => {
-      const go = await chooseAction(`Forget the ${label} key?`,
-        "It is removed from disk. Anything that needed it stops working until another is set.",
-        [{ key: "go", label: "Forget it", primary: true }], { wide: true });
-      if (!go) return;
-      const answer = await dlPost("/keys", { name, forget: true });
-      if (!answer?.ok) { notify("Not removed", answer?.reason || "It could not be written."); return; }
-      keysHeld[name] = false;
-      state.textContent = "not set";
-      forget.style.display = "none";
-      toast(`${label} key forgotten.`, { kind: "ok" });
-    };
-    line.appendChild(forget);
-    row.appendChild(line);
-    rows.appendChild(row);
-  }
-  box.appendChild(rows);
-  if (found?.path) {
-    const where = el("div", "om-dl-note", `Stored at ${found.path}`);
-    box.appendChild(where);
-  }
-
+  const body = el("div", "om-keys-body");
   const foot = el("div", "om-note-foot");
   const close = el("button", "om-btn", "Close");
   close.onclick = () => backdrop.remove();
   foot.appendChild(close);
-  box.appendChild(foot);
+  box.append(el("div", "om-note-title", "Access keys"), body, foot);
   backdrop.appendChild(box);
   document.body.appendChild(backdrop);
   closeOn(backdrop);
+  body.appendChild(el("div", "om-dl-note", "Reading"));
+
+  const found = await loadKeys();
+  if (!found?.keys) {
+    body.replaceChildren(el("div", "om-dl-note", "The server did not answer."));
+    return;
+  }
+  const parts = [
+    el("div", "om-dl-note",
+      "Keys come from environment variables. Set one in the file that starts ComfyUI, "
+      + "then restart it."),
+    el("div", "om-cmd", "Windows: set NAME=value    Linux and macOS: export NAME=value"),
+  ];
+  const rows = el("div", "om-keys");
+  for (const [name, entry] of Object.entries(found.keys)) {
+    const row = el("div", "om-keys-row");
+    const head = el("div", "om-dl-top");
+    head.appendChild(el("span", "om-dl-name", entry.label || name));
+    head.appendChild(el("span", "om-dl-src",
+      entry.set ? `Set by ${entry.env} ${entry.hint}` : "Not set"));
+    row.appendChild(head);
+    if (entry.purpose) row.appendChild(el("div", "om-dl-note", entry.purpose));
+    if (!entry.set && entry.env_names?.length) {
+      row.appendChild(el("div", "om-dl-note", `Variable: ${entry.env_names.join(", ")}`));
+    }
+    rows.appendChild(row);
+  }
+  parts.push(rows);
+  body.replaceChildren(...parts);
 }
 
 function vtKey() {

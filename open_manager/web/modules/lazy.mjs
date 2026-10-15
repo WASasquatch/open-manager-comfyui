@@ -40,7 +40,8 @@ const openSnapshotWindow = later("snapshot-window", "openSnapshotWindow");
 const openDownloadManager = later("downloads", "openDownloadManager");
 const downloadNodeModels = later("downloads", "downloadNodeModels");
 const addModelUrlToNode = later("downloads", "addModelUrlToNode");
+const openManagerSettings = later("om-settings", "openManagerSettings");
 
 export { load, openModelLibrary, openMemoryPanel, openFileBrowser, openDesktopSettings,
   openManagePrograms, openSnapshotWindow, openDownloadManager, downloadNodeModels,
-  addModelUrlToNode };
+  addModelUrlToNode, openManagerSettings };

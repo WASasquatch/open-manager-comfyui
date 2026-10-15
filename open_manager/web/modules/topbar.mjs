@@ -1,10 +1,10 @@
 import { api } from "../../../scripts/api.js";
-import { ICON_TAB, ICON_PROGRAM, ICON_MEMORY, ICON_DOWNLOADS, ICON_LIBRARY, ICON_DESKTOP, ICON_FOLDER, ICON_NOTE } from "./base.mjs";
+import { ICON_TAB, ICON_PROGRAM, ICON_MEMORY, ICON_DOWNLOADS, ICON_LIBRARY, ICON_DESKTOP, ICON_FOLDER, ICON_NOTE, ICON_SETTINGS } from "./base.mjs";
 import { el } from "./ui.mjs";
 import { openEnvironmentDialog } from "./installs.mjs";
 import { openAboutDialog, openKeysDialog, vtReady, panelSetting } from "./settings.mjs";
 import { openPanelWindow } from "./discovery.mjs";
-import { openDownloadManager, openMemoryPanel, openManagePrograms, openDesktopSettings, openFileBrowser, openModelLibrary } from "./lazy.mjs";
+import { openDownloadManager, openMemoryPanel, openManagePrograms, openDesktopSettings, openFileBrowser, openModelLibrary, openManagerSettings } from "./lazy.mjs";
 import { filesOn, programRows } from "./programs.mjs";
 import { buildMonitorStrip, startMonitor, stopMonitor } from "./monitor.mjs";
 import { mountTabMarks } from "./tab-marks.mjs";
@@ -127,6 +127,11 @@ function managerDestinations() {
     { key: "environment", kind: "action", label: "Environment changes", icon: "\u2317",
       hint: "What recent installs did to your Python packages, and how to undo one",
       open: openEnvironmentDialog },
+    { key: "omsettings", kind: "program", label: "Open Manager Settings", icon: "\u2699",
+      hint: "Settings, version and updates",
+      desk: { at: 4, label: "Open Manager Settings", art: ICON_SETTINGS, kind: "mask",
+              window: "omsettings", off: true },
+      open: () => openManagerSettings() },
     { key: "about", kind: "action", label: "About and updates", icon: "\u2139",
       hint: "Which Open Manager this is, and what updating it takes here",
       open: openAboutDialog },

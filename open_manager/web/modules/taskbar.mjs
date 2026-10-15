@@ -446,7 +446,7 @@ function closeStartPop() {
   startPop = null;
 }
 
-const START_SETTINGS = new Set(["desksettings", "programs"]);
+const START_SETTINGS = new Set(["desksettings", "programs", "omsettings"]);
 
 function startGroupOf(row) {
   const said = String(row.program?.group || "").trim();

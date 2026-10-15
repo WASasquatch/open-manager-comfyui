@@ -95,11 +95,13 @@ Restart ComfyUI and open the **Discovery** tab in the sidebar. The console shows
 | --- | --- |
 | As the manager | `python -m pip install --upgrade comfyui-open-manager`, with `python_embeded\python.exe` in place of `python` on a portable build |
 | As a custom node | `git pull` in its folder |
+| From Open Manager | **Open Manager Settings** compares this copy with `pyproject.toml` on GitHub, then updates and restarts: pip as the manager, `git pull` as a clone, the GitHub archive as any other custom node, swapped in only once it is unpacked. Needs installs and GitHub left on |
 | Log | `--enable-manager` writes `user/comfyui.log`, rotating to `comfyui.prev.log` and `comfyui.prev2.log`. `OPEN_MANAGER_NO_LOG=1` leaves it alone |
 
 ### Access keys (optional)
 
-Set under Access keys in the Open Manager menu. A variable, where set, is used instead.
+Keys come from environment variables only. **Access keys** in the Open Manager menu shows which
+are set and by which variable.
 
 | For | Variables | Get one at |
 |---|---|---|
@@ -160,7 +162,6 @@ What ships on is closed with a `NO_` switch:
 | `OPEN_MANAGER_NO_GITHUB` | GitHub repositories cannot be added or installed | They can |
 | `OPEN_MANAGER_NO_DOWNLOADS` | Models cannot be fetched | They can |
 | `OPEN_MANAGER_NO_RESTART` | Open Manager cannot restart ComfyUI | It can |
-| `OPEN_MANAGER_NO_KEYS` | Access keys cannot be written | They can |
 | `OPEN_MANAGER_APPROVED_ONLY` | Only versions the registry lists as active install. No GitHub repositories | Flagged versions and GitHub repositories install too |
 
 What ships off is opened with its own:
@@ -257,6 +258,8 @@ already fixed, stands down and says so in the browser console.
 | Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
 | API jobs open as workflows | On | Jobs queued with only an API prompt open as a laid-out workflow |
 | Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
+| Workflow tabs without a scrollbar | On | The tab strip drops its scrollbar. Its arrows and the mouse wheel scroll it |
+| Workflow tabs look like tabs | On | Flat tabs side by side with a line between each, the open one marked along its top, in place of rounded buttons |
 | Node search narrows every match | On | In the node search box, a category or the Comfy, Partner or Extensions filter lists every match it holds, not only those among the top 64 |
 | Node search draws only the rows in view | On | Results build as they scroll into view |
 | Node search waits for a pause in typing | On | Slow searches run once typing pauses |
@@ -279,13 +282,18 @@ Open Manager reads the Comfy Registry live. What it contacts:
 
 ### Settings
 
-Under `Settings -> Open Manager`.
+Under `Settings -> Open Manager`, and in **Open Manager Settings** from the Open Manager menu,
+the Start menu or the `Open Manager: settings` command. That window holds every Open Manager
+setting by section, and an overview: the version and updates, the system, the server switches,
+each patch's state, and which access keys are set. Installed as the manager, it also offers to
+uninstall the official ComfyUI-Manager where its package or a `ComfyUI-Manager` folder is still
+there, keeping the file that loads Open Manager.
 
 | | |
 |---|---|
 | Trust | Answer once per author, or every time |
 
-A GitHub token, set under Access keys in the Open Manager menu or as `GITHUB_TOKEN`, raises 60
+A GitHub token, set as `GITHUB_TOKEN`, raises 60
 anonymous calls an hour to 5,000. Without one, pack pages still show README, gallery and
 versions.
 

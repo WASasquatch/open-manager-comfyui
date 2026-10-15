@@ -21,7 +21,7 @@ ENTRY = "program.mjs"
 RESERVED = frozenset({
     "note", "notes", "folder", "pack", "panel", "props", "desktop", "wastebasket", "manager",
     "registry", "memory", "downloads", "library", "notepad", "start", "trash",
-    "programs", "desksettings", "files",
+    "programs", "desksettings", "files", "omsettings",
     "constructor", "prototype", "__proto__", "toString", "valueOf", "hasownproperty",
 })
 

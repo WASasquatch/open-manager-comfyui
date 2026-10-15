@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 __all__ = ["APPROVED_ONLY", "DESKTOP", "DOWNLOADS", "FILES", "GITHUB", "GRANTS", "INSTALL",
-           "KEYS", "NAMES", "RESTART", "WRITES", "refuse", "state"]
+           "NAMES", "RESTART", "WRITES", "refuse", "state"]
 
 NAMES = {
     "files": "OPEN_MANAGER_ENABLE_FILES",
@@ -15,7 +15,6 @@ NAMES = {
     "github": "OPEN_MANAGER_NO_GITHUB",
     "downloads": "OPEN_MANAGER_NO_DOWNLOADS",
     "restart": "OPEN_MANAGER_NO_RESTART",
-    "keys": "OPEN_MANAGER_NO_KEYS",
     "approved": "OPEN_MANAGER_APPROVED_ONLY",
 }
 
@@ -44,8 +43,6 @@ DOWNLOADS = not _set(NAMES["downloads"])
 
 RESTART = not _set(NAMES["restart"])
 
-KEYS = not _set(NAMES["keys"])
-
 APPROVED_ONLY = _set(NAMES["approved"])
 
 
@@ -71,7 +68,6 @@ def state() -> dict:
         "github": GITHUB and INSTALL and not APPROVED_ONLY,
         "downloads": DOWNLOADS,
         "restart": RESTART,
-        "keys": KEYS,
         "approved": APPROVED_ONLY,
         "names": dict(NAMES),
     }

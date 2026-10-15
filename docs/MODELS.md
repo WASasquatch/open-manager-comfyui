@@ -144,8 +144,8 @@ And under **Open Manager → Interface**:
 
 ## Access keys
 
-The library needs none. Fetching a gated model does: set `HF_TOKEN` before ComfyUI starts, or
-paste it into **Access keys** in the Open Manager menu. See [DOWNLOADS.md](DOWNLOADS.md).
+The library needs none. Fetching a gated model does: set `HF_TOKEN` before ComfyUI starts.
+See [DOWNLOADS.md](DOWNLOADS.md).
 
 ## Related
 

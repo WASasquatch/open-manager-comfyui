@@ -12,7 +12,7 @@ import { refreshPackThemes } from "./pack-extras.mjs";
 import { refreshMissingIfActive, openPanelWindow, togglePanelWindow, openManagerMenu, addLegacyMenuButton, renderSidebar } from "./discovery.mjs";
 import { syncOptions } from "./registry.mjs";
 import { nodeModels } from "./net.mjs";
-import { openDownloadManager, addModelUrlToNode, downloadNodeModels, openMemoryPanel, openDesktopSettings, openModelLibrary } from "./lazy.mjs";
+import { openDownloadManager, addModelUrlToNode, downloadNodeModels, openMemoryPanel, openDesktopSettings, openModelLibrary, openManagerSettings } from "./lazy.mjs";
 import { readLegacyUi, managerEntry, mountTopbar, remountTopbar } from "./topbar.mjs";
 import { deskGates } from "./programs.mjs";
 import { MONITOR_STYLES, wireMonitorLink } from "./monitor.mjs";
@@ -899,7 +899,7 @@ app.registerExtension({
       id: "openManager.pauseButton",
       onChange: () => remountTopbar(),
       name: "Pause button beside Run",
-      category: ["Open Manager", "Monitor", "pauseButton"],
+      category: ["Open Manager", "Snapshots", "pauseButton"],
       type: "boolean",
       defaultValue: true,
       tooltip: "Pausing saves what the run has finished, without models. The next Run of that "
@@ -908,7 +908,7 @@ app.registerExtension({
     {
       id: "openManager.pauseLive",
       name: "Save each run as it goes",
-      category: ["Open Manager", "Monitor", "pauseLive"],
+      category: ["Open Manager", "Snapshots", "pauseLive"],
       type: "boolean",
       defaultValue: false,
       tooltip: "Each node's outputs, without models, are written to disk as the run reaches it. "
@@ -1055,6 +1055,11 @@ app.registerExtension({
       id: "openmanager.desktopsettings",
       label: "Open Manager: desktop settings",
       function: () => openDesktopSettings(),
+    },
+    {
+      id: "openmanager.settings",
+      label: "Open Manager: settings",
+      function: () => openManagerSettings(),
     },
     {
       id: "openmanager.minimise",

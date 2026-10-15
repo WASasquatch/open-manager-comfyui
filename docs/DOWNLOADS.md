@@ -65,8 +65,8 @@ video    .mp4 .webm .mov .mkv .m4v .avi
 audio    .mp3 .wav .flac .ogg .oga .opus .m4a .aac
 ```
 
-**Gated and private models.** Set `HF_TOKEN` before ComfyUI starts, or paste it into
-**Access keys** in the Open Manager menu. Get one at huggingface.co/settings/tokens.
+**Gated and private models.** Set `HF_TOKEN` before ComfyUI starts. Get one at
+huggingface.co/settings/tokens.
 
 ```bat
 set HF_TOKEN=hf_xxx
@@ -136,7 +136,6 @@ Read once at start-up, so ComfyUI must be restarted after changing one.
 | `OPEN_MANAGER_REPO_DOWNLOADS` | `1` fetches whole Hugging Face repositories the model list names. |
 | `HF_TOKEN` | Hugging Face token. Also reads `HUGGING_FACE_HUB_TOKEN` and `OPEN_MANAGER_HF_TOKEN`. Read per request, not at start-up. |
 
-A key pasted into Access keys is never written to the environment.
 
 Each list is one value, comma separated, with no spaces around `=`. Hosts are bare names, no
 `https://`. In the file that starts ComfyUI, above the line that runs it; whole files are under

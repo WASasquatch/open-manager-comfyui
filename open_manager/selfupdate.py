@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
-__all__ = ["DIST", "NODE_ID", "behind", "newest", "state"]
+__all__ = ["DIST", "NODE_ID", "behind", "newest", "remote", "state", "update"]
 
 DIST = "comfyui-open-manager"
 NODE_ID = "comfyui-open-manager"
@@ -14,6 +15,12 @@ NODE_ID = "comfyui-open-manager"
 REPO_URL = "https://github.com/WASasquatch/open-manager-comfyui"
 
 ARCHIVE_URL = f"{REPO_URL}/archive/refs/heads/main.zip"
+
+REMOTE_URL = "https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/pyproject.toml"
+
+UPDATE_TIMEOUT = 900
+
+OUTPUT_CAP = 4000
 
 _ROOT = Path(__file__).resolve().parent
 
@@ -114,11 +121,18 @@ def _quote(path: str) -> str:
 
 
 def version() -> str:
-    """The version of the copy that is running.
+    """The version of the copy that is running: its own pyproject.toml beside the package,
+    as a custom node or a source checkout has, otherwise what pip recorded.
 
     Returns:
         A version string, or ``unknown`` where neither source answers.
     """
+    try:
+        found = _project_version((_ROOT.parent / "pyproject.toml").read_text(encoding="utf-8"))
+        if found:
+            return found
+    except OSError:
+        pass
     try:
         from importlib.metadata import PackageNotFoundError, version as dist_version
 
@@ -128,17 +142,6 @@ def version() -> str:
             pass
     except Exception:
         pass
-
-    import re
-
-    for candidate in (_ROOT.parent / "pyproject.toml",):
-        try:
-            text = candidate.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        match = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', text)
-        if match:
-            return match.group(1)
     return "unknown"
 
 
@@ -204,6 +207,236 @@ def behind(check: bool = False) -> dict:
     return out
 
 
+def _newer(candidate: str, here: str) -> bool:
+    """Whether one version string is ahead of another."""
+    if not candidate:
+        return False
+    try:
+        from packaging.version import InvalidVersion, Version
+
+        try:
+            return Version(candidate) > Version(here)
+        except InvalidVersion:
+            return candidate != here
+    except Exception:
+        return candidate != here
+
+
+def _project_version(text: str) -> str:
+    """The ``[project]`` version a pyproject.toml declares, or an empty string."""
+    try:
+        try:
+            import tomllib  # type: ignore
+        except ImportError:
+            import tomli as tomllib  # type: ignore
+        found = ((tomllib.loads(text) or {}).get("project") or {}).get("version")
+        if found:
+            return str(found).strip()[:40]
+    except Exception:
+        pass
+    import re
+
+    inside = False
+    for line in text.splitlines():
+        bare = line.strip()
+        if bare.startswith("[") and bare.endswith("]") and not bare.startswith("[["):
+            inside = bare == "[project]"
+            continue
+        if inside:
+            match = re.match(r'version\s*=\s*["\']([^"\']+)["\']', bare)
+            if match:
+                return match.group(1).strip()[:40]
+    return ""
+
+
+_remote: dict = {"version": "", "checked": 0.0, "asked": 0.0, "error": ""}
+
+
+def remote(check: bool = False) -> dict:
+    """The version Open Manager's main branch declares, against the copy that is running.
+
+    Args:
+        check: Ask GitHub again even where a recent answer is held.
+
+    Returns:
+        ``{version, remote, behind, checked, error}``. ``remote`` is empty where it is not
+        known; ``checked`` is when GitHub last answered, in epoch seconds.
+    """
+    import time
+
+    now = time.time()
+    if check or now - _remote["asked"] >= NEWEST_TTL:
+        _remote["asked"] = now
+        try:
+            import urllib.request
+
+            asked = urllib.request.Request(REMOTE_URL, headers={"User-Agent": "open-manager"})
+            with urllib.request.urlopen(asked, timeout=NEWEST_TIMEOUT) as answer:
+                found = _project_version(answer.read(200_000).decode("utf-8", "replace"))
+            if found:
+                _remote.update(version=found, checked=now, error="")
+            else:
+                _remote["error"] = "no version in its pyproject.toml"
+        except Exception as error:
+            _remote["error"] = f"GitHub did not answer ({type(error).__name__})"
+    here = version()
+    return {
+        "version": here,
+        "remote": _remote["version"],
+        "behind": _newer(_remote["version"], here),
+        "checked": _remote["checked"],
+        "error": _remote["error"],
+    }
+
+
+def _updater(pack_dir: Path | None, direct: dict) -> dict:
+    """Whether Open Manager can update itself here, and how.
+
+    Returns:
+        ``{able, how, reason}``. ``how`` is ``pip`` for a package, ``git`` for a clone in
+        ``custom_nodes``, ``archive`` for any other copy there, or empty.
+    """
+    import shutil
+
+    from . import gates, piptool
+
+    if not gates.INSTALL:
+        return {"able": False, "how": "", "reason": gates.refuse("install")["reason"]}
+    if not gates.GITHUB:
+        return {"able": False, "how": "", "reason": gates.refuse("github")["reason"]}
+    if pack_dir is not None:
+        if (pack_dir / ".git").is_dir():
+            git = shutil.which("git") is not None
+            return {"able": git, "how": "git", "reason": "" if git else "git is not on PATH"}
+        return {"able": True, "how": "archive", "reason": ""}
+    if (direct.get("dir_info") or {}).get("editable"):
+        return {"able": False, "how": "", "reason": "installed editable from a folder"}
+    if not piptool.available(sys.executable):
+        return {"able": False, "how": "", "reason": "this Python has no pip or uv"}
+    return {"able": True, "how": "pip", "reason": ""}
+
+
+_updating = threading.Lock()
+
+
+def _swap_from_archive(pack_dir: Path) -> str:
+    """Replace a custom-node copy with the main branch's archive, keeping the running copy
+    until the new one is unpacked, checked and in its place.
+
+    Returns:
+        An empty string on success, otherwise what stopped it. A failure leaves the running
+        copy where it was.
+    """
+    import json
+    import shutil
+    import tempfile
+    import time
+
+    from . import installer
+
+    staging = pack_dir.with_name(f"{pack_dir.name}.update.disabled")
+    previous = pack_dir.with_name(f"{pack_dir.name}.previous.disabled")
+    for leftover in (staging, previous):
+        if leftover.exists():
+            try:
+                installer._remove_tree(leftover)
+            except OSError as error:
+                return f"{leftover.name} could not be cleared ({error.strerror or error})"
+    scratch = Path(tempfile.mkdtemp(prefix="open_manager_update_"))
+    try:
+        archive = scratch / "main.zip"
+        try:
+            installer._download(ARCHIVE_URL, archive)
+            staging.mkdir()
+            written = installer._extract(archive, staging, strip_top=True)
+        except (RuntimeError, OSError) as error:
+            return f"the download failed ({error})"
+        fresh = _project_version((staging / "pyproject.toml").read_text(encoding="utf-8")) \
+            if (staging / "pyproject.toml").is_file() else ""
+        if not fresh or not (staging / "open_manager" / "__init__.py").is_file():
+            return "the download is not Open Manager"
+        held = {}
+        try:
+            held = json.loads((pack_dir / installer.MARKER).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            held = {}
+        (staging / ".tracking").write_text("\n".join(written) + "\n", encoding="utf-8")
+        (staging / installer.MARKER).write_text(json.dumps({
+            "id": held.get("id") or NODE_ID, "version": fresh, "installed_at": time.time(),
+        }), encoding="utf-8")
+        try:
+            pack_dir.rename(previous)
+        except OSError as error:
+            return f"the running copy could not be moved aside ({error.strerror or error})"
+        try:
+            staging.rename(pack_dir)
+        except OSError as error:
+            previous.rename(pack_dir)
+            return f"the new copy could not be put in place ({error.strerror or error})"
+        try:
+            installer._remove_tree(previous)
+        except OSError:
+            pass
+        return ""
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+        if staging.exists():
+            try:
+                installer._remove_tree(staging)
+            except OSError:
+                pass
+
+
+def update() -> dict:
+    """Install the newest Open Manager over the copy that is running. A restart loads it.
+
+    Returns:
+        ``{ok, reason, version, output}``. ``version`` is what is installed afterwards;
+        ``output`` is the end of what the installer printed.
+    """
+    import subprocess
+
+    if not _updating.acquire(blocking=False):
+        return {"ok": False, "reason": "an update is already running", "version": version(),
+                "output": ""}
+    try:
+        pack_dir = _custom_node_dir()
+        plan = _updater(pack_dir, _direct_url())
+        if not plan["able"]:
+            return {"ok": False, "reason": plan["reason"] or "cannot update itself here",
+                    "version": version(), "output": ""}
+        if plan["how"] == "archive":
+            problem = _swap_from_archive(pack_dir)
+            return {"ok": not problem, "reason": problem, "version": version(), "output": ""}
+        if plan["how"] == "git":
+            argv = ["git", "-C", str(pack_dir), "pull", "--ff-only"]
+        else:
+            from . import piptool
+
+            argv = piptool.command(sys.executable, "install",
+                                   ["--upgrade", "--force-reinstall", "--no-deps", ARCHIVE_URL])
+        if not argv:
+            return {"ok": False, "reason": "this Python has no pip or uv", "version": version(),
+                    "output": ""}
+        try:
+            done = subprocess.run(
+                argv, capture_output=True, timeout=UPDATE_TIMEOUT, check=False,
+                encoding="utf-8", errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8", "GIT_TERMINAL_PROMPT": "0"},
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return {"ok": False, "reason": f"the updater did not run ({type(error).__name__})",
+                    "version": version(), "output": ""}
+        output = f"{done.stdout or ''}{done.stderr or ''}"[-OUTPUT_CAP:]
+        if done.returncode != 0:
+            return {"ok": False, "reason": f"{plan['how']} stopped with code {done.returncode}",
+                    "version": version(), "output": output}
+        return {"ok": True, "reason": "", "version": version(), "output": output}
+    finally:
+        _updating.release()
+
+
 def _install_prefix(python: str) -> tuple[str, str]:
     """How to spell an install command for this environment, and how to force one.
 
@@ -230,10 +463,14 @@ def state(check: bool = False) -> dict:
 
     Returns:
         ``{mode, version, newest, behind, dist, node_id, path, python, environment, from_git,
-        managed, steps, note}``. ``mode`` is ``custom_node`` or ``package``. ``managed`` says
-        whether Open Manager can perform the update itself. ``steps`` is the terminal recipe
-        for when it cannot, each ``{label, command}``; it is empty in custom-node mode.
+        managed, updater, official, steps, note}``. ``mode`` is ``custom_node`` or ``package``.
+        ``managed`` says whether the pack updater handles it. ``updater`` is what ``update``
+        would do, as ``_updater`` answers. ``official`` is the official ComfyUI-Manager beside
+        it, as ``official.state`` answers, in package mode only. ``steps`` is the terminal
+        recipe, each ``{label, command}``; it is empty in custom-node mode.
     """
+    from . import official
+
     published = behind(check)
     pack_dir = _custom_node_dir()
     environment = _environment()
@@ -253,6 +490,7 @@ def state(check: bool = False) -> dict:
             "python": sys.executable,
             "environment": environment,
             "managed": True,
+            "updater": _updater(pack_dir, direct),
             "steps": [],
             "note": "Installed as a custom node, so it updates like any other pack.",
         }
@@ -309,6 +547,8 @@ def state(check: bool = False) -> dict:
         "environment": environment,
         "from_git": from_git,
         "managed": False,
+        "updater": _updater(pack_dir, direct),
+        "official": official.state(),
         "steps": steps,
         "note": notes[environment] + " Stop ComfyUI first, then run it, then start again.",
     }
