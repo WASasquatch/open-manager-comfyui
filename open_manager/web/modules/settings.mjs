@@ -4,7 +4,7 @@ import { API } from "./base.mjs";
 import { el, closeOn, toast, notify, chooseAction } from "./ui.mjs";
 import { foldId } from "./installs.mjs";
 import { openPack } from "./packs.mjs";
-import { dlPost } from "./downloads.mjs";
+import { dlPost } from "./net.mjs";
 
 const keysHeld = { huggingface: false, github: false, virustotal: false };
 

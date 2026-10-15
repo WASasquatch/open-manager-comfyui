@@ -235,7 +235,7 @@ function paintBar(bar, look) {
 }
 
 function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
-                               centred = false, modal = false } = {}) {
+                               centred = false, modal = false, keep = true } = {}) {
   const open = floatingPanel(key);
   if (open) { open.present(); return open; }
 
@@ -361,7 +361,7 @@ function createFloatingPanel({ key, title, width = 820, height = 520, onClose,
     height: parseInt(body.style.height, 10) || height,
   });
   const remember = () => {
-    if (minimised) return;
+    if (minimised || !keep) return;
     const now = state();
     const { folded: _gone, ...previous } = floatRecall(id, {});
     if (!anchored()) { delete now.left; delete now.top; }

@@ -4,7 +4,7 @@ import { el, safeArt, toast, liveTip, notify, askText, confirmAction, openRowMen
 import { WINDOW_SIZES, windowSize, createFloatingPanel, floatingPanel } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
 import { whenText } from "./installed.mjs";
-import { dlPost, bytesText } from "./downloads.mjs";
+import { dlPost, bytesText } from "./net.mjs";
 import { addNodeAt, canvasCentre, graphNodes, nodeDragFrom } from "./node-drag.mjs";
 import { TASK_GROUP_NAMES } from "./taskbar.mjs";
 import { deskProgramsOff, hideDesk } from "./desktop.mjs";
@@ -36,6 +36,8 @@ function filesWritable() {
 }
 
 const PROGRAM_WAIT = 6000;
+
+const HOLD_AFTER = 150;
 
 let programRows = [];
 
@@ -107,6 +109,24 @@ function programView(entry) {
   return held.length ? held[0][1] : "main";
 }
 
+function programHolder(entry, view, carry) {
+  const panel = createFloatingPanel({
+    key: `${entry.id}:${view}`,
+    title: entry.name,
+    ...windowSize("note"),
+    keep: false,
+  });
+  const art = programIconArt(entry);
+  if (art.kind === "mask") panel.setMaskIcon(art.url);
+  else panel.setIcon(art.url);
+  const box = el("div", "om-loading");
+  box.appendChild(el("div", "om-loading-spin"));
+  box.appendChild(el("div", "om-loading-text", "Loading"));
+  panel.body.appendChild(box);
+  panel._omCarry = carry;
+  return panel;
+}
+
 async function runProgram(entry, carried, wanted = "") {
   const view = wanted || programView(entry);
   const open = floatingPanel(`${entry.id}:${view}`);
@@ -115,12 +135,26 @@ async function runProgram(entry, carried, wanted = "") {
     if (carried !== undefined && typeof open._omCarry === "function") open._omCarry(carried);
     return open;
   }
-  let made = null;
-  try {
-    made = await importProgram(entry);
-  } catch (error) {
-    notify(`${entry.name} did not load`, `${entry.name} could not be started: ${error.message}`);
-    return null;
+  let made = programModules.get(entry.id) || null;
+  if (!made) {
+    let holder = null;
+    const timer = setTimeout(() => {
+      holder = programHolder(entry, view, (next) => { carried = next; });
+    }, HOLD_AFTER);
+    let failed = null;
+    try {
+      made = await importProgram(entry);
+    } catch (error) {
+      failed = error;
+    }
+    clearTimeout(timer);
+    const dismissed = !!holder && !holder.el.isConnected;
+    if (holder && !dismissed) holder.destroy();
+    if (failed) {
+      notify(`${entry.name} did not load`, `${entry.name} could not be started: ${failed.message}`);
+      return null;
+    }
+    if (dismissed) return null;
   }
   try {
     return made.open(programApi(entry, view), carried);

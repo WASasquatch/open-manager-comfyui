@@ -4,7 +4,7 @@ import { el } from "./ui.mjs";
 import { openEnvironmentDialog } from "./installs.mjs";
 import { openAboutDialog, openKeysDialog, vtReady, panelSetting } from "./settings.mjs";
 import { openPanelWindow } from "./discovery.mjs";
-import { openDownloadManager } from "./downloads.mjs";
+import { openDownloadManager, openMemoryPanel, openManagePrograms, openDesktopSettings, openFileBrowser, openModelLibrary } from "./lazy.mjs";
 import { filesOn, programRows } from "./programs.mjs";
 import { buildMonitorStrip, startMonitor, stopMonitor } from "./monitor.mjs";
 import { mountTabMarks } from "./tab-marks.mjs";
@@ -13,10 +13,6 @@ import { taskbarSync } from "./taskbar.mjs";
 import { draftNote, openNote } from "./desk-docs.mjs";
 import { runBar, mountRunBar } from "./runbar.mjs";
 import { mountPauseButton, wirePause } from "./pause.mjs";
-import { openMemoryPanel } from "./memory.mjs";
-import { openManagePrograms, openDesktopSettings } from "./desk-settings.mjs";
-import { openFileBrowser } from "./files.mjs";
-import { openModelLibrary } from "./library.mjs";
 import { topbarReady } from "./extension.mjs";
 
 function topbarSlot() {

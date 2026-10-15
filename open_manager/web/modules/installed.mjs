@@ -8,7 +8,7 @@ import { loadSelfInfo, selfUpdateTarget, openAboutDialog, vtReady, vtRemaining, 
 import { packIcon, starCount } from "./results.mjs";
 import { viewGeneration, viewIsCurrent, refreshInstalledIfActive } from "./discovery.mjs";
 import { dropdown } from "./registry.mjs";
-import { dlPost } from "./downloads.mjs";
+import { dlPost } from "./net.mjs";
 import { hostConflicts, hostPipLit, acknowledgeHostPip, conflictText, misreadAccelerator, pipMark } from "./host-pips.mjs";
 
 function conflictIndex(reported) {

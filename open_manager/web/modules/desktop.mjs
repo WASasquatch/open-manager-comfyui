@@ -4,14 +4,14 @@ import { API, ICON_BRAND, ICON_PROGRAM, ICON_DESKTOP } from "./base.mjs";
 import { el, safeArt, toast, liveTip, openRowMenu } from "./ui.mjs";
 import { floatPanels, readColour } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
-import { dlPost } from "./downloads.mjs";
+import { dlPost } from "./net.mjs";
 import { managerDestinations } from "./topbar.mjs";
 import { deskGates, loadPrograms } from "./programs.mjs";
 import { taskBar, taskbarSync } from "./taskbar.mjs";
 import { docKey, DOC_DESKTOP, loadDeskDocs, FILE_DRAG_TYPE, dropDocsInto, newDeskFlow, openWastebasket, newDeskNote, newDeskFolder } from "./desk-docs.mjs";
 import { deskSelect, onDeskKey, paintDeskIcons } from "./desk-icons.mjs";
 import { sessionReady, sessionKeep } from "./session.mjs";
-import { openDesktopSettings } from "./desk-settings.mjs";
+import { openDesktopSettings } from "./lazy.mjs";
 import { activePath } from "./workflows.mjs";
 
 let deskProgramsOff = [];
@@ -688,12 +688,15 @@ function showDesk() {
   paintDeskTab();
   taskbarSync();
   sessionKeep();
+  watchDeskWork();
 }
 
 function hideDesk() {
   if (!deskShown) return;
   deskShown = false;
   deskHashWanted = false;
+  clearInterval(deskWatchTimer);
+  deskWatchTimer = 0;
   if (deskLayer) {
     deskLayer.hidden = true;
     deskLayer.classList.remove("om-desk-on");
@@ -750,17 +753,13 @@ function watchDeskTab() {
 
 function watchDeskWork() {
   clearInterval(deskWatchTimer);
-  deskSeenPath = activePath();
-  let deskChromeAway = null;
+  deskWatchTimer = 0;
+  if (!deskShown) return;
   deskWatchTimer = setInterval(() => {
     const open = deskShown && !!deskLayer && !deskLayer.hidden;
-    if (deskLayer && !deskShown) deskLayer.classList.remove("om-desk-on");
     document.body.classList.toggle("om-desk-open", open);
-    if (open || deskChromeAway !== false) {
-      slideChrome(open);
-      deskChromeAway = open;
-    }
-    if (!deskShown) return;
+    slideChrome(open);
+    if (!open) return;
     const now = activePath();
     if (!now) return;
     if (!deskSeenPath || Date.now() < deskArmAt) { deskSeenPath = now; return; }

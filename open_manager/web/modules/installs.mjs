@@ -9,7 +9,7 @@ import { countText, dayText } from "./results.mjs";
 import { refreshInstalledIfActive } from "./discovery.mjs";
 import { isRelease, updateInstalled, isHeld, toggleHold, isInstalledUpdatable, togglePack } from "./installed.mjs";
 import { sinceText, allowBanned, browseTopic } from "./registry.mjs";
-import { dlPost } from "./downloads.mjs";
+import { dlPost } from "./net.mjs";
 
 async function appendImpact(packId, version, slot, gate, policy, base) {
   const ticket = (slot._omTicket || 0) + 1;

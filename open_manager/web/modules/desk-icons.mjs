@@ -8,7 +8,8 @@ import { programOff } from "./programs.mjs";
 import { omIcon } from "./taskbar.mjs";
 import { deskLayer, deskCells, deskPinned, deskUnpinned, deskTaken, placeDeskCells, saveDeskCells, saveDeskPins, deskGrid, dragDeskCell } from "./desktop.mjs";
 import { deskDocs, docKey, refreshDocs, FILE_DRAG_TYPE, carriedDoc, carriedHost, docsPathOf, openDoc, emptyWastebasket, openWastebasket, renameDocIn, removeDoc, buildDocCell } from "./desk-docs.mjs";
-import { openFileBrowser, FILE_MOVE_TYPE, filePinParts } from "./files.mjs";
+import { FILE_MOVE_TYPE, filePinParts } from "./file-keys.mjs";
+import { openFileBrowser } from "./lazy.mjs";
 import { workflowMissing } from "./workflows.mjs";
 
 const PROGRAM_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;

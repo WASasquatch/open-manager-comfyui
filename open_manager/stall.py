@@ -385,11 +385,11 @@ def _encoded_command() -> str:
 def _spawn(args: list, env: dict | None = None, fds: tuple = ()) -> None:
     """Start a process that outlives this one."""
     if os.name == "nt":
-        detached = 0x00000008 | 0x00000200
+        hidden = 0x08000000 | 0x00000200
         try:
-            subprocess.Popen(args, env=env, creationflags=detached | 0x01000000, close_fds=True)
+            subprocess.Popen(args, env=env, creationflags=hidden | 0x01000000, close_fds=True)
         except OSError:
-            subprocess.Popen(args, env=env, creationflags=detached, close_fds=True)
+            subprocess.Popen(args, env=env, creationflags=hidden, close_fds=True)
         return
     subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True,

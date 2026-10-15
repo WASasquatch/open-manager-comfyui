@@ -1,9 +1,9 @@
 import { api } from "../../../scripts/api.js";
 import { el, toast, notify, askText, confirmAction, openRowMenu, liveTip } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
-import { activeWorkflow, openWorkflows, workflowStore } from "./workflows.mjs";
+import { activeWorkflow, openWorkflows, workflowStore, watchTabStrip } from "./workflows.mjs";
 import { SNAP_NAME_CAP, SNAP_ORIGIN_NAMES, bookOf, openBook, syncBook, takeSnapshot, applySnapshot, openSnapshotTab, renameSnapshot, deleteSnapshot, clearBook, liveSig, tagFor, noteRunTag, watchBooks, renamedWorkflow, deletedWorkflow, agoText } from "./snapshot-store.mjs";
-import { openSnapshotWindow } from "./snapshot-window.mjs";
+import { openSnapshotWindow } from "./lazy.mjs";
 
 const SNAP_TAKE_COMMAND = "openmanager.snapshotTake";
 
@@ -312,16 +312,9 @@ async function toggleMenu(anchor, workflow) {
 
 function mountSnapshotTabs() {
   if (tabWatching) { paintSnapTabs(); return; }
-  const strip = tabStrip();
-  if (!strip) return;
+  if (!watchTabStrip(paintSnapTabs)) return;
   tabWatching = true;
   let due = 0;
-  const watcher = new MutationObserver(() => {
-    if (due) return;
-    due = requestAnimationFrame(() => { due = 0; paintSnapTabs(); });
-  });
-  watcher.observe(strip, { childList: true, subtree: true, characterData: true,
-                           attributes: true, attributeFilter: ["class"] });
   watchBooks(() => {
     if (due) return;
     due = requestAnimationFrame(() => { due = 0; paintSnapTabs(); });

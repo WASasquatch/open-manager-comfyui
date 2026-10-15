@@ -183,13 +183,27 @@ function linkIssues() {
 
 function watchIssueLinks() {
   let due = 0;
-  new MutationObserver(() => {
+  let inside = null;
+  const soon = () => {
     if (due) return;
     due = requestAnimationFrame(() => {
       due = 0;
       if (document.querySelector('[data-setting-id^="openManager.qol"]')) linkIssues();
     });
-  }).observe(document.body, { childList: true, subtree: true });
+  };
+  const look = () => {
+    const dialog = document.querySelector('[data-testid="settings-dialog"]');
+    if (dialog === inside?.dialog) return;
+    inside?.watcher.disconnect();
+    inside = null;
+    if (!dialog) return;
+    const watcher = new MutationObserver(soon);
+    watcher.observe(dialog, { childList: true, subtree: true });
+    inside = { dialog, watcher };
+    soon();
+  };
+  new MutationObserver(look).observe(document.body, { childList: true });
+  look();
 }
 
 function startQolPatches() {

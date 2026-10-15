@@ -5,7 +5,7 @@ import { el, toast, liveTip, notify, openRowMenu, countNote } from "./ui.mjs";
 import { windowSize, applyWindowLook, BAR_PAINTS, barPaint, readColour, createFloatingPanel, floatingPanel } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
 import { whenText } from "./installed.mjs";
-import { dlPost, bytesText } from "./downloads.mjs";
+import { dlPost, bytesText } from "./net.mjs";
 import { remountTopbar } from "./topbar.mjs";
 import { deskGates, programIconArt } from "./programs.mjs";
 import { TAB_HEX } from "./tab-marks.mjs";

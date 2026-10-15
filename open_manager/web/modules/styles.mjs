@@ -102,6 +102,7 @@ style.textContent = `
 .om-tip-facts dd { margin: 0; color: var(--om-text, #e6edf3); overflow-wrap: anywhere; }
 .om-tip-facts + .om-tip-line { margin-top: 5px; padding-top: 4px;
   border-top: 1px solid var(--om-border, #2c332b); }
+html.om-fetching, html.om-fetching * { cursor: progress !important; }
 .om-toasts { position: fixed; right: 16px; bottom: calc(16px + var(--om-bar-h, 0px));
   z-index: 10001;
   display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }

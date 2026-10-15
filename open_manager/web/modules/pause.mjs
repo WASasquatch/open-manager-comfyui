@@ -3,7 +3,7 @@ import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
 import { el, toast, notify, openRowMenu } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
-import { dlPost, bytesText } from "./downloads.mjs";
+import { dlPost, bytesText } from "./net.mjs";
 import { workflowGraph, workflowGraphById, workflowOfJob, openWorkflowByPath } from "./workflows.mjs";
 
 const pauseState = {

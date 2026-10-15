@@ -3,9 +3,9 @@ import { API } from "./base.mjs";
 import { el, tipWith, liveTip } from "./ui.mjs";
 import { floatingPanel } from "./windows.mjs";
 import { panelSetting } from "./settings.mjs";
-import { bytesText } from "./downloads.mjs";
+import { bytesText } from "./net.mjs";
 import { mountTopbar, monitorStrip } from "./topbar.mjs";
-import { readingAge, readingQuiet, quietText, recordReading, openMemoryPanel } from "./memory.mjs";
+import { openMemoryPanel } from "./lazy.mjs";
 
 const MONITOR_CLIENT = `om-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -31,6 +31,48 @@ const link = {
   strikes: 0, tries: 0, nextTryAt: 0, verifyUntil: 0, socketSeen: null,
   nextPostAt: 0, pollStep: 0, hiddenAt: 0, hiddenFor: 0,
 };
+
+const MEMORY_HISTORY = 240;
+
+const memoryHistory = { cpu: [], ram: [], gpu: [], vram: [] };
+
+const READING_QUIET = 6000;
+
+let lastReadingAt = 0;
+
+function readingAge() {
+  if (!lastReadingAt) return Infinity;
+  const hidden = link.hiddenFor + (link.hiddenAt ? Date.now() - link.hiddenAt : 0);
+  return Math.max(0, Date.now() - lastReadingAt - hidden);
+}
+
+function readingQuiet() {
+  return readingAge() > Math.max(READING_QUIET, monitorInterval() * 3000);
+}
+
+function quietText(age) {
+  if (!Number.isFinite(age)) return "nothing since the panel opened";
+  const seconds = Math.round(age / 1000);
+  if (seconds < 90) return `no reading for ${seconds} seconds`;
+  const minutes = Math.round(seconds / 60);
+  return `no reading for ${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function recordReading(reading) {
+  lastReadingAt = Date.now();
+  link.hiddenFor = 0;
+  link.hiddenAt = document.hidden ? Date.now() : 0;
+  const push = (key, value) => {
+    if (typeof value !== "number" || Number.isNaN(value)) return;
+    const series = memoryHistory[key];
+    series.push(value);
+    if (series.length > MEMORY_HISTORY) series.shift();
+  };
+  push("cpu", reading.cpu);
+  if (reading.ram?.total) push("ram", (reading.ram.used / reading.ram.total) * 100);
+  push("gpu", reading.vram?.util);
+  if (reading.vram?.total) push("vram", (reading.vram.used / reading.vram.total) * 100);
+}
 
 const readingHooks = new Set();
 
@@ -631,4 +673,4 @@ function stopMonitor() {
 
 const MEMORY_CLIENT = `${MONITOR_CLIENT}-panel`;
 
-export { monitorInterval, LINK_DEADLINE, link, readingHooks, dropMonitorCalls, linkLeased, linkMayPost, monPost, monGet, monRelease, pushStale, linkState, takeReading, linkTick, reviveSocket, LINK_SAY, buildLinkRow, meterText, MONITOR_STYLES, buildMonitorStrip, startMonitor, wireMonitorLink, stopMonitor, MEMORY_CLIENT };
+export { MEMORY_HISTORY, memoryHistory, readingAge, readingQuiet, quietText, recordReading, monitorInterval, LINK_DEADLINE, link, readingHooks, dropMonitorCalls, linkLeased, linkMayPost, monPost, monGet, monRelease, pushStale, linkState, takeReading, linkTick, reviveSocket, LINK_SAY, buildLinkRow, meterText, MONITOR_STYLES, buildMonitorStrip, startMonitor, wireMonitorLink, stopMonitor, MEMORY_CLIENT };

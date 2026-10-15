@@ -2,16 +2,12 @@ import { api } from "../../../scripts/api.js";
 import { API, ICON_FOLDER } from "./base.mjs";
 import { el, closeOn, toast, notify, askText, confirmAction, openRowMenu, countNote } from "./ui.mjs";
 import { windowSize, floatPanels, createFloatingPanel } from "./windows.mjs";
-import { dlPost, bytesText } from "./downloads.mjs";
+import { dlPost, bytesText } from "./net.mjs";
 import { SHOWN_KINDS, EDITS_HERE, suffixOf, viewRootOf, runProgramById } from "./programs.mjs";
 import { omIcon } from "./taskbar.mjs";
 import { docPath, placeDoc, NEW_NOTE_NAME, docsIn, DOC_DESKTOP, DOC_DOCUMENTS, refreshDocs, openNote, docKindOf, docsPathOf, parentOf, openDoc, removeDoc } from "./desk-docs.mjs";
 import { pinDesk } from "./desk-icons.mjs";
-
-const FILE_WORDS = {
-  image: "Image", video: "Video", audio: "Audio", model: "Model", text: "Text",
-  other: "File",
-};
+import { FILE_WORDS, FILE_MOVE_TYPE, filePinKey, filePinParts } from "./file-keys.mjs";
 
 let fileWindows = 0;
 
@@ -764,30 +760,9 @@ function openFileBrowser(start = "", at = "") {
   return panel;
 }
 
-const FILE_MOVE_TYPE = "application/x-om-hostfile";
-
 function makeFolderShortcut(place, path, name) {
   pinDesk(filePinKey(place, path));
   toast(`Shortcut to ${name} added.`, { kind: "ok" });
-}
-
-const FILE_PIN = "files:";
-
-function filePinKey(place, path) {
-  return `${FILE_PIN}${encodeURIComponent(`${place}|${path || ""}`)}`;
-}
-
-function filePinParts(key) {
-  if (!key.startsWith(FILE_PIN)) return null;
-  let text = "";
-  try {
-    text = decodeURIComponent(key.slice(FILE_PIN.length));
-  } catch {
-    return null;
-  }
-  const at = text.lastIndexOf("|");
-  if (at < 0) return null;
-  return { place: text.slice(0, at), path: text.slice(at + 1) };
 }
 
 export { FILE_WORDS, openFileBrowser, FILE_MOVE_TYPE, filePinParts };

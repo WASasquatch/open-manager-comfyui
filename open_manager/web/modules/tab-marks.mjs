@@ -3,7 +3,7 @@ import { el, toast, liveTip, askText } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
 import { loadDeskDocs, makeFlowLink } from "./desk-docs.mjs";
 import { paintDeskIcons } from "./desk-icons.mjs";
-import { activeWorkflow, openWorkflows, savedWorkflows } from "./workflows.mjs";
+import { activeWorkflow, openWorkflows, savedWorkflows, watchTabStrip } from "./workflows.mjs";
 
 const TAB_MARK_KEY = "om-tab-marks";
 
@@ -363,16 +363,8 @@ function onTabMenu(event) {
 
 function mountTabMarks() {
   if (tabWatching) { tabTick(); return; }
-  const strip = tabStrip();
-  if (!strip) return;
+  if (!watchTabStrip(tabTick)) return;
   tabWatching = true;
-  let due = 0;
-  const watcher = new MutationObserver(() => {
-    if (due) return;
-    due = requestAnimationFrame(() => { due = 0; tabTick(); });
-  });
-  watcher.observe(strip, { childList: true, subtree: true, characterData: true,
-                           attributes: true, attributeFilter: ["class"] });
   document.addEventListener("contextmenu", onTabMenu, true);
   tabMarksTidy();
   tabTick();

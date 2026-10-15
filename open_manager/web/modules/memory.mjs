@@ -1,52 +1,10 @@
 import { ICON_MEMORY } from "./base.mjs";
 import { el, toast, liveTip, notify, chooseAction, factList } from "./ui.mjs";
 import { asWindow, windowSize, createFloatingPanel, floatingPanel, closeFloatingPanel } from "./windows.mjs";
-import { dlPost, bytesText, dlRemember, dlRecall } from "./downloads.mjs";
-import { monitorInterval, LINK_DEADLINE, link, readingHooks, dropMonitorCalls, linkLeased, linkMayPost, monPost, monGet, monRelease, pushStale, linkState, takeReading, linkTick, reviveSocket, LINK_SAY, buildLinkRow, meterText, MEMORY_CLIENT } from "./monitor.mjs";
+import { dlPost, bytesText, dlRemember, dlRecall } from "./net.mjs";
+import { MEMORY_HISTORY, memoryHistory, readingAge, readingQuiet, quietText, monitorInterval, LINK_DEADLINE, link, readingHooks, dropMonitorCalls, linkLeased, linkMayPost, monPost, monGet, monRelease, pushStale, linkState, takeReading, linkTick, reviveSocket, LINK_SAY, buildLinkRow, meterText, MEMORY_CLIENT } from "./monitor.mjs";
 import { libGet } from "./library.mjs";
 import { restartAndRequeue, tdrStatus } from "./stall.mjs";
-
-const MEMORY_HISTORY = 240;
-
-const memoryHistory = { cpu: [], ram: [], gpu: [], vram: [] };
-
-const READING_QUIET = 6000;
-
-let lastReadingAt = 0;
-
-function readingAge() {
-  if (!lastReadingAt) return Infinity;
-  const hidden = link.hiddenFor + (link.hiddenAt ? Date.now() - link.hiddenAt : 0);
-  return Math.max(0, Date.now() - lastReadingAt - hidden);
-}
-
-function readingQuiet() {
-  return readingAge() > Math.max(READING_QUIET, monitorInterval() * 3000);
-}
-
-function quietText(age) {
-  if (!Number.isFinite(age)) return "nothing since the panel opened";
-  const seconds = Math.round(age / 1000);
-  if (seconds < 90) return `no reading for ${seconds} seconds`;
-  const minutes = Math.round(seconds / 60);
-  return `no reading for ${minutes} minute${minutes === 1 ? "" : "s"}`;
-}
-
-function recordReading(reading) {
-  lastReadingAt = Date.now();
-  link.hiddenFor = 0;
-  link.hiddenAt = document.hidden ? Date.now() : 0;
-  const push = (key, value) => {
-    if (typeof value !== "number" || Number.isNaN(value)) return;
-    const series = memoryHistory[key];
-    series.push(value);
-    if (series.length > MEMORY_HISTORY) series.shift();
-  };
-  push("cpu", reading.cpu);
-  if (reading.ram?.total) push("ram", (reading.ram.used / reading.ram.total) * 100);
-  push("gpu", reading.vram?.util);
-  if (reading.vram?.total) push("vram", (reading.vram.used / reading.vram.total) * 100);
-}
 
 function drawGraph(canvas, series, colour) {
   const ratio = window.devicePixelRatio || 1;
@@ -1051,4 +1009,4 @@ function openMemoryPanel() {
   return panel;
 }
 
-export { readingAge, readingQuiet, quietText, recordReading, openMemoryPanel };
+export { openMemoryPanel };

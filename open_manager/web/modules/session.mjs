@@ -6,8 +6,7 @@ import { loadGates, programRows, runProgram, loadPrograms } from "./programs.mjs
 import { deskLayer, deskShown, deskHashAsked, desktopOn, deskAsked, placeDeskCells, loadDeskCells, showDesk, applyDesktop } from "./desktop.mjs";
 import { loadDeskDocs, docFind, openDoc, openWastebasket } from "./desk-docs.mjs";
 import { deskOpenRow, paintDeskIcons } from "./desk-icons.mjs";
-import { openDesktopSettings } from "./desk-settings.mjs";
-import { openFileBrowser } from "./files.mjs";
+import { openDesktopSettings, openFileBrowser } from "./lazy.mjs";
 import { openWorkflows, activePath } from "./workflows.mjs";
 
 const SESSION_KEY = "om-session";

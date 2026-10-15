@@ -305,4 +305,29 @@ async function openWorkflow(source, { label = "", title = null, ask = null, afte
   return true;
 }
 
-export { workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, workflowDocument, workflowGraphById, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, loadWorkflow, openWorkflow };
+const stripPainters = new Set();
+
+let stripWatched = null;
+
+let stripDue = 0;
+
+function watchTabStrip(paint) {
+  const strip = document.querySelector(".workflow-tabs");
+  if (!strip) return false;
+  stripPainters.add(paint);
+  if (stripWatched === strip) return true;
+  stripWatched = strip;
+  new MutationObserver(() => {
+    if (stripDue) return;
+    stripDue = requestAnimationFrame(() => {
+      stripDue = 0;
+      for (const one of stripPainters) {
+        try { one(); } catch {}
+      }
+    });
+  }).observe(strip, { childList: true, subtree: true, characterData: true,
+                      attributes: true, attributeFilter: ["class"] });
+  return true;
+}
+
+export { watchTabStrip, workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, workflowDocument, workflowGraphById, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, loadWorkflow, openWorkflow };

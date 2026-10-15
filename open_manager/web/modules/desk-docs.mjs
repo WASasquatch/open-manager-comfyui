@@ -4,13 +4,14 @@ import { API, ICON_FOLDER, ICON_NOTE, ICON_FILE, ICON_BIN, ICON_FLOW } from "./b
 import { el, closeOn, toastHost, toastShut, toast, liveTip, notify, confirmAction, openRowMenu, tabbedPanel, countNote } from "./ui.mjs";
 import { windowSize, floatPanels, createFloatingPanel, floatingPanel } from "./windows.mjs";
 import { whenText } from "./installed.mjs";
-import { dlPost, bytesText } from "./downloads.mjs";
+import { dlPost, bytesText } from "./net.mjs";
 import { filesWritable, SHOWN_KINDS, assetThumbUrl, runProgramById } from "./programs.mjs";
 import { TAB_TINTS } from "./tab-marks.mjs";
 import { omIcon } from "./taskbar.mjs";
 import { deskLayer, DESK_SPRING, deskCells, saveDeskCells, deskCellFor, deskSpotAt, deskArrangeAt, dragDeskCell, hideDesk } from "./desktop.mjs";
 import { deskSelect, binDropInto, paintDeskIcons } from "./desk-icons.mjs";
-import { FILE_WORDS, openFileBrowser, FILE_MOVE_TYPE } from "./files.mjs";
+import { FILE_WORDS, FILE_MOVE_TYPE } from "./file-keys.mjs";
+import { openFileBrowser } from "./lazy.mjs";
 import { workflowStore, savedWorkflows, workflowMissing, workflowByPath, openWorkflow } from "./workflows.mjs";
 
 let deskDocs = [];
