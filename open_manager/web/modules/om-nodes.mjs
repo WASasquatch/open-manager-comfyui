@@ -7,6 +7,9 @@ import {
   fitNodes, fitTargets, fitWhenShown, startResize, stopResize, watchConfigure,
 } from "./om-nodes/resize.mjs";
 import { refreshMenuRow, watchMenu } from "./om-nodes/menu.mjs";
+import { refreshOmGrips, startOmGrips, stopOmGrips } from "./om-nodes/grips.mjs";
+
+export { refreshOmGrips };
 
 const KEY = "openManager.omNodes";
 const RESTORE = "openManager.omNodesRestore";
@@ -109,10 +112,12 @@ function apply() {
     syncOmPalette();
     root.setAttribute("data-om-nodes", "");
     startResize();
+    startOmGrips();
     scheduleProbe();
   } else {
     root.removeAttribute("data-om-nodes");
     stopResize();
+    stopOmGrips();
   }
   if (want !== showing) {
     showing = want;

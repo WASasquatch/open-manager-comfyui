@@ -33,7 +33,9 @@ import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
 import { snapshotCommands, watchSnapshots, applySnapshotSetting } from "./snapshots.mjs";
-import { omNodeCommands, omNodeCreated, omNodeMenuItems, omNodeSettings, startOmNodes } from "./om-nodes.mjs";
+import {
+  omNodeCommands, omNodeCreated, omNodeMenuItems, omNodeSettings, refreshOmGrips, startOmNodes,
+} from "./om-nodes.mjs";
 
 let lastMissingTypes = null;
 
@@ -520,7 +522,10 @@ app.registerExtension({
     },
     {
       id: "openManager.textareaGrips",
-      onChange: () => applyGrips(),
+      onChange: () => {
+        applyGrips();
+        refreshOmGrips();
+      },
       name: "Drag multiline text boxes to size them",
       category: ["Open Manager", "Interface", "textareaGrips"],
       type: "boolean",

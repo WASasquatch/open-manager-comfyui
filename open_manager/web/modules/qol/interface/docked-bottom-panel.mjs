@@ -1,4 +1,6 @@
-const SPLIT = ".splitter-overlay-bottom";
+const SPLIT = ':is(.splitter-overlay-bottom, [data-testid="graph-canvas-gutter"])';
+
+const HANDLE = ":is(.p-splitter-gutter, [data-panel-resize-handle-id])";
 
 const GUTTER = "var(--comfy-canvas-gutter)";
 
@@ -14,12 +16,12 @@ const MAIN = `.p-splitter:has(> .p-splitterpanel > ${SPLIT} > ${SHOWN})`;
 
 function edge(side, before = "") {
   const split = `${before}${SPLIT}[class~="${side}-(--comfy-canvas-gutter)"]`;
-  return `${split} > .bottom-panel, ${split} > .p-splitter-gutter`;
+  return `${split} > .bottom-panel, ${split} > ${HANDLE}`;
 }
 
 const DOCK_CSS = `
 ${SPLIT} > .bottom-panel { max-width: none; border-radius: 0; border-width: 1px 0 0; }
-${SPLIT} > .p-splitter-gutter { border-radius: 0; }
+${SPLIT} > ${HANDLE} { border-radius: 0; }
 ${SPLIT}[class~="mb-(--comfy-canvas-gutter)"] > .bottom-panel {
   margin-bottom: calc(-1 * ${GUTTER}); }
 ${edge("ml", `${CONNECTED} `)}, ${edge("ml", `${BAR_RIGHT} `)} { margin-left: calc(-1 * ${GUTTER}); }

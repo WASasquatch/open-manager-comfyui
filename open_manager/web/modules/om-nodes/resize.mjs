@@ -4,7 +4,7 @@ import { panelSetting } from "../settings.mjs";
 const EDGE_BAND = 8;
 const CORNER_SPAN = 15;
 const DOT_REACH = 7;
-const FRESH_FRAMES = 40;
+const FRESH_FRAMES = 180;
 
 const CURSORS = {
   NE: "nesw-resize", SW: "nesw-resize", NW: "nwse-resize", SE: "nwse-resize",
@@ -12,7 +12,8 @@ const CURSORS = {
 };
 
 const BLOCKED = "input, textarea, select, button, a, label, [contenteditable], [role='switch'], "
-  + "[role='combobox'], [role='slider'], [data-capture-wheel]";
+  + "[role='combobox'], [role='slider'], [data-capture-wheel], .om-row-grip";
+const RIGID = "[data-om-rigid]";
 
 function blocked(target, event) {
   if (target.closest(BLOCKED)) return true;
@@ -43,15 +44,15 @@ function titleHeight() {
   return Number(window.LiteGraph?.NODE_TITLE_HEIGHT) || 30;
 }
 
-function scale() {
+export function scale() {
   return app.canvas?.ds?.scale || 1;
 }
 
-function currentGraph() {
+export function currentGraph() {
   return app.canvas?.graph || app.graph || null;
 }
 
-function rootOf(node) {
+export function rootOf(node) {
   if (!node || node.id === undefined || node.id === null) return null;
   try {
     return document.querySelector(`.lg-node[data-node-id="${CSS.escape(String(node.id))}"]`);
@@ -60,7 +61,7 @@ function rootOf(node) {
   }
 }
 
-function nodeOf(root) {
+export function nodeOf(root) {
   const id = root?.getAttribute("data-node-id");
   if (!id) return null;
   try {
@@ -97,7 +98,7 @@ function minWidth(node) {
   return Math.max(Number(window.LiteGraph?.NODE_MIN_WIDTH) || 50, computed);
 }
 
-function contentHeight(root, width) {
+export function contentHeight(root, width) {
   const style = root.style;
   const keptWidth = style.getPropertyValue("--node-width");
   const keptHeight = style.getPropertyValue("--node-height");
@@ -127,12 +128,12 @@ function edgeAt(root, event) {
   return null;
 }
 
-function openChange(graph) {
+export function openChange(graph) {
   try { app.canvas?.emitBeforeChange?.(); } catch {}
   try { graph?.beforeChange?.(); } catch {}
 }
 
-function closeChange(graph) {
+export function closeChange(graph) {
   try { graph?.afterChange?.(); } catch {}
   try { app.canvas?.emitAfterChange?.(); } catch {}
 }
@@ -164,6 +165,7 @@ function companions(node) {
       size: [root ? root.offsetWidth : one.size[0], one.size[1]],
       minWidth: minWidth(one),
       minHeight: root ? contentHeight(root) : 0,
+      rigid: !!root?.querySelector(RIGID),
     };
   });
 }
@@ -182,6 +184,7 @@ function begin(event, root, node, dir) {
     pos: [node.pos[0], node.pos[1]],
     size: [root.offsetWidth, node.size[1]],
     minWidth: minWidth(node),
+    rigid: !!root.querySelector(RIGID),
     others: companions(node),
   };
   openChange(node.graph);
@@ -215,7 +218,7 @@ function move(event) {
     width = drag.minWidth;
   }
   const least = contentHeight(drag.root, width);
-  if (height < least) {
+  if (height < least || (drag.rigid && height > least)) {
     if (drag.north) y -= least - height;
     height = least;
   }
@@ -227,7 +230,7 @@ function move(event) {
   for (const other of drag.others) {
     other.node.setSize([
       Math.max(other.minWidth, other.size[0] + grow[0]),
-      Math.max(other.minHeight, other.size[1] + grow[1]),
+      other.rigid ? other.minHeight : Math.max(other.minHeight, other.size[1] + grow[1]),
     ]);
     if (drag.west || drag.north) other.node.pos = [other.pos[0] + shift[0], other.pos[1] + shift[1]];
   }
@@ -352,23 +355,38 @@ function recordedNode(state, node) {
   return list.find((one) => String(one?.id) === String(node.id)) || null;
 }
 
+function freshState(root) {
+  const grid = root.querySelector('[data-testid="node-widgets"]');
+  if (grid?.style.gridTemplateRows.includes("auto")) return "skip";
+  if (root.querySelector('[data-testid^="node-body-"] :is(img, video, canvas)')) return "skip";
+  for (const row of root.querySelectorAll('[data-testid="node-widget"]')) {
+    const shown = [...row.children].some((part) => !part.classList.contains("z-10")
+      && part.firstElementChild && part.offsetHeight > 0);
+    if (!shown) return "wait";
+  }
+  return "ready";
+}
+
 function settleFresh() {
   freshTimer = 0;
-  for (const [node, frames] of fresh) {
-    if (configured.has(node) || !node.graph || !active()) {
+  for (const [node, seen] of fresh) {
+    if (configured.has(node) || !node.graph || !active() || node.flags?.collapsed) {
       fresh.delete(node);
       continue;
     }
     const root = rootOf(node);
-    if (!root || !root.offsetHeight) {
-      if (frames >= FRESH_FRAMES) fresh.delete(node);
-      else fresh.set(node, frames + 1);
+    const state = root?.offsetHeight ? freshState(root) : "wait";
+    if (state === "skip" || seen.frames >= FRESH_FRAMES) {
+      fresh.delete(node);
+      continue;
+    }
+    const height = state === "ready" ? contentHeight(root, root.offsetWidth) : 0;
+    if (!height || height !== seen.height) {
+      fresh.set(node, { frames: seen.frames + 1, height });
       continue;
     }
     fresh.delete(node);
-    if (node.flags?.collapsed) continue;
-    const height = contentHeight(root, root.offsetWidth);
-    if (!height || height >= node.size[1] - 0.5) continue;
+    if (height >= node.size[1] - 0.5) continue;
     node.setSize([node.size[0], height]);
     const saved = recordedNode(trackerState(), node);
     if (Array.isArray(saved?.size)) saved.size = [node.size[0], node.size[1]];
@@ -379,6 +397,6 @@ function settleFresh() {
 
 export function fitWhenShown(node) {
   if (!active() || !node) return;
-  fresh.set(node, 0);
+  fresh.set(node, { frames: 0, height: 0 });
   if (!freshTimer) freshTimer = requestAnimationFrame(settleFresh);
 }

@@ -1,24 +1,36 @@
 const ROOT = "html[data-om-nodes]";
 const NODE = `${ROOT} .lg-node`;
 const GRID = `${NODE} .lg-node-widgets`;
-const ROW = `${GRID} > [data-testid="node-widget"]`;
+const SECTION = ".grid-rows-subgrid";
+const ROW = `:is(${GRID} > [data-testid="node-widget"], ${GRID} > ${SECTION} > [data-testid="node-widget"])`;
+const PLAIN_ROW = `:is(${GRID}, ${GRID} > ${SECTION}) > .col-span-full:not(.lg-node-widget):not(${SECTION})`;
 const LABEL = '[data-testid="widget-layout-field-label"]';
-const FIELD = `${ROW}:has(> .col-span-2 > ${LABEL}, > .col-span-2 > .col-span-2 > ${LABEL})`;
-const ROOTS = [`${ROW} > .col-span-2`, `${ROW} > .col-span-2 > .col-span-2`];
+const SPAN = ["> .col-span-2", "> .col-span-2 > .col-span-2", "> .col-span-2 > .col-span-2 > .col-span-2"];
+const HAS_LABEL = SPAN.map((path) => `${path} > ${LABEL}`).join(", ");
+const LEGACY = ':is([class*="mx-["], .-mx-3)';
+const HAS_BUTTON = SPAN.slice(0, 2).map((path) => `${path}.flex-col.gap-1`).join(", ");
+const HAS_LEGACY = SPAN.slice(0, 2).map((path) => `${path}${LEGACY}`).join(", ");
+const FIELD = `${ROW}:has(${HAS_LABEL})`;
+const ROOTS = SPAN.map((path) => `${ROW} ${path}`);
 const LABELS = ROOTS.map((root) => `${root} > ${LABEL}`);
 const CELLS = LABELS.map((label) => `${label} + .min-w-0`);
 const BODY = '[data-testid^="node-body-"]';
 const WRAP = '[data-testid="node-inner-wrapper"]';
 const RING = '[data-testid="node-state-outline-overlay"]';
 const FOOT = ".box-border.isolate";
-const TABS = ':is([data-testid="advanced-inputs-button"], [data-testid="subgraph-enter-button"], '
-  + "button.bg-destructive-background)";
+const ERROR_TAB = "button:is(.bg-destructive-background, .bg-destructive, .bg-warning)";
+const TABS = `:is([data-testid="advanced-inputs-button"], [data-testid="subgraph-enter-button"], ${ERROR_TAB})`;
 const NAMED = ':is([data-testid="advanced-inputs-button"], [data-testid="subgraph-enter-button"])';
 const STEP = ':is([data-testid="decrement"], [data-testid="increment"])';
 const TRIGGER = '[data-testid="widget-select-default-trigger"]';
-const BUTTON = `${ROW} > .col-span-2.flex-col.gap-1 > button`;
-const OTHER = `${ROW} > .col-span-2:not(:has(> ${LABEL})):not(:has(> .col-span-2 > ${LABEL}))`
-  + ':not(.gap-1):not([class*="mx-["])';
+const SELECTED = ":is(.outline-node-component-outline, .outline-foreground)";
+const PROGRESS = ":is(.bg-primary-500, .bg-primary)";
+const BADGE = ":is(.bg-node-component-surface, .bg-node)";
+const SLOT_ERROR = ":is(.text-error, .text-destructive)";
+const BUTTONS = SPAN.slice(0, 2).map((path) => `${ROW} ${path}.flex-col.gap-1 > button`).join(",\n");
+const LEGACIES = SPAN.slice(0, 2).map((path) => `${ROW} ${path}${LEGACY}`).join(",\n");
+const TEXTAREAS = SPAN.slice(0, 2).map((path) => `${ROW} ${path}`);
+const OTHER = `${ROW}:not(:has(${HAS_LABEL})):not(:has(${HAS_BUTTON})):not(:has(${HAS_LEGACY})) > .col-span-2`;
 const BYPASSED = `${NODE}:has(> ${WRAP}[class*="before:bg-bypass"])`;
 const MUTED = `${NODE}:has(> ${WRAP}[class*="before:inset-0"]:not([class*="before:bg-bypass"]))`;
 const STATUS = `:is(${BYPASSED}, ${MUTED})`;
@@ -65,14 +77,14 @@ ${ROOT} {
   --omn-widget-label: #999;
   --omn-widget-value: #ddd;
   --omn-widget-disabled: #666;
-  --omn-accent: var(--primary-background, #0b8ce9);
+  --omn-accent: var(--primary, var(--primary-background, #0b8ce9));
   --omn-selection: #fff;
   --omn-running: #0f0;
   --omn-progress: green;
   --omn-drop: dodgerblue;
   --omn-progress-height: 3px;
   --omn-status-fade: 0.5;
-  --omn-error: var(--destructive-background, #e00);
+  --omn-error: var(--destructive, var(--destructive-background, #e00));
 }
 ${NODE} {
   --radius-xl: var(--omn-node-radius);
@@ -86,17 +98,17 @@ ${NODE} > ${WRAP} {
 ${NODE} > ${WRAP}.ring-4 {
   --tw-ring-shadow: 0 0 0 2px var(--tw-ring-color, currentcolor);
 }
-${NODE} > ${WRAP}.ring-destructive-background {
+${NODE} > ${WRAP}:is(.ring-destructive-background, .ring-destructive) {
   --tw-ring-color: var(--omn-error);
 }
-${NODE} > ${WRAP}.ring-primary-500 {
+${NODE} > ${WRAP}:is(.ring-primary-500, .ring-primary) {
   --tw-ring-color: var(--omn-drop);
   background-color: color-mix(in srgb, var(--omn-drop) 10%, transparent);
 }
 ${NODE} > ${WRAP}::before {
   border-radius: inherit;
 }
-${NODE} > ${WRAP} > .relative > .bg-primary-500 {
+${NODE} > ${WRAP} > .relative > ${PROGRESS} {
   top: 0;
   z-index: 1;
   height: var(--omn-progress-height);
@@ -105,7 +117,7 @@ ${NODE} > ${WRAP} > .relative > .bg-primary-500 {
   transform: none;
   translate: none;
 }
-${NODE} > ${WRAP} > .bg-primary-500 {
+${NODE} > ${WRAP} > ${PROGRESS} {
   bottom: 0;
   left: var(--omn-node-radius);
   right: auto;
@@ -126,10 +138,10 @@ ${NODE} > ${RING}[class*="rounded-["] {
 ${NODE} > ${RING}[class*="rounded-tl-["] {
   border-radius: calc(var(--omn-node-radius) + var(--omn-outline-width) + var(--omn-outline-gap)) 0;
 }
-${NODE} > ${RING}.border-node-component-outline {
+${NODE} > ${RING}:is(.border-node-component-outline, .border-foreground) {
   border-color: var(--omn-selection);
 }
-${NODE} > ${RING}.border-node-stroke-executing {
+${NODE} > ${RING}:is(.border-node-stroke-executing, .border-primary) {
   border-color: var(--omn-running);
 }
 ${NODE} .lg-node-header {
@@ -142,7 +154,7 @@ ${NODE} .lg-node-header {
   font-weight: var(--omn-title-weight);
   line-height: 1.2;
 }
-${NODE}.outline-node-component-outline .lg-node-header {
+${NODE}${SELECTED} .lg-node-header {
   color: var(--omn-title-ink-selected);
 }
 ${NODE} .lg-node-header > div {
@@ -181,10 +193,10 @@ ${NODE} [data-testid="node-pin-indicator"] {
   flex-shrink: 0;
 }
 ${NODE}:has(> ${FOOT} > ${NAMED}) .lg-node-header,
-${NODE}:has(> ${FOOT} > button.bg-destructive-background) .lg-node-header {
+${NODE}:has(> ${FOOT} > ${ERROR_TAB}) .lg-node-header {
   padding-right: 30px;
 }
-${NODE}:has(> ${FOOT} > button.bg-destructive-background):has(> ${FOOT} > ${NAMED}) .lg-node-header {
+${NODE}:has(> ${FOOT} > ${ERROR_TAB}):has(> ${FOOT} > ${NAMED}) .lg-node-header {
   padding-right: 54px;
 }
 ${NODE} > ${FOOT} {
@@ -220,16 +232,16 @@ ${STATUS} > ${FOOT} {
   opacity: var(--omn-status-fade);
 }
 ${STATUS}:has(> ${FOOT} > ${NAMED}),
-${STATUS}:has(> ${FOOT} > button.bg-destructive-background) {
+${STATUS}:has(> ${FOOT} > ${ERROR_TAB}) {
   --omn-status-foot: 22px;
 }
-${STATUS}:has(> ${FOOT} > button.bg-destructive-background):has(> ${FOOT} > ${NAMED}) {
+${STATUS}:has(> ${FOOT} > ${ERROR_TAB}):has(> ${FOOT} > ${NAMED}) {
   --omn-status-foot: 46px;
 }
 ${STATUS}:has([data-testid="node-pin-indicator"]) {
   --omn-status-pin: 20px;
 }
-${STATUS} .lg-node-header > div > .bg-node-component-surface {
+${STATUS} .lg-node-header > div > ${BADGE} {
   visibility: hidden;
 }
 ${STATUS}::after {
@@ -276,8 +288,11 @@ ${MUTED}::after {
 ${NODE} > ${FOOT} > ${TABS}:hover {
   background: color-mix(in srgb, currentColor 18%, transparent);
 }
-${NODE} > ${FOOT} > button.bg-destructive-background {
+${NODE} > ${FOOT} > button:is(.bg-destructive-background, .bg-destructive) {
   color: var(--omn-error);
+}
+${NODE} > ${FOOT} > button.bg-warning {
+  color: var(--warning);
 }
 ${NODE} > ${FOOT} > ${TABS} span {
   display: none;
@@ -292,6 +307,9 @@ ${NODE} ${BODY} {
 }
 ${NODE} ${BODY}:has(> [data-testid="node-widgets"]) {
   padding-bottom: 12px;
+}
+${NODE} ${BODY}:has(> .flex-col > .lg-node-content > .image-preview) > :is(img.min-h-55, .mt-1.text-center, .size-full.text-center) {
+  display: none;
 }
 ${NODE} ${BODY} > .mt-auto {
   position: absolute;
@@ -315,7 +333,7 @@ ${NODE} .lg-slot span.truncate {
   color: var(--omn-slot-ink);
   font-size: var(--omn-text-size);
 }
-${NODE} .lg-slot span.text-error {
+${NODE} .lg-slot span${SLOT_ERROR} {
   color: var(--omn-error);
 }
 ${NODE} [data-testid="slot-dot"] {
@@ -328,13 +346,13 @@ ${GRID} {
   padding: 0 var(--omn-widget-inset);
   font-size: var(--omn-text-size);
 }
-${GRID} > .col-span-full:not(.lg-node-widget) {
+${PLAIN_ROW} {
   margin-left: calc(-1 * var(--omn-widget-inset));
 }
-${GRID} > .col-span-full:not(.lg-node-widget) .lg-slot--input > [data-testid="slot-connection-dot"] + div {
+${PLAIN_ROW} .lg-slot--input > [data-testid="slot-connection-dot"] + div {
   padding-left: calc(var(--omn-widget-inset) + var(--omn-widget-pad) - 12px);
 }
-${GRID} > .col-span-full:not(.lg-node-widget) .lg-slot--input span.truncate:not(.text-error) {
+${PLAIN_ROW} .lg-slot--input span.truncate:not(${SLOT_ERROR}) {
   color: var(--omn-widget-label);
 }
 ${ROW} {
@@ -357,7 +375,7 @@ ${ROW} > .col-span-2 {
 ${OTHER} {
   margin-inline: min(0px, calc(10px - var(--omn-widget-inset)));
 }
-${ROW} > .col-span-2[class*="mx-["] {
+${LEGACIES} {
   width: calc(100% + 2 * var(--omn-widget-inset));
   margin-inline: calc(-1 * var(--omn-widget-inset));
 }
@@ -372,7 +390,7 @@ ${FIELD} {
 ${FIELD}:hover {
   background: ${HOVER};
 }
-${FIELD}:has(.ring-component-node-widget-advanced) {
+${FIELD}:has(:is(.ring-component-node-widget-advanced, .ring-primary)) {
   outline-color: var(--omn-widget-outline-advanced);
 }
 ${FIELD}:focus-within {
@@ -417,9 +435,9 @@ ${cell("> .cursor-default > div")} {
 ${cell("> .cursor-default > .w-fit")} {
   flex: 0 0 auto;
 }
-${cell(".bg-component-node-widget-background")},
-${cell(".not-disabled\\:bg-component-node-widget-background")},
-${cell(".hover\\:bg-component-node-widget-background-hovered:hover")} {
+${cell(":is(.bg-component-node-widget-background, .bg-input, .bg-secondary)")},
+${cell(":is(.not-disabled\\:bg-component-node-widget-background, .not-disabled\\:bg-input)")},
+${cell(":is(.hover\\:bg-component-node-widget-background-hovered, .hover\\:bg-muted):hover")} {
   background-color: transparent;
 }
 ${cell(".ring")},
@@ -525,7 +543,7 @@ ${cell("label.size-8")} {
   border-left: 1px solid var(--omn-widget-outline);
   border-radius: 0 ${RADIUS} ${RADIUS} 0;
 }
-${cell("input.p-inputtext")} {
+${cell("input:is(.p-inputtext, .appearance-none)")} {
   field-sizing: content;
   min-width: 2ch;
   height: var(--omn-widget-height);
@@ -576,7 +594,7 @@ ${cell('[role="group"] > button')} {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-${BUTTON} {
+${BUTTONS} {
   height: var(--omn-widget-height);
   min-height: 0;
   padding: 0 8px;
@@ -587,10 +605,10 @@ ${BUTTON} {
   color: var(--omn-widget-value);
   font-size: var(--omn-text-size);
 }
-${BUTTON}:hover {
+${each(BUTTONS.split(",\n"), ":hover")} {
   background: ${HOVER};
 }
-${ROW} > .col-span-2 > textarea {
+${each(TEXTAREAS, " > textarea")} {
   padding: 4px 6px;
   border-radius: 6px;
   background: var(--omn-widget-bg);
@@ -598,15 +616,44 @@ ${ROW} > .col-span-2 > textarea {
   outline-offset: -1px;
   color: var(--omn-widget-value);
 }
-${ROW} > .col-span-2 > textarea:focus {
+${each(TEXTAREAS, " > textarea:focus")} {
   outline-color: var(--omn-accent);
 }
-${ROW} > .col-span-2 > label:has(+ textarea) {
+${each(TEXTAREAS, " > label:has(+ textarea)")} {
   top: 4px;
   left: 7px;
   color: var(--omn-widget-label);
 }
-${ROW} > .col-span-2 > label:has(+ textarea:not(:placeholder-shown)) {
+${each(TEXTAREAS, " > label:has(+ textarea:not(:placeholder-shown))")} {
   display: none;
+}
+${NODE} .om-row-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 2;
+}
+${NODE} .om-row-grip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 2px;
+  margin: -1px 0 0 -12px;
+  border-radius: 1px;
+  background: var(--omn-widget-label);
+  opacity: 0;
+}
+${NODE}:hover .om-row-grip::after {
+  opacity: .35;
+}
+${NODE} .om-row-grip:hover::after,
+${NODE} .om-row-grip[data-om-held]::after {
+  opacity: .95;
 }
 `;

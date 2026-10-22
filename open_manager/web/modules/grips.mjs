@@ -229,4 +229,7 @@ function gripMenuItem(node) {
   };
 }
 
-export { GRIP_BAR, GRIP_INSET, watchGrips, applyGrips, gripMenuItem };
+export {
+  GRIP_BAR, GRIP_INSET, watchGrips, applyGrips, gripMenuItem,
+  gripsOn, gripWidgets, gripHeld, gripClamp, gripPin, gripUnpin, gripSave,
+};

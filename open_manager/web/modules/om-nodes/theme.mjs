@@ -48,8 +48,8 @@ const OM_TOKENS = {
 };
 
 const SURFACES = {
-  header: "--node-component-header-surface",
-  body: "--component-node-background",
+  header: ["--node-component-header-surface", "--node-header"],
+  body: ["--component-node-background", "--node"],
 };
 
 const PALETTE = [
@@ -76,13 +76,14 @@ const PALETTE = [
 
 const NODE_PARTS = {
   node: ".lg-node",
-  selected: ".lg-node.outline-node-component-outline",
-  running: ".lg-node.outline-node-stroke-executing",
+  selected: ".lg-node:is(.outline-node-component-outline, .outline-foreground)",
+  running: ".lg-node:is(.outline-node-stroke-executing, .outline-primary)",
   collapsed: ".lg-node[data-collapsed]",
   bypassed: '.lg-node:has(> [data-testid="node-inner-wrapper"][class*="before:bg-bypass"])',
   muted: '.lg-node:has(> [data-testid="node-inner-wrapper"][class*="before:inset-0"]'
     + ':not([class*="before:bg-bypass"]))',
-  errored: '.lg-node:has(> [data-testid="node-inner-wrapper"][class*="ring-destructive-background"])',
+  errored: '.lg-node:has(> [data-testid="node-inner-wrapper"]:is([class*="ring-destructive"], '
+    + '[class*="ring-warning"]))',
 };
 
 const INNER_PARTS = {
@@ -99,14 +100,16 @@ const INNER_PARTS = {
   widgets: '[data-testid="node-widgets"]',
   widget: '[data-testid="node-widget"]',
   field: '[data-testid="node-widget"]:has(> .col-span-2 > [data-testid="widget-layout-field-label"], '
-    + '> .col-span-2 > .col-span-2 > [data-testid="widget-layout-field-label"])',
+    + '> .col-span-2 > .col-span-2 > [data-testid="widget-layout-field-label"], '
+    + '> .col-span-2 > .col-span-2 > .col-span-2 > [data-testid="widget-layout-field-label"])',
   label: '[data-testid="widget-layout-field-label"]',
   value: '[data-testid="widget-layout-field-label"] + .min-w-0',
   stepper: ':is([data-testid="decrement"], [data-testid="increment"])',
   textarea: "textarea",
   badges: '[data-testid^="node-body-"] > .mt-auto',
   tabs: '.box-border.isolate > :is([data-testid="advanced-inputs-button"], '
-    + '[data-testid="subgraph-enter-button"], button.bg-destructive-background)',
+    + '[data-testid="subgraph-enter-button"], '
+    + "button:is(.bg-destructive-background, .bg-destructive, .bg-warning))",
   outline: '[data-testid="node-state-outline-overlay"]',
   resize: "[data-corner]",
 };
@@ -334,7 +337,7 @@ export function applyOmTheme(extras) {
   if (Number.isFinite(radius) && radius >= 0 && radius <= 120) decl.push(`--omn-node-radius:${radius}px`);
   for (const [name, value] of Object.entries(om?.tokens || {})) {
     decl.push(`--omn-${name}:${value}`);
-    if (SURFACES[name]) decl.push(`${SURFACES[name]}:${value}`);
+    for (const prop of SURFACES[name] || []) decl.push(`${prop}:${value}`);
   }
   for (const [name, src] of Object.entries(om?.images || {})) {
     decl.push(`--omn-image-${name}:url("${src}")`);

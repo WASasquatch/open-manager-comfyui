@@ -1218,7 +1218,14 @@ function applyBackdrop(canvas, surface, palette) {
 
 const VUE_SWEEP = 150;
 
-const VUE_LIFTED = ["--node-component-header-surface", "--component-node-background"];
+const VUE_LIFTS = [
+  ["--node-component-header-surface", "NODE_DEFAULT_COLOR"],
+  ["--node-header", "NODE_DEFAULT_COLOR"],
+  ["--component-node-background", "NODE_DEFAULT_BGCOLOR"],
+  ["--node", "NODE_DEFAULT_BGCOLOR"],
+];
+
+const vueLifted = new Map();
 
 let vueObserver = null;
 let vueTimer = 0;
@@ -1238,18 +1245,27 @@ function cssGradient(grade) {
   return `linear-gradient(${grade.angle}deg, ${stops.join(", ")})`;
 }
 
-function liftVueProperties(palette) {
-  const root = document.documentElement;
-  const lift = Number(window.LiteGraph?.nodeLightness);
-  if (!vueNodesOn() || !Number.isFinite(lift) || lift <= 0) {
-    for (const prop of VUE_LIFTED) root.style.removeProperty(prop);
-    return;
+function unliftVueProperties(style) {
+  for (const [prop, held] of vueLifted) {
+    if (style.getPropertyValue(prop).trim() !== held.mine) continue;
+    if (held.theirs) style.setProperty(prop, held.theirs);
+    else style.removeProperty(prop);
   }
+  vueLifted.clear();
+}
+
+function liftVueProperties(palette) {
+  const style = document.documentElement.style;
+  unliftVueProperties(style);
+  const lift = Number(window.LiteGraph?.nodeLightness);
+  if (!vueNodesOn() || !Number.isFinite(lift) || lift <= 0) return;
   const base = palette?.colors?.litegraph_base || {};
-  for (const [prop, stated] of [["--node-component-header-surface", base.NODE_DEFAULT_COLOR],
-                                ["--component-node-background", base.NODE_DEFAULT_BGCOLOR]]) {
-    if (typeof stated === "string" && stated) root.style.setProperty(prop, asRendered(stated));
-    else root.style.removeProperty(prop);
+  for (const [prop, key] of VUE_LIFTS) {
+    const stated = base[key];
+    if (typeof stated !== "string" || !stated) continue;
+    const mine = asRendered(stated);
+    vueLifted.set(prop, { mine, theirs: style.getPropertyValue(prop).trim() });
+    style.setProperty(prop, mine);
   }
 }
 
@@ -1268,6 +1284,7 @@ function vueInnerOf(root) {
 function stripVueNode(root) {
   stripOmNode(root, vueHeaderOf(root));
   root.style.removeProperty("--node-component-header-surface");
+  root.style.removeProperty("--node-header");
   root.style.removeProperty("--component-node-background");
   const inner = vueInnerOf(root);
   if (inner) {
@@ -1280,6 +1297,7 @@ function stripVueNode(root) {
   const header = vueHeaderOf(root);
   if (header) {
     header.style.removeProperty("--node-component-slot-text");
+    header.style.removeProperty("color");
     header.style.backgroundImage = "";
   }
   root.style.removeProperty("filter");
@@ -1315,12 +1333,22 @@ function paintVueNode(root, extras) {
   const grade = node.color ? null : (rule?.gradient ?? categoryGradient(extras.categories, node));
   const shown = grade ? gradientAnchor(grade) : (chosen ? asRendered(chosen) : null);
   const header = vueHeaderOf(root);
+  const om = omActive();
   if (shown) {
     root.style.setProperty("--node-component-header-surface", shown);
-    if (header) header.style.setProperty("--node-component-slot-text", contrastOn(shown));
+    root.style.setProperty("--node-header", shown);
+    if (header) {
+      header.style.setProperty("--node-component-slot-text", contrastOn(shown));
+      if (om) header.style.removeProperty("color");
+      else header.style.setProperty("color", contrastOn(shown));
+    }
   } else {
     root.style.removeProperty("--node-component-header-surface");
-    if (header) header.style.removeProperty("--node-component-slot-text");
+    root.style.removeProperty("--node-header");
+    if (header) {
+      header.style.removeProperty("--node-component-slot-text");
+      header.style.removeProperty("color");
+    }
   }
   if (header) header.style.backgroundImage = grade ? cssGradient(grade) : "";
 
@@ -1335,6 +1363,7 @@ function paintVueNode(root, extras) {
     const wash = `rgba(${red},${green},${blue},${solidity})`;
     root.style.setProperty("--component-node-background", wash);
     root.style.setProperty("--node-component-header-surface", "transparent");
+    root.style.setProperty("--node-header", "transparent");
     const inner = vueInnerOf(root);
     if (inner) {
       inner.style.setProperty("--component-node-background", wash);

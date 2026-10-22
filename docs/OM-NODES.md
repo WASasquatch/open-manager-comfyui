@@ -37,8 +37,14 @@ values, so a theme that sets them for classic sets them here too.
 | Several selected nodes | The same change for each, with *Resize every selected node together* on |
 | Shift, or snap to grid | Snaps to the grid size |
 | Smallest size | The node's classic minimum width, and the height its rows need |
+| Text boxes | A grip under each box sets that box's height, with *Drag multiline text boxes to size them* on |
 
 A drag on a slot's dot still starts a link. Each resize is one undo step.
+
+A text box you have sized keeps its height when the node grows; boxes you have not sized share
+what is left. When every box on a node is sized, the node grows only from a grip. Double-click a
+grip, or use **Reset text box heights** in the node's menu, to give a box back. Heights are saved
+in the workflow and are the same in classic nodes.
 
 ## Fit to content
 
