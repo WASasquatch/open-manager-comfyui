@@ -14,8 +14,8 @@ __all__ = ["ALL_CAP", "FLOW_KEYS", "KINDS", "PAGE", "PAGE_CAP", "ROOTS", "SCAN_C
            "THUMB_EDGE", "WRITE_CAP", "WRITE_KINDS",
            "TEXT_CAP", "TEXT_EDITS", "VIEW_TYPES",
            "listing", "locate", "peek", "read_text", "remove", "root_of", "search",
-           "strip_workflow", "sweep_thumbs", "thumb", "thumb_folder", "workflow_of",
-           "write", "write_text"]
+           "strip_workflow", "sweep_thumbs", "thumb", "thumb_folder", "video_meta",
+           "workflow_of", "write", "write_text"]
 
 ROOTS = ("output", "input", "temp")
 
@@ -248,6 +248,29 @@ def locate(root: str, relative: str) -> tuple[Path | None, str, str]:
     if not kind:
         return None, "", "is not a picture, a video or a sound"
     return found, kind, ""
+
+
+def video_meta(root: str, relative: str) -> dict:
+    """One video's frame rate, length, size and bytes, read as ComfyUI's video nodes read them.
+
+    Returns:
+        ``{ok, fps, duration, width, height, size}``, or ``{ok: False, reason}``.
+    """
+    found, kind, problem = locate(root, relative)
+    if problem or found is None:
+        return {"ok": False, "reason": problem or "no such file"}
+    if not kind.startswith("video/"):
+        return {"ok": False, "reason": "is not a video"}
+    try:
+        from comfy_api.latest import InputImpl
+
+        video = InputImpl.VideoFromFile(str(found))
+        width, height = video.get_dimensions()
+        return {"ok": True, "fps": float(video.get_frame_rate()),
+                "duration": float(video.get_duration()), "width": int(width),
+                "height": int(height), "size": found.stat().st_size}
+    except Exception as error:  # noqa: BLE001
+        return {"ok": False, "reason": f"could not be read ({type(error).__name__})"}
 
 
 TEXT_EDITS = (".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".toml", ".ini", ".cfg",

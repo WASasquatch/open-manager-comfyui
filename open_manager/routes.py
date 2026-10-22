@@ -1140,6 +1140,24 @@ def register_routes() -> None:
         """Every Quality of Life patch this install ships, by category."""
         return web.json_response(await asyncio.to_thread(qol_patches.listing))
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/qol/video-meta")
+    async def qol_video_meta(request: web.Request) -> web.Response:
+        """Frame rate, length, size and bytes of one video, as ComfyUI's video nodes read them."""
+        query = request.query
+        relative = "/".join(part for part in (query.get("subfolder", ""), query.get("filename", ""))
+                            if part)
+        answer = await asyncio.to_thread(
+            asset_files.video_meta, query.get("type", "output"), relative
+        )
+        return web.json_response(answer, status=200 if answer["ok"] else 404)
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/qol/frontend-chunks")
+    async def qol_frontend_chunks(request: web.Request) -> web.Response:
+        """The built files of ComfyUI frontend components a patch shows on the classic canvas."""
+        names = [name for name in request.query.get("names", "").split(",") if name][:16]
+        answer = await asyncio.to_thread(qol_patches.frontend_chunks, names)
+        return web.json_response(answer, status=200 if answer["ok"] else 404)
+
     @PromptServer.instance.routes.get(f"{PREFIX}/programs/store")
     async def program_store_read(request: web.Request) -> web.Response:
         """What one program kept in its own corner of the reader's directory."""

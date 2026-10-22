@@ -205,8 +205,128 @@ Design for the on state. None of these write to your file.
 ## Nodes 2.0
 
 - `shape.radius` and `shape.titleHeight` are ignored. `shape.slotHeight` still applies.
+  [OM Nodes](OM-NODES.md) uses `shape.radius` too.
 - The icon sits between the collapse button and the title. An image icon is drawn at 16 pixels
   at most.
+
+---
+
+## OM Nodes
+
+[OM Nodes](OM-NODES.md) takes its colours and sizes from the palette, the way classic nodes
+do. `extras.om` restyles it further, from a token to every part of a node.
+
+```jsonc
+"extras": {
+  "om": {
+    "tokens": { "widget-bg": "#1b1d22", "widget-radius": 4, "title-size": 13, "accent": "#7aa2f7" },
+    "images": { "grain": "pack:themes/my-theme/grain.png" },
+    "css": [
+      "%header { background-image: var(--omn-image-grain); }",
+      "%node[data-om-type='KSampler'] %title { letter-spacing: 0.04em; }",
+      "%selected %frame { outline: 1px solid var(--omn-accent); }",
+      "%field:hover %label { color: var(--omn-widget-value); }"
+    ]
+  },
+  "categories": { "sampling": { "om": { "tokens": { "widget-outline": "#6b4fa8" } } } },
+  "nodes": { "KSampler": { "om": { "tokens": { "title-weight": 600 } } } }
+}
+```
+
+A rule in `categories` or `nodes` takes `om.tokens` for the nodes it matches, every token
+except `header` and `body`; colour those with the rule's own `color` and `body`. A `nodes` rule
+wins over a category, and the longest category over a shorter one.
+
+### Tokens
+
+Each token is a CSS variable, `--omn-<name>`, usable in your CSS. Lengths are numbers, in
+pixels.
+
+| token | accepted | default |
+| --- | --- | --- |
+| `node-radius` | 0 to 24 | `ROUND_RADIUS`, or `shape.radius` |
+| `widget-radius` | 0 to 20 | half the widget height |
+| `widget-height` | 14 to 40 | `NODE_WIDGET_HEIGHT` |
+| `widget-gap` | 0 to 12 | 4 |
+| `widget-inset` | 0 to 40 | 15, the space beside each widget |
+| `widget-pad` | 8 to 40 | 20, the space for − and + |
+| `slot-height` | 14 to 40 | `NODE_SLOT_HEIGHT` |
+| `title-size` | 8 to 28 | `NODE_TEXT_SIZE` |
+| `text-size` | 8 to 20 | `NODE_SUBTEXT_SIZE` |
+| `title-weight` | 100 to 900, `normal`, `bold` | 400 |
+| `font` | a font family list | `NODE_FONT` |
+| `dot-size` | 4 to 16 | 8 |
+| `outline-width` | 0 to 6 | 2, the selection outline |
+| `outline-gap` | 0 to 8 | 2 |
+| `shadow-x`, `shadow-y` | -20 to 20 | 2 |
+| `shadow-blur` | 0 to 40 | 3 |
+| `shadow-color` | colour | `DEFAULT_SHADOW_COLOR` |
+| `title-ink` | colour | `NODE_TITLE_COLOR` |
+| `title-ink-selected` | colour | `NODE_SELECTED_TITLE_COLOR` |
+| `slot-ink` | colour | `NODE_TEXT_COLOR` |
+| `box` | colour | the title colour, for the collapse arrow |
+| `header` | colour | `NODE_DEFAULT_COLOR` |
+| `body` | colour | `NODE_DEFAULT_BGCOLOR` |
+| `widget-bg` | colour | `WIDGET_BGCOLOR` |
+| `widget-bg-hover` | colour | `widget-bg`, lightened |
+| `widget-outline` | colour | `WIDGET_OUTLINE_COLOR` |
+| `widget-outline-advanced` | colour | `WIDGET_ADVANCED_OUTLINE_COLOR` |
+| `widget-label` | colour | `WIDGET_SECONDARY_TEXT_COLOR` |
+| `widget-value` | colour | `WIDGET_TEXT_COLOR` |
+| `widget-disabled` | colour | `WIDGET_DISABLED_TEXT_COLOR` |
+| `accent` | colour | ComfyUI's primary colour, for focus and fills |
+| `selection` | colour | `NODE_BOX_OUTLINE_COLOR` |
+| `running` | colour | `#0f0`, the running outline |
+| `progress` | colour | `green`, the bar along the top of the body |
+| `progress-height` | 1 to 8 | 3 |
+| `drop` | colour | `dodgerblue`, a node a dragged file can drop on |
+| `error` | colour | `NODE_ERROR_COLOUR` |
+
+The title bar's height is always `NODE_TITLE_HEIGHT`, so links and saved positions stay where
+LiteGraph puts them.
+
+### Named images
+
+`images` names up to 8 images, read like any other theme image and counted against the same
+limits. Each becomes `--omn-image-<name>`, holding `url(...)`. Names are lowercase letters,
+digits and hyphens, starting with a letter.
+
+### CSS
+
+`css` is a string, or a list of strings joined in order. Name parts of a node with `%`:
+
+| part | is |
+| --- | --- |
+| `%node` | the whole node |
+| `%selected`, `%running`, `%collapsed`, `%bypassed`, `%muted`, `%errored` | the whole node, in that state |
+| `%frame` | the node's background and shape |
+| `%header`, `%title`, `%collapse` | the title bar, its text, the collapse arrow |
+| `%body` | everything under the title bar |
+| `%slot`, `%input`, `%output` | slot rows |
+| `%slot-label`, `%dot` | a slot's name and its dot |
+| `%widgets`, `%widget` | the widget area, one widget row |
+| `%field`, `%label`, `%value` | a labelled widget, its name, its control |
+| `%stepper` | the − and + buttons |
+| `%textarea` | a text box |
+| `%badges` | node ID and source badges above the title |
+| `%tabs` | the advanced inputs, Enter subgraph and error icons |
+| `%outline` | the selection and running outline |
+| `%resize` | the corner handles |
+
+Every node carries `data-om-type`, its class, and `data-om-category`, its category path, so
+`%node[data-om-type='KSampler']` and `%node[data-om-category^='loaders']` select by node.
+
+| rule | |
+| --- | --- |
+| Scope | Each selector must start with a part. Rules apply inside nodes only, while OM Nodes is on and your theme is active |
+| Images | `url()` is refused. Use `var(--omn-image-<name>)` |
+| Refused | `@import`, `@font-face`, `@keyframes`, `animation`, `transition`, `position: fixed` and `sticky` |
+| Allowed | `@media` and `@supports` around rules, `:hover`, `:focus-within`, `:has()`, `!important` |
+| Size | 48,000 characters, 600 rules |
+
+A selector or declaration that breaks one of these is dropped and the rest load. Every rule is
+matched against every node on screen: end each selector in a part or a class, not `*` or a
+bare tag.
 
 ---
 

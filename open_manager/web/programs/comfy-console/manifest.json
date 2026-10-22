@@ -1,0 +1,27 @@
+{
+  "id": "comfy-console",
+  "name": "Console",
+  "hint": "ComfyUI's console output, live",
+  "tags": [
+    "console",
+    "logs",
+    "terminal",
+    "output",
+    "errors",
+    "comfyui"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "comfy-console.svg",
+  "group": "ComfyUI",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "purple"
+  },
+  "capabilities": [
+    "Reads ComfyUI's console output"
+  ]
+}

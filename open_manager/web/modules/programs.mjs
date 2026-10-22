@@ -13,6 +13,7 @@ import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowB
 import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.mjs";
 import { runSnapshot } from "./snapshot-store.mjs";
 import { sessionReady } from "./session.mjs";
+import { piniaStores } from "./qol/shared.mjs";
 
 const PROGRAM_BASE = new URL("./programs/", new URL("../", import.meta.url)).href;
 
@@ -679,6 +680,83 @@ function programTiming() {
   };
 }
 
+const CORE_LOGS_TAB = "logs-terminal";
+
+const logWatchers = new Set();
+
+let logHold = null;
+
+function coreLogsShown() {
+  try {
+    const store = piniaStores()?.get("bottomPanel");
+    return !!store?.bottomPanelVisible && store.activeBottomPanelTab?.id === CORE_LOGS_TAB;
+  } catch {
+    return false;
+  }
+}
+
+function tellLogs(detail) {
+  for (const fn of [...logWatchers]) {
+    try { fn(detail); } catch {}
+  }
+}
+
+function holdLogs() {
+  const own = api.subscribeLogs;
+  if (typeof own !== "function") return null;
+  const subscribe = () => Promise.resolve(own.call(api, true)).catch(() => {});
+  const held = {
+    own,
+    wrapper: (enabled) => (enabled ? own.call(api, true) : Promise.resolve()),
+    entries: (event) => tellLogs(Array.isArray(event.detail?.entries) ? event.detail.entries : []),
+    back: () => {
+      void subscribe();
+      tellLogs(null);
+    },
+  };
+  api.subscribeLogs = held.wrapper;
+  api.addEventListener("logs", held.entries);
+  api.addEventListener("reconnected", held.back);
+  void subscribe();
+  return held;
+}
+
+function releaseLogs(held) {
+  api.removeEventListener("logs", held.entries);
+  api.removeEventListener("reconnected", held.back);
+  if (api.subscribeLogs === held.wrapper) {
+    if (Object.getPrototypeOf(api).subscribeLogs === held.own) delete api.subscribeLogs;
+    else api.subscribeLogs = held.own;
+  }
+  if (!coreLogsShown() && api.clientId) {
+    void Promise.resolve(held.own.call(api, false)).catch(() => {});
+  }
+}
+
+function programLogs() {
+  return {
+    read: async () => {
+      try {
+        const answer = await api.getRawLogs();
+        return { ok: true, entries: Array.isArray(answer?.entries) ? answer.entries : [] };
+      } catch {
+        return { ok: false, entries: [] };
+      }
+    },
+    watch: (fn) => {
+      const held = (detail) => fn(detail);
+      logWatchers.add(held);
+      if (!logHold) logHold = holdLogs();
+      return () => {
+        logWatchers.delete(held);
+        if (logWatchers.size || !logHold) return;
+        releaseLogs(logHold);
+        logHold = null;
+      };
+    },
+  };
+}
+
 async function runProgramById(id, carried) {
   const row = programRows.find((one) => one.key === id);
   if (!row) {
@@ -731,6 +809,7 @@ function programApi(entry, view = "main") {
       watchWorkflow: (fn) => watchActiveWorkflow((place) => fn(place)),
     },
     timing: programTiming(),
+    logs: programLogs(),
   };
 }
 

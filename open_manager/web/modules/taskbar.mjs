@@ -4,7 +4,7 @@ import { floatPanels, setTaskRoom, floatTakeFocus, taskbarOn, taskbarGrouped, fl
 import { panelSetting } from "./settings.mjs";
 import { managerDestinations } from "./topbar.mjs";
 import { guardWindowDrags } from "./node-drag.mjs";
-import { DESK_TAB_ID, START_ART, desktopOn } from "./desktop.mjs";
+import { DESK_TAB_ID, START_ART, deskSidebar, desktopOn } from "./desktop.mjs";
 import { deskDocs, loadDeskDocs, docArt, openDoc, openWastebasket } from "./desk-docs.mjs";
 import { pinnedOn, pinDesk, unpinDesk, deskOpenRow } from "./desk-icons.mjs";
 import { programKeysText } from "./programs.mjs";
@@ -713,10 +713,25 @@ function paintTaskbar() {
 
 let taskHideWired = false;
 
+let startSide = null;
+
+let startSideRoom = null;
+
+function watchStartSide(side) {
+  if (side === startSide || !window.ResizeObserver) return;
+  startSideRoom?.disconnect();
+  startSide = side;
+  startSideRoom = side ? new ResizeObserver(() => matchStartWidth()) : null;
+  startSideRoom?.observe(side);
+}
+
 function matchStartWidth(tries = 12) {
   if (!taskStart) return;
+  const side = deskSidebar();
+  watchStartSide(side);
+  const sideWide = side?.getBoundingClientRect().width || 0;
   const tab = document.getElementById(DESK_TAB_ID);
-  const wide = Math.round(tab?.getBoundingClientRect().width || 0);
+  const wide = Math.round(sideWide >= 24 ? sideWide : tab?.getBoundingClientRect().width || 0);
   if (wide >= 24) {
     taskStart.style.setProperty("--om-start-wide", `${wide}px`);
     return;

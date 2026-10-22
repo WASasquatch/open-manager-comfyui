@@ -33,6 +33,7 @@ import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
 import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
 import { snapshotCommands, watchSnapshots, applySnapshotSetting } from "./snapshots.mjs";
+import { omNodeCommands, omNodeCreated, omNodeMenuItems, omNodeSettings, startOmNodes } from "./om-nodes.mjs";
 
 let lastMissingTypes = null;
 
@@ -1008,6 +1009,7 @@ app.registerExtension({
         + "URL to it. Added URLs are checked against the same host and format rules as any "
         + "other download.",
     },
+    ...omNodeSettings,
   ],
   commands: [
     {
@@ -1119,6 +1121,7 @@ app.registerExtension({
     presetCommand,
     alignCommand,
     ...snapshotCommands,
+    ...omNodeCommands,
   ],
   getCanvasMenuItems(canvas) {
     return [...groupAlignMenuItems(canvas), ...qolCanvasMenuItems(canvas)];
@@ -1147,12 +1150,20 @@ app.registerExtension({
       if (!items.length) items.push(null);
       items.push(reset);
     }
+    const fitted = omNodeMenuItems(node);
+    if (fitted.length) {
+      if (!items.length) items.push(null);
+      items.push(...fitted);
+    }
     const patched = qolNodeMenuItems(node);
     if (patched.length) {
       if (!items.length) items.push(null);
       items.push(...patched);
     }
     return items;
+  },
+  nodeCreated(node) {
+    omNodeCreated(node);
   },
   beforeConfigureGraph(graphData) {
     mendNodeBodies(graphData);
@@ -1202,6 +1213,7 @@ app.registerExtension({
     watchSnapshots();
     registerThemes().catch(() => {});
     watchThemeExtras();
+    startOmNodes();
     refreshPackThemes().then((updated) => {
       if (!updated.length) return;
       toast(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} themes`} `

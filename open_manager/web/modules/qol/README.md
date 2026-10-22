@@ -18,7 +18,8 @@ Settings > Open Manager > Quality of Life Patches.
 
 Every `.mjs` file in a category folder is one patch. The server lists them
 (`GET /open_manager/v1/api/qol`, `open_manager/qol.py`) sorted by folder, then file, and Settings
-shows them grouped by folder.
+shows them grouped by folder. A folder inside a category holds one patch's own modules, named
+after it (`nodes/nodes2-widgets/` for `nodes/nodes2-widgets.mjs`), and is never listed.
 
 ## Adding a patch
 

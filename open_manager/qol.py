@@ -6,7 +6,13 @@ import json
 import re
 from pathlib import Path
 
-__all__ = ["folder", "listing", "meta"]
+__all__ = ["folder", "frontend_chunks", "listing", "meta"]
+
+_CHUNK_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,60}$")
+
+_CHUNK_REF = re.compile(r"""["'`](?:\./|/assets/|assets/)?([A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8}\.js)["'`]""")
+
+_chunk_memo: dict = {}
 
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,40}$")
 
@@ -148,6 +154,81 @@ def _category(home: Path, problems: list) -> list:
             continue
         found.append(f"{home.name}/{module.name}")
     return found
+
+
+def _web_root() -> Path | None:
+    """The folder ComfyUI serves its frontend from, or None outside a running server."""
+    try:
+        from server import PromptServer
+        root = PromptServer.instance.web_root
+    except (ImportError, AttributeError):
+        return None
+    return Path(root) if root else None
+
+
+def _reached(root: Path) -> set:
+    """The chunk files the frontend's index page can load, following imports from it."""
+    assets = root / "assets"
+    text = (root / "index.html").read_text(encoding="utf-8", errors="replace")
+    queue = [match.group(1) for match in _CHUNK_REF.finditer(text)]
+    queue += re.findall(r"assets/([A-Za-z0-9_.-]+\.js)", text)
+    seen: set = set()
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        try:
+            body = (assets / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        seen.add(name)
+        queue.extend(match.group(1) for match in _CHUNK_REF.finditer(body)
+                     if match.group(1) not in seen)
+    return seen
+
+
+def frontend_chunks(names: list) -> dict:
+    """The built file of each named frontend component, as a path under the web root.
+
+    Returns:
+        ``{ok, chunks}`` with ``chunks`` mapping each name to ``assets/<name>-<hash>.js``, or
+        to None where this frontend has no such file. Answers are kept until ``index.html``
+        changes.
+    """
+    root = _web_root()
+    if root is None:
+        return {"ok": False, "reason": "no frontend folder", "chunks": {}}
+    try:
+        stamp = (root / "index.html").stat().st_mtime_ns
+    except OSError as error:
+        return {"ok": False, "reason": f"the frontend folder is unreadable ({error.strerror})",
+                "chunks": {}}
+    key = (str(root), stamp)
+    memo = _chunk_memo.get(key)
+    if memo is None:
+        _chunk_memo.clear()
+        memo = _chunk_memo[key] = {"chunks": {}, "files": None, "reached": None}
+    found = {}
+    for name in names:
+        if not _CHUNK_NAME.match(name):
+            continue
+        if name in memo["chunks"]:
+            found[name] = memo["chunks"][name]
+            continue
+        if memo["files"] is None:
+            try:
+                memo["files"] = sorted(entry.name for entry in (root / "assets").glob("*.js"))
+            except OSError:
+                memo["files"] = []
+        shape = re.compile(rf"^{re.escape(name)}-[A-Za-z0-9_-]{{8}}\.js$")
+        matches = [file for file in memo["files"] if shape.match(file)]
+        if len(matches) > 1:
+            if memo["reached"] is None:
+                memo["reached"] = _reached(root)
+            matches = [file for file in matches if file in memo["reached"]]
+        chosen = f"assets/{matches[0]}" if len(matches) == 1 else None
+        memo["chunks"][name] = found[name] = chosen
+    return {"ok": True, "chunks": found}
 
 
 def listing() -> dict:

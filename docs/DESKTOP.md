@@ -68,6 +68,7 @@ Open Manager → Windows → Taskbar along the bottom** on.
 | Timer | How long each node takes, live, run by run, workflow by workflow | Start menu |
 | Templates | ComfyUI's workflow templates, in a window | Start menu, ComfyUI |
 | ComfyUI Settings | Every ComfyUI setting, in a window you can leave open | Start menu, ComfyUI |
+| Console | ComfyUI's console output, live, in colour | Start menu, ComfyUI |
 | Scratch | A pad for short notes | Start menu |
 | Attack of the Nodes | A game | Start menu, Games |
 | Image Viewer | Zoom, fit, rotate, crop, save | opened by what needs it |
@@ -108,6 +109,12 @@ the comparison stays put while you switch workflow tabs to add more. Shift-click
 adds or removes its latest run. A comparison shows one bar per run on each node with the
 difference from the first one picked, and adds a sort by largest difference. Clicking a node
 frames it on the graph, switching to the workflow tab that ran it when that is open.
+
+**Console** starts from the last 300 writes ComfyUI keeps and follows from there, holding up to
+10,000 lines. Progress bars update in place, as in a terminal. Scrolling up holds the view; the
+arrow returns to the latest line. **Find** narrows to the lines that match, Ctrl+F jumps to it, and
+Escape clears it. **Wrap** and **Times** are remembered. **Copy** takes the selection, or every
+line shown; **Save** writes every line to a `.log` file. A dashed line marks a server restart.
 
 ## Files and notes
 

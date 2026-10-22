@@ -834,4 +834,4 @@ function applyDesktop() {
   taskbarSync();
 }
 
-export { deskProgramsOff, DESK_TAB_ID, START_ART, deskLayer, deskShown, deskHashAsked, desktopOn, deskCanvasBox, deskAsked, deskFit, deskFitNow, deskFocus, deskPosition, deskPaperUrl, deskNumber, applyDeskLook, deskPapers, DESK_SPRING, deskCells, deskPinned, deskUnpinned, deskTaken, placeDeskCells, saveDeskCells, authorColours, windowColour, deskLook, setWindowColour, setProgramOn, saveDeskPins, loadDeskCells, repaintLooks, deskGrid, deskCellFor, deskSpotAt, deskArrangeAt, dragDeskCell, showDesk, hideDesk, deskShowing, applyDesktop };
+export { deskProgramsOff, DESK_TAB_ID, START_ART, deskSidebar, deskLayer, deskShown, deskHashAsked, desktopOn, deskCanvasBox, deskAsked, deskFit, deskFitNow, deskFocus, deskPosition, deskPaperUrl, deskNumber, applyDeskLook, deskPapers, DESK_SPRING, deskCells, deskPinned, deskUnpinned, deskTaken, placeDeskCells, saveDeskCells, authorColours, windowColour, deskLook, setWindowColour, setProgramOn, saveDeskPins, loadDeskCells, repaintLooks, deskGrid, deskCellFor, deskSpotAt, deskArrangeAt, dragDeskCell, showDesk, hideDesk, deskShowing, applyDesktop };

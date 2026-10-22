@@ -14,7 +14,7 @@ const OVERVIEW = "\u0000overview";
 
 const QOL_SECTION = "Quality of Life Patches";
 
-const SECTION_ORDER = ["Interface", "Windows", "Desktop", "Theme", "Monitor", "Snapshots",
+const SECTION_ORDER = ["Interface", "Nodes", "Windows", "Desktop", "Theme", "Monitor", "Snapshots",
                        "Gallery", "Library", "Downloads", "Registry", "Scanning", "Licences",
                        QOL_SECTION];
 

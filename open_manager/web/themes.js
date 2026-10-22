@@ -1,5 +1,8 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import {
+  applyOmTheme, omActive, paintOmNode, sanitiseOm, sanitiseOmRule, stripOmNode, syncOmPalette,
+} from "./modules/om-nodes/theme.mjs";
 
 const SLOTS_DARK = {
   CLIP: "#ffd500", CLIP_VISION: "#a8dadc", CLIP_VISION_OUTPUT: "#ad7452",
@@ -362,6 +365,20 @@ function facetFor(extras, node, name) {
   return extras[name];
 }
 
+function omTokensFor(extras, node) {
+  let tokens = null;
+  const categories = extras.categories;
+  if (categories) {
+    for (const key of [...categoryKeys(node)].reverse()) {
+      const found = categories[key]?.om?.tokens;
+      if (found) tokens = { ...tokens, ...found };
+    }
+  }
+  const own = extras.nodes?.[node?.type]?.om?.tokens;
+  if (own) tokens = { ...tokens, ...own };
+  return tokens;
+}
+
 function categoryGradient(categories, node) {
   if (!categories) return undefined;
   for (const key of categoryKeys(node)) {
@@ -512,6 +529,8 @@ function sanitiseExtras(raw) {
         if (ownBody) kept.body = ownBody;
         const ownIcon = sanitiseFacet(colour.icon, "icon");
         if (ownIcon) kept.icon = ownIcon;
+        const ownOm = sanitiseOmRule(colour.om);
+        if (ownOm) kept.om = ownOm;
         if (Object.keys(kept).length) categories[name] = kept;
       }
     }
@@ -533,6 +552,8 @@ function sanitiseExtras(raw) {
         const ownIcon = sanitiseFacet(rule.icon, "icon");
         if (ownIcon) kept.icon = ownIcon;
         if (typeof rule.title === "string") kept.title = rule.title.slice(0, 60);
+        const ownOm = sanitiseOmRule(rule.om);
+        if (ownOm) kept.om = ownOm;
         if (Object.keys(kept).length) nodes[type] = kept;
       }
     }
@@ -557,6 +578,9 @@ function sanitiseExtras(raw) {
       replaceShadow: raw.glow.replaceShadow === true,
     };
   }
+
+  const om = sanitiseOm(raw.om, themeImage);
+  if (om) out.om = om;
 
   return Object.keys(out).length ? out : null;
 }
@@ -1242,6 +1266,7 @@ function vueInnerOf(root) {
 }
 
 function stripVueNode(root) {
+  stripOmNode(root, vueHeaderOf(root));
   root.style.removeProperty("--node-component-header-surface");
   root.style.removeProperty("--component-node-background");
   const inner = vueInnerOf(root);
@@ -1347,6 +1372,9 @@ function paintVueNode(root, extras) {
   }
 
   paintVueIcon(root, extras, node);
+
+  if (omActive()) paintOmNode(root, node, omTokensFor(extras, node), header, shown ? contrastOn(shown) : "");
+  else stripOmNode(root, header);
 
   const body = vueBodyOf(root);
   if (!body) return;
@@ -1603,6 +1631,10 @@ export function applyExtras(palette) {
   }
 
   if (extras) installDrawHook();
+  try {
+    syncOmPalette();
+    applyOmTheme(extras);
+  } catch {}
   liftVueProperties(palette);
   watchVueNodes();
   scheduleVuePaint();

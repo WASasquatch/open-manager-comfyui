@@ -133,10 +133,11 @@ registry has banned* is on.
 
 ## Beyond packs
 
-Four pieces. None of them adds a node to your graph.
+Five pieces. None of them adds a node to your graph.
 
 | | | Default |
 | --- | --- | --- |
+| [OM Nodes](docs/OM-NODES.md) | Nodes 2.0 at classic node sizes and layout, switched from the ComfyUI menu | off |
 | [Download Manager](docs/DOWNLOADS.md) | Fetches the models a workflow needs: resumes, verifies, picks the drive | on |
 | [Model Library](docs/MODELS.md) | What is on disk across every registered folder: duplicates, unreferenced files, storage, and ComfyUI-Manager's model list to fetch from | on |
 | [Resource Monitor](docs/MONITOR.md) | CPU, RAM, VRAM and temperatures in ComfyUI's control bar, with a Memory panel behind it | strip off, Memory button on |
@@ -250,16 +251,19 @@ already fixed, stands down and says so in the browser console.
 | Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the latest preview promoted to it |
 | Subgraph nodes keep their saved values | On | A subgraph node whose promoted widgets ComfyUI migrated loads with its saved values instead of the values they had at migration |
 | Custom widgets follow their node's width | On | Custom and DOM widgets keep following their node once it has been shown in the properties panel |
+| Nodes 2.0 widgets on the classic canvas | On | Curves, image compare and crop, video trim and crop, bounding boxes, colour palettes, the resolution preview and LoRA stacks work on the classic canvas, also when promoted to a subgraph. The painter, the compositor and light info show ComfyUI's own editors there. Stands down when [ComfyUI-Nodes2Classic](https://github.com/Nynxz/ComfyUI-Nodes2Classic) is installed |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
+| Hidden links as nubs | On | A hidden link shows a small nub in its type colour on each node's edge, in place of a type label. Hovering a nub shows the label; hovering the label shows the link |
 | No frontend_only badge | On | Nodes with no Python side carry no source badge |
 | Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
 | API jobs open as workflows | On | Jobs queued with only an API prompt open as a laid-out workflow |
 | Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
-| Workflow tabs without a scrollbar | On | The tab strip drops its scrollbar. Its arrows and the mouse wheel scroll it |
+| Workflow tabs without a scrollbar | On | The tab strip drops its scrollbar. Faded edges show where more tabs are, and the mouse wheel scrolls to them |
 | Workflow tabs look like tabs | On | Flat tabs side by side with a line between each, the open one marked along its top, in place of rounded buttons |
+| Bottom panel docked to the edges | On | The Logs and Shortcuts panel meets the sidebar and the window's edges, with square corners, in place of floating over the canvas |
 | Node search narrows every match | On | In the node search box, a category or the Comfy, Partner or Extensions filter lists every match it holds, not only those among the top 64 |
 | Node search draws only the rows in view | On | Results build as they scroll into view |
 | Node search waits for a pause in typing | On | Slow searches run once typing pauses |
@@ -398,8 +402,8 @@ the same way.
 
 A ComfyUI colour palette plus an optional `extras` block: gradient or flat headers per node
 category or class, a title icon, an image behind node bodies, see-through bodies, a graph
-backdrop, shadow colours and a selection glow. Packs ship them, users add them from the pack
-page.
+backdrop, shadow colours and a selection glow. For OM Nodes, tokens, named parts and scoped CSS
+restyle every part of a node. Packs ship them, users add them from the pack page.
 
 ```toml
 [tool.open_manager]
