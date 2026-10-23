@@ -8,6 +8,7 @@ import { openRepoPack } from "./packs.mjs";
 import { packIcon } from "./results.mjs";
 import { renderInstalled } from "./installed.mjs";
 import { renderMissing, sinceText, renderRegistry } from "./registry.mjs";
+import { renderInUse } from "./in-use.mjs";
 import { managerDestinations } from "./topbar.mjs";
 import { lastMissingTypes } from "./extension.mjs";
 import { hostPipLit, watchHostPip, pipMark } from "./host-pips.mjs";
@@ -59,6 +60,7 @@ function refreshMissingIfActive() {
   const active = document.querySelector(".om-nav-btn.active");
   const content = document.querySelector(".om-content");
   if (active && content && active.textContent === "Missing") renderMissing(content);
+  if (active && content && active.textContent === "In use") void renderInUse(content);
 }
 
 function openPanelWindow(view) {
@@ -303,6 +305,7 @@ function renderSidebar(root, initial) {
     installed: { label: "Installed", render: () => renderInstalled(content) },
     github: { label: "GitHub", render: () => renderGithub(content) },
     missing: { label: "Missing", render: () => renderMissing(content) },
+    inuse: { label: "In use", render: () => renderInUse(content) },
   };
   const buttons = {};
   const select = (key) => {

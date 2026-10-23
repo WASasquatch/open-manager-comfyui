@@ -325,12 +325,16 @@ sidebarStyle.textContent = `
 
 .om-side { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 8px;
   font: 13px/1.5 system-ui, sans-serif; color: var(--om-text); box-sizing: border-box; }
-.om-nav { display: flex; gap: 4px; flex: none; }
+.om-nav { display: flex; gap: 4px; flex: none; container: om-nav / inline-size; }
 .om-nav-btn { flex: 1; padding: 6px 4px; background: var(--om-surface); border: 1px solid var(--om-border);
   border-radius: 6px; color: var(--om-muted); cursor: pointer; font-size: 15px; line-height: 1; }
 .om-nav-btn:hover { background: var(--om-hover); }
 .om-nav-more { flex: none; width: 28px; padding: 6px 0; font-size: 14px; line-height: 1; }
 .om-nav-btn.active { background: var(--om-border); color: var(--om-text); border-color: var(--om-border); }
+@container om-nav (max-width: 380px) {
+  .om-nav-btn:not(.om-nav-more) { flex: 1 1 auto; font-size: 13px; padding: 6px 2px; white-space: nowrap; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; }
+}
 .om-content { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .om-cat-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .om-cat-head .om-btn { flex: none; padding: 5px 12px; font-size: 12px; }
@@ -503,6 +507,17 @@ sidebarStyle.textContent = `
 .om-side-text { flex: 1; min-width: 0; cursor: pointer; }
 .om-side-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-side-meta { color: var(--om-muted); font-size: 11px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.om-used-row { align-items: flex-start; }
+.om-used-text { cursor: default; }
+.om-used-gap { flex: 1; }
+.om-used-link { cursor: pointer; }
+.om-used-link:hover { text-decoration: underline; }
+.om-used-ids { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.om-used-id { font: 11px/1 ui-monospace, Consolas, monospace; padding: 3px 6px; border-radius: 4px;
+  border: 1px solid var(--om-border); background: var(--om-input); color: var(--om-text-2);
+  cursor: pointer; }
+.om-used-id:hover { background: var(--om-hover); color: var(--om-text); }
+.om-used-off { opacity: .55; border-style: dashed; }
 .om-lic { font-size: 10px; font-weight: 600; padding: 0 6px; border: 1px solid var(--om-muted);
   border-radius: 4px; line-height: 15px; }
 .om-upd { font-size: 10px; font-weight: 600; padding: 0 6px; margin-left: 6px;

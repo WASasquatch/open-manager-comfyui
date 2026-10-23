@@ -127,6 +127,7 @@ and macOS, in the file that starts ComfyUI. See [Launch files](#launch-files).
 | Your own repos | By URL or `owner/repo`, kept in `user/` |
 | Any ref | Branch, tag or commit |
 | Workflow gaps | Missing nodes, and which pack won a duplicate name |
+| Workflow packs | Each pack the open workflow uses, with node ids to copy |
 | Themes | Gradients, icons, backdrops |
 | Fast sync | Whole registry in seconds |
 

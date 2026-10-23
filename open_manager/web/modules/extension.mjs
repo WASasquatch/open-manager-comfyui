@@ -10,6 +10,7 @@ import { openPack } from "./packs.mjs";
 import { loadKeys, migrateKeys, migrateEntryMode, panelSetting } from "./settings.mjs";
 import { refreshPackThemes } from "./pack-extras.mjs";
 import { refreshMissingIfActive, openPanelWindow, togglePanelWindow, openManagerMenu, addLegacyMenuButton, renderSidebar } from "./discovery.mjs";
+import { watchNodeOrigins } from "./in-use.mjs";
 import { syncOptions } from "./registry.mjs";
 import { nodeModels } from "./net.mjs";
 import { openDownloadManager, addModelUrlToNode, downloadNodeModels, openMemoryPanel, openDesktopSettings, openModelLibrary, openManagerSettings } from "./lazy.mjs";
@@ -46,6 +47,8 @@ floatHooks.add(taskbarSync);
 floatHooks.add(paintDeskLive);
 
 floatHooks.add(sessionKeep);
+
+watchNodeOrigins();
 
 app.registerExtension({
   name: "openmanager.browser",
