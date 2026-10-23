@@ -607,6 +607,8 @@ function deskChrome() {
   if (cluster) found.push(cluster);
   const crumb = document.querySelector(".subgraph-breadcrumb");
   if (crumb) found.push(crumb);
+  const map = document.querySelector(".minimap-main-container");
+  if (map) found.push(map);
   const panel = deskFreeBox();
   const room = panel?.getBoundingClientRect();
   for (const group of panel?.querySelectorAll(".p-buttongroup") || []) {

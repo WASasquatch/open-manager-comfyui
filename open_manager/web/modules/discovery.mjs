@@ -25,6 +25,20 @@ function collectMissingNodeTypes() {
   return [...types];
 }
 
+function collectMissingNodeHints() {
+  const registered = window.LiteGraph?.registered_node_types || {};
+  const hints = {};
+  for (const node of app.graph?._nodes || []) {
+    const type = node.type;
+    if (!type || registered[type] || hints[type]) continue;
+    const props = node.properties || node.last_serialization?.properties || {};
+    const cnr = typeof props.cnr_id === "string" ? props.cnr_id : "";
+    const aux = typeof props.aux_id === "string" ? props.aux_id : "";
+    if (cnr || aux) hints[type] = { cnr_id: cnr, aux_id: aux };
+  }
+  return hints;
+}
+
 let viewGeneration = 0;
 
 function beginView() {
@@ -455,4 +469,4 @@ async function removeGithubSource(repo, container) {
   renderGithub(container);
 }
 
-export { collectMissingNodeTypes, viewGeneration, viewIsCurrent, refreshInstalledIfActive, refreshMissingIfActive, openPanelWindow, togglePanelWindow, openManagerMenu, addLegacyMenuButton, renderSidebar };
+export { collectMissingNodeTypes, collectMissingNodeHints, viewGeneration, viewIsCurrent, refreshInstalledIfActive, refreshMissingIfActive, openPanelWindow, togglePanelWindow, openManagerMenu, addLegacyMenuButton, renderSidebar };

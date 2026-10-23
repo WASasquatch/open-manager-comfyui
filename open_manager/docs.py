@@ -86,8 +86,16 @@ _ROUGH = re.compile(r"[^A-Za-z0-9 ._-]+")
 
 
 def folder() -> Path:
-    """Where the reader's documents live, created if it is not there yet."""
-    return paths.store("docs")
+    """Where the reader's documents live, with its Desktop and Documents, created if missing."""
+    base = paths.store("docs")
+    for one in HOMES:
+        home = base / one
+        if not home.is_dir():
+            try:
+                home.mkdir(exist_ok=True)
+            except OSError:
+                pass
+    return base
 
 
 DESKTOP = "Desktop"

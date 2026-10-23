@@ -2,14 +2,14 @@
 
 <img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-banner.png" alt="Open Manager for ComfyUI">
 
+<a href="https://youtu.be/swET9-F8gXs"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/video-tour.jpg" width="800" alt="Open Manager for ComfyUI: a quick tour, on YouTube"></a>
+
 | | |
 | --- | --- |
 | <a href="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/download-manager.png"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/download-manager.png" width="400" alt="Download Manager"></a><br>**[Download Manager](docs/DOWNLOADS.md)** | <a href="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/model-library.png"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/model-library.png" width="400" alt="Model Library"></a><br>**[Model Library](docs/MODELS.md)** |
 | <a href="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/monitor-panel.png"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/monitor-panel.png" width="400" alt="Resource Monitor"></a><br>**[Resource Monitor](docs/MONITOR.md)** | <a href="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/desktop.png"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/desktop.png" width="400" alt="Desktop Mode"></a><br>**[Desktop Mode](docs/DESKTOP.md)** |
 
 The whole workspace at once: [one screenshot](https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/open-manager-screenshot.png).
-
-https://github.com/user-attachments/assets/5f264d2f-b11b-4ca9-9f69-73a553213e85
 
 ## A manager for the whole ComfyUI workspace, not just its nodes.
 
@@ -115,6 +115,8 @@ and macOS, in the file that starts ComfyUI. See [Launch files](#launch-files).
 ---
 
 ## Packs
+
+<a href="https://youtu.be/W7xUrkimnPs"><img src="https://raw.githubusercontent.com/WASasquatch/open-manager-comfyui/main/docs/video-install.jpg" width="800" alt="Installing packs tutorial, on YouTube"></a>
 
 | | |
 | --- | --- |

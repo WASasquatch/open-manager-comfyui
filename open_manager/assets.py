@@ -810,7 +810,7 @@ def thumb(root: str, relative: str, edge: int = THUMB_EDGE) -> tuple[bytes, str,
         stat = found.stat()
     except OSError as error:
         return b"", "", str(error)[:120]
-    rel = found.relative_to(home).as_posix()
+    rel = found.relative_to(home.resolve(strict=True)).as_posix()
     spot = _spot(home, rel)
     kept = thumb_folder() / f"{_root_key(name)}-{spot}-{_mark(stat, wanted)}.webp"
     try:

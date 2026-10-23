@@ -4,6 +4,8 @@ A desktop on a tab of its own, beside your workflows. Windows, a taskbar, a Star
 notes and programs. Off by default: launch ComfyUI with `OPEN_MANAGER_ENABLE_DESKTOP=1`, then
 **Settings → Open Manager → Desktop → Desktop mode**.
 
+[![Desktop Mode tutorial, on YouTube](video-desktop.jpg)](https://youtu.be/KkJso4RbeNw)
+
 ![The desktop](desktop.png)
 
 Built for a ComfyUI you reach over the network: Vast.ai, RunPod, a LAN box. Files, notes and
@@ -55,6 +57,8 @@ Anything in the Start menu can be pinned to the desktop, and anything on the des
 taken off it again.
 
 ## Programs
+
+[![Programs tutorial, on YouTube](video-programs.jpg)](https://youtu.be/LCK0tPYyV8s)
 
 In the Start menu, and on the desktop where the program asks for it. Desktop Mode is not needed:
 the Start menu comes with the taskbar, so programs open over the graph with only **Settings →

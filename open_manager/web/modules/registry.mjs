@@ -8,7 +8,7 @@ import { loadingBlock } from "./markdown.mjs";
 import { panelSetting } from "./settings.mjs";
 import { quickInstall } from "./pack-extras.mjs";
 import { queueLicense, packIcon, buildResultRow, buildResultTableRow, buildResultCard } from "./results.mjs";
-import { collectMissingNodeTypes, viewGeneration, viewIsCurrent, openPanelWindow } from "./discovery.mjs";
+import { collectMissingNodeTypes, collectMissingNodeHints, viewGeneration, viewIsCurrent, openPanelWindow } from "./discovery.mjs";
 
 let onLicencesResolved = null;
 
@@ -31,7 +31,7 @@ async function renderMissing(container) {
     const answer = await api.fetchApi(`${API}/resolve-nodes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ classes: missing }),
+      body: JSON.stringify({ classes: missing, hints: collectMissingNodeHints() }),
     });
     data = await answer.json();
     if (!answer.ok) throw new Error(`HTTP ${answer.status}`);

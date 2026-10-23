@@ -513,6 +513,7 @@ function mountAssetDrop() {
 function assetDraggable(node, item, root) {
   if (!(node instanceof Element) || !item?.name) return;
   mountAssetDrop();
+  node.dataset.omDrag = "1";
   node.draggable = true;
   node.addEventListener("dragstart", (event) => {
     event.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify({

@@ -4,6 +4,8 @@ Fetches the models a workflow needs, from a URL you paste or from the workflow i
 
 ![Download Manager](download-manager.png)
 
+[![Installing packs tutorial, on YouTube](video-install.jpg)](https://youtu.be/W7xUrkimnPs)
+
 Open it from the **Downloads** button at the right of the workflow tab strip, from the Open
 Manager menu, or from the command palette.
 

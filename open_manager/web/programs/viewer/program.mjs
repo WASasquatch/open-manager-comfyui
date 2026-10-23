@@ -205,10 +205,23 @@ export const program = {
     const outW = () => (state.turn % 180 !== 0 ? shot.naturalHeight : shot.naturalWidth);
     const outH = () => (state.turn % 180 !== 0 ? shot.naturalWidth : shot.naturalHeight);
 
+    const fittedScale = () => {
+      if (!shot.naturalWidth || !shot.clientWidth) return 1;
+      const seen = visual();
+      return (shot.clientWidth / shot.naturalWidth) * (seen ? seen.shrink : 1);
+    };
+
     const step = (by) => {
       if (cropping()) return;
-      state.fit = false;
-      state.zoom = Math.max(0, Math.min(STEPS.length - 1, state.zoom + by));
+      if (state.fit) {
+        const now = fittedScale();
+        const up = STEPS.findIndex((one) => one > now * 1.001);
+        const down = STEPS.findLastIndex((one) => one < now * 0.999);
+        state.zoom = by > 0 ? (up < 0 ? STEPS.length - 1 : up) : Math.max(0, down);
+        state.fit = false;
+      } else {
+        state.zoom = Math.max(0, Math.min(STEPS.length - 1, state.zoom + by));
+      }
       apply();
     };
 

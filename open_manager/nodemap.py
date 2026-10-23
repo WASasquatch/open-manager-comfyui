@@ -21,7 +21,7 @@ TIMEOUT = 60
 
 _GITHUB = re.compile(r"github\.com[:/]+[^/]+/([^/#?]+)", re.I)
 
-_memory: dict = {"at": 0.0, "reverse": None}
+_memory: dict = {"at": 0.0, "reverse": None, "patterns": []}
 
 
 def _cache_path() -> Path:
@@ -72,52 +72,86 @@ async def _raw_index(session: aiohttp.ClientSession) -> dict:
     return data
 
 
-async def _reverse(session: aiohttp.ClientSession) -> dict:
-    """A node class to ``(repository, title)`` map, memoized.
+async def _index(session: aiohttp.ClientSession) -> tuple[dict, list]:
+    """Every pack that claims each node class, and the packs that claim classes by pattern.
 
     Args:
         session: Session a fetch would run on.
 
     Returns:
-        The reverse index, empty on failure.
+        ``(reverse, patterns)``. ``reverse`` maps a node class to ``[(repository, title)]`` in
+        index order; ``patterns`` lists ``(regex, repository, title)``. Both empty on failure.
     """
     if _memory["reverse"] is not None and time.time() - _memory["at"] < CACHE_TTL:
-        return _memory["reverse"]
+        return _memory["reverse"], _memory["patterns"]
     data = await _raw_index(session)
     reverse: dict = {}
+    patterns: list = []
     for url, value in data.items():
         if not isinstance(value, list) or not value:
             continue
         classes = value[0] if isinstance(value[0], list) else []
-        title = value[1].get("title_aux", "") if len(value) > 1 and isinstance(value[1], dict) else ""
+        meta = value[1] if len(value) > 1 and isinstance(value[1], dict) else {}
+        title = meta.get("title_aux", "")
         for node_class in classes:
-            reverse.setdefault(node_class, (url, title))
+            reverse.setdefault(node_class, []).append((url, title))
+        pattern = meta.get("nodename_pattern")
+        if isinstance(pattern, str) and pattern:
+            try:
+                patterns.append((re.compile(pattern), url, title))
+            except re.error:
+                pass
     if reverse:
         _memory["reverse"] = reverse
+        _memory["patterns"] = patterns
         _memory["at"] = time.time()
-    return reverse
+    return reverse, patterns
 
 
-async def resolve(classes, session: aiohttp.ClientSession) -> tuple[dict, list]:
+def _owner_repo(url: str) -> str:
+    """``owner/repo`` from a GitHub URL, lowercased, empty where it is not one."""
+    match = re.search(r"github\.com[:/]+([^/]+)/([^/#?]+)", url or "", re.I)
+    if not match:
+        return ""
+    return f"{match.group(1)}/{match.group(2).removesuffix('.git')}".lower()
+
+
+async def resolve(classes, session: aiohttp.ClientSession, hints: dict | None = None,
+                  rank=None) -> tuple[dict, list]:
     """Group node classes by the repository that provides them.
+
+    A class the workflow names a repository for goes to that repository. Otherwise, of the packs
+    that claim it, by name or by pattern, the highest ranked wins, and the first in the index on a
+    tie.
 
     Args:
         classes: Node class names to resolve.
         session: Session a fetch would run on.
+        hints: Node class to the repository URL the workflow names for it.
+        rank: Repository URL to a score.
 
     Returns:
         ``(groups, unresolved)``. ``groups`` maps a repository URL to ``{title, classes}``;
         ``unresolved`` lists classes no pack in the index claims.
     """
-    reverse = await _reverse(session)
+    reverse, patterns = await _index(session)
+    hints = hints or {}
     groups: dict = {}
     unresolved: list = []
     for node_class in classes:
-        hit = reverse.get(node_class)
-        if hit is None:
+        claimants = reverse.get(node_class) or [
+            (url, title) for regex, url, title in patterns if regex.search(node_class)
+        ]
+        named = _owner_repo(hints.get(node_class, ""))
+        if named:
+            picked = next((one for one in claimants if _owner_repo(one[0]) == named),
+                          (hints[node_class], ""))
+        elif claimants:
+            picked = max(claimants, key=lambda one: rank(one[0]) if rank else 0)
+        else:
             unresolved.append(node_class)
             continue
-        url, title = hit
+        url, title = picked
         group = groups.setdefault(url, {"title": title, "classes": []})
         group["classes"].append(node_class)
     return groups, unresolved

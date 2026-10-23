@@ -2764,13 +2764,32 @@ def register_routes() -> None:
             return web.json_response({"packs": [], "unresolved": []})
 
         repo_index = {}
+        by_id = {}
         for entry in await asyncio.to_thread(catalog.load):
             key = _norm_repo(entry.get("repository"))
             if key:
                 repo_index[key] = entry
+            if entry.get("id"):
+                by_id[str(entry["id"]).lower()] = entry
+
+        hints = {}
+        raw_hints = body.get("hints") if isinstance(body.get("hints"), dict) else {}
+        for node_class, hint in raw_hints.items():
+            if not isinstance(hint, dict):
+                continue
+            entry = by_id.get(str(hint.get("cnr_id") or "").strip().lower())
+            aux = str(hint.get("aux_id") or "").strip()
+            if entry and entry.get("repository"):
+                hints[str(node_class)] = entry["repository"]
+            elif re.fullmatch(r"[\w.-]+/[\w.-]+", aux):
+                hints[str(node_class)] = f"https://github.com/{aux}"
+
+        def rank(url: str) -> int:
+            entry = repo_index.get(_norm_repo(url))
+            return int(entry.get("downloads") or 0) if entry else -1
 
         async with aiohttp.ClientSession() as session:
-            groups, unresolved = await nodemap.resolve(classes, session)
+            groups, unresolved = await nodemap.resolve(classes, session, hints, rank)
             packs = []
             for url, group in groups.items():
                 entry = repo_index.get(_norm_repo(url))
