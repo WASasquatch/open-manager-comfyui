@@ -522,6 +522,8 @@ sidebarStyle.textContent = `
   border-radius: 4px; line-height: 15px; }
 .om-upd { font-size: 10px; font-weight: 600; padding: 0 6px; margin-left: 6px;
   border: 1px solid #1f6feb; color: #58a6ff; border-radius: 999px; line-height: 15px; }
+.om-upd.om-review { border-color: #d29922; color: #d29922; }
+.om-upd.om-review-banned { border-color: #f85149; color: #f85149; }
 .om-disabled { font-size: 10px; font-weight: 600; padding: 0 6px; margin-left: 6px;
   border: 1px solid var(--om-border); color: var(--om-muted); border-radius: 999px; line-height: 15px; }
 .om-side-ictl { flex: none; }

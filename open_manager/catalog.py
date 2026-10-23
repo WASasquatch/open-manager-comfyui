@@ -224,6 +224,11 @@ def _stars(raw, repository: str) -> int:
     return 0 if _borrowed(repository) else int(raw or 0)
 
 
+def _status_word(value) -> str:
+    """A registry version status reduced to its last word, such as ``flagged``; empty if none."""
+    return str(value or "").strip().removeprefix("NodeVersionStatus").lower()
+
+
 def _entry(node: dict) -> dict:
     """Trim a registry node to the fields a listing needs, with its licence classified."""
     licence = licenses.classify(node.get("license"))
@@ -243,6 +248,7 @@ def _entry(node: dict) -> dict:
         "icon": node.get("icon", "") or "",
         "repository": node.get("repository", "") or "",
         "advertised": (node.get("latest_version") or {}).get("version", "") or "",
+        "advertised_status": _status_word((node.get("latest_version") or {}).get("status")),
         "released": (node.get("latest_version") or {}).get("createdAt", "") or "",
         "license": licence["name"],
         "license_tier": licence["tier"],

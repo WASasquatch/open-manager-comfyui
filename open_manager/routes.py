@@ -2724,8 +2724,10 @@ def register_routes() -> None:
             folded = _fold(entry.get("id"))
             if folded:
                 index[folded] = entry
+        advertised = {}
         for pack in packs:
             entry = index.get(_fold(pack.get("id"))) or index.get(_fold(pack.get("dir")))
+            advertised[id(pack)] = entry.get("advertised_status") if entry else None
             pack["registry_id"] = entry.get("id", "") if entry else ""
             pack["latest"] = entry.get("advertised", "") if entry else ""
             pack["repository"] = entry.get("repository", "") if entry else ""
@@ -2745,8 +2747,13 @@ def register_routes() -> None:
                 if not pack["registry_id"]:
                     return
                 if pack.get("version") and pack["version"] == pack["latest"]:
-                    pack["status"] = "active"
-                    return
+                    known = advertised.get(id(pack))
+                    if known is None:
+                        pack["status"] = "active"
+                        return
+                    if known:
+                        pack["status"] = known
+                        return
                 async with gate:
                     pack["status"] = await _installed_status(
                         pack["registry_id"], pack.get("version", ""), session

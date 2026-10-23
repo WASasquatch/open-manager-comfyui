@@ -278,13 +278,36 @@ function makeInstallControl({ packId, entry, rowsRoot, withMenu, onInstall, item
     wrap.replaceChildren(label, caretFor("installing"));
   };
   control.setStatusInstalled = (status) => {
-    const cls = status === "banned" ? "banned" : status === "flagged" ? "flagged" : "installed";
+    const cls = status === "banned" ? "banned" : REVIEWS[status] ? "flagged" : "installed";
     const label = button("Installed", `om-btn ${cls}`);
-    label.title = `The installed version is ${status} by the registry`;
+    label.title = REVIEWS[status]?.title || "Installed";
     if (!withMenu) { wrap.replaceChildren(label); return; }
     wrap.replaceChildren(label, caretFor(cls));
   };
   return control;
+}
+
+const REVIEWS = {
+  flagged: { word: "flagged", title: "The registry flagged the installed version" },
+  banned: { word: "banned", title: "The registry banned the installed version" },
+  pending: { word: "pending review", title: "The installed version awaits the registry's review" },
+};
+
+function reviewOf(status) {
+  const key = String(status || "").toLowerCase();
+  return REVIEWS[key] ? key : "";
+}
+
+function reviewWord(status) {
+  return REVIEWS[reviewOf(status)]?.word || "";
+}
+
+function reviewChip(status) {
+  const key = reviewOf(status);
+  if (!key) return null;
+  const chip = el("span", `om-upd om-review om-review-${key}`, REVIEWS[key].word);
+  chip.title = REVIEWS[key].title;
+  return chip;
 }
 
 const installState = new Map();
@@ -398,6 +421,8 @@ function registryControl(entry, cls) {
   const busy = installState.get(entry.id);
   if (ahead && (!busy || busy === "installed")) {
     control.setUpdate(ahead, () => quickInstall(entry.id, control));
+  } else if (onDisk && !busy && reviewOf(onDisk.status)) {
+    control.setStatusInstalled(reviewOf(onDisk.status));
   }
   control.el.classList.add(cls);
   return control;
@@ -1111,4 +1136,4 @@ function tagChip(tag) {
   return chip;
 }
 
-export { compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip };
+export { compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };

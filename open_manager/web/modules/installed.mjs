@@ -1,7 +1,7 @@
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
 import { el, toast, notify, chooseAction } from "./ui.mjs";
-import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, packName, installedMenu, enqueueInstall, install, byTrustedAuthor } from "./installs.mjs";
+import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, packName, installedMenu, enqueueInstall, install, byTrustedAuthor, reviewOf, reviewChip } from "./installs.mjs";
 import { openPack, openRepoPack } from "./packs.mjs";
 import { loadingBlock } from "./markdown.mjs";
 import { loadSelfInfo, selfUpdateTarget, openAboutDialog, vtReady, vtRemaining, panelSetting } from "./settings.mjs";
@@ -98,7 +98,7 @@ async function renderInstalled(container) {
   const filterSel = dropdown("om-installed-filter", "all", [
     ["all", "All installed"],
     ["updates", "Updates available"],
-    ["flagged", "Flagged or banned"],
+    ["flagged", "Flagged, banned or pending"],
     ["conflicts", "Conflicts"],
     ["disabled", "Disabled"],
     ["registry", "Registry"],
@@ -138,7 +138,7 @@ async function renderInstalled(container) {
     const wanted = search.value.trim().toLowerCase();
     const rows = packs.filter((pack) => {
       if (mode === "updates" && !isInstalledUpdatable(pack)) return false;
-      if (mode === "flagged" && !["flagged", "banned"].includes((pack.status || "").toLowerCase())) return false;
+      if (mode === "flagged" && !reviewOf(pack.status)) return false;
       if (mode === "conflicts" && !conflictFor(pack, conflicts)) return false;
       if (mode === "disabled" && !pack.disabled) return false;
       if (mode === "off-registry" && pack.registry_id) return false;
@@ -149,7 +149,7 @@ async function renderInstalled(container) {
       }
       return true;
     });
-    const rank = (pack) => (pack.status === "banned" ? 0 : pack.status === "flagged" ? 1 : 2);
+    const rank = (pack) => ({ banned: 0, flagged: 1, pending: 2 })[reviewOf(pack.status)] ?? 3;
     const sorters = {
       name: (a, b) => a.id.localeCompare(b.id),
       status: (a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id),
@@ -361,6 +361,8 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
     meta.appendChild(badge);
   }
   if (cost?.failed) meta.appendChild(el("span", "om-upd om-cost-failed", "import failed"));
+  const review = reviewChip(pack.status);
+  if (review) meta.appendChild(review);
   if (updatable) meta.appendChild(el("span", "om-upd", `update → ${pack.latest}`));
   else if (selfUpdateTarget(pack)) {
     meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));
@@ -388,13 +390,13 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
     withMenu: true,
     items,
   });
-  const vstatus = (pack.status || "").toLowerCase();
+  const vstatus = reviewOf(pack.status);
   const mine = selfUpdateTarget(pack);
   if (mine) {
     control.setUpdate(mine, () => openAboutDialog());
     control.el.querySelector(".om-btn").title =
       `Version ${mine} is published. Open Manager updates from About and updates.`;
-  } else if (vstatus === "banned" || vstatus === "flagged") {
+  } else if (vstatus) {
     control.setStatusInstalled(vstatus);
   } else if (updatable) {
     control.setUpdate(pack.latest, () => updateInstalled(pack, row, control));

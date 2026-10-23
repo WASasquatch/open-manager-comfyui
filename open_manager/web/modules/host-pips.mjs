@@ -12,10 +12,10 @@ const CONFLICT_TEXT = {
   accelerator: (one) => (misreadAccelerator(one)
     ? `Made for ${one.required}, which includes ${one.current}. ComfyUI's check misses the match`
     : `Made for ${one.required}, this has ${one.current}`),
-  banned: () => "Banned on the registry",
-  pending: () => "Awaiting the registry's security review",
   import_failed: (one) => `Failed to import: ${one.current.slice(0, 240)}`,
 };
+
+const REVIEWED = new Set(["pending", "banned"]);
 
 const listeners = new Set();
 let watching = false;
@@ -31,15 +31,23 @@ function conflictStore() {
 function hostConflicts() {
   const raw = conflictStore()?.conflictedPackages;
   if (!Array.isArray(raw)) return [];
-  return raw.filter((one) => one && one.has_conflict !== false).map((one) => ({
-    id: String(one.package_id || ""),
-    name: String(one.package_name || one.package_id || ""),
-    conflicts: (Array.isArray(one.conflicts) ? one.conflicts : []).map((item) => ({
+  const found = [];
+  for (const one of raw) {
+    if (!one || one.has_conflict === false) continue;
+    const listed = Array.isArray(one.conflicts) ? one.conflicts : [];
+    const conflicts = listed.map((item) => ({
       type: String(item?.type || ""),
       current: String(item?.current_value ?? ""),
       required: String(item?.required_value ?? ""),
-    })),
-  }));
+    })).filter((item) => !REVIEWED.has(item.type));
+    if (listed.length && !conflicts.length) continue;
+    found.push({
+      id: String(one.package_id || ""),
+      name: String(one.package_name || one.package_id || ""),
+      conflicts,
+    });
+  }
+  return found;
 }
 
 function misreadAccelerator(one) {

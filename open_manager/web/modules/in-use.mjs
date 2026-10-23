@@ -12,8 +12,8 @@ const ABSENT = "absent";
 const UNKNOWN = "unknown";
 const MAX_DEPTH = 24;
 const STACK_DEPTH = 40;
-const OWN_FOLDER = "open_manager";
 const EXTENSION_FRAME = /\/extensions\/([^/?#\s]+)\//;
+const OWN_FOLDER = decodeURIComponent(EXTENSION_FRAME.exec(import.meta.url)?.[1] || "open_manager");
 
 const MODES = { 2: "muted", 4: "bypassed" };
 

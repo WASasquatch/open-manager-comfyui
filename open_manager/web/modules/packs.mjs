@@ -2,7 +2,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 import { API, STATUS_COLOUR, LOADING_GRACE } from "./base.mjs";
 import { el, safeUrl, openUrl, badge, closeOn, stateRow, notify, confirmAction, tabbedPanel, panel, collapsible, countNote } from "./ui.mjs";
-import { compareVersions, versionSwitch, makeInstallControl, installedPack, packName, versionFacts, installedMenu, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip } from "./installs.mjs";
+import { compareVersions, versionSwitch, makeInstallControl, installedPack, packName, versionFacts, installedMenu, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord } from "./installs.mjs";
 import { asWindow, windowSize, floatPanels, createFloatingPanel, floatingPanel } from "./windows.mjs";
 import { loadingBlock, renderMarkdownInto, paintPackBody } from "./markdown.mjs";
 import { panelSetting } from "./settings.mjs";
@@ -333,6 +333,11 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       ? `Publisher account: ${pack.publisher}`
       : "");
   statusChip("registry", pack.status, pack.status);
+  const installedReview = reviewOf(
+    versions.find((one) => one.version === pack.installed_version)?.status);
+  if (installedReview) {
+    statusChip("installed", `${pack.installed_version} ${reviewWord(installedReview)}`, installedReview);
+  }
   if (pack.license) {
     const node = el("span", "om-chip");
     node.appendChild(el("b", null, "license"));
@@ -426,7 +431,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
                           () => control, versionsBox)
           : undefined,
       });
-      if (isInstalledRow) {
+      if (isInstalledRow && reviewOf(entry.status)) {
+        control.setStatusInstalled(reviewOf(entry.status));
+      } else if (isInstalledRow) {
         control.setInstalled();
       } else {
         const change = versionSwitch(pack.installed_version || "", entry.version);
