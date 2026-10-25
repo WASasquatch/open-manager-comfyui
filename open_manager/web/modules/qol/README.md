@@ -1,7 +1,7 @@
 # Quality of Life patches
 
-Each patch fixes one fault in ComfyUI's own frontend and has its own switch under
-Settings > Open Manager > Quality of Life Patches.
+Each patch fixes one fault in, or adds one feature to, ComfyUI's own frontend and has its own
+switch under Settings > Open Manager > Quality of Life Patches.
 
 ## Layout
 
@@ -10,7 +10,7 @@ Settings > Open Manager > Quality of Life Patches.
 | `loader.mjs` | Registers the settings from the server's list, then imports and runs the patches |
 | `shared.mjs` | Helpers more than one patch uses |
 | `assets/` | The Media Assets panel and the assets behind it |
-| `canvas/` | Canvas input and navigation |
+| `canvas/` | Canvas input, navigation and how links draw |
 | `interface/` | Menus, dialogs and the rest of ComfyUI's chrome |
 | `nodes/` | Node bodies, widgets, badges and node lists |
 | `search/` | The node search box |
