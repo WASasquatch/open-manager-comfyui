@@ -1,4 +1,8 @@
-const REPORT = "/open_manager/v1/api/registry-report/";
+const REPORT = "/open_manager/v1/api/registry-report";
+
+const INSTALLED = "/open_manager/v1/api/installed";
+
+const REVIEWED = ["banned", "flagged", "pending"];
 
 const STATUS_WORDS = {
   flagged: "Flagged", banned: "Banned", active: "Active", pending: "Pending",
@@ -9,7 +13,7 @@ const FROM_WORDS = { reviewer: "Reviewer", registry: "Registry", scan: "Automate
 
 let comfyApi = null;
 
-async function ask(path) {
+async function ask(path, needOk = true) {
   if (!comfyApi) ({ api: comfyApi } = await import("/scripts/api.js"));
   const answer = await comfyApi.fetchApi(path);
   let data = null;
@@ -18,10 +22,27 @@ async function ask(path) {
   } catch {
     data = null;
   }
-  if (!answer.ok || !data?.ok) {
+  if (!answer.ok || (needOk && !data?.ok)) {
     throw new Error(data?.reason || `the server answered ${answer.status}`);
   }
   return data;
+}
+
+function installedRows(found) {
+  const packs = Array.isArray(found) ? found : found?.packs || found?.installed || [];
+  return packs
+    .filter((pack) => pack && (pack.registry_id || pack.dir || pack.id))
+    .map((pack) => ({
+      label: String(pack.dir || pack.id).replace(/\.disabled$/, ""),
+      query: pack.registry_id || String(pack.dir || pack.id).replace(/\.disabled$/, ""),
+      version: pack.version || "",
+      status: String(pack.status || "").toLowerCase(),
+      off: !!pack.disabled,
+    }))
+    .sort((a, b) => {
+      const rank = (one) => (REVIEWED.includes(one.status) ? REVIEWED.indexOf(one.status) : 9);
+      return rank(a) - rank(b) || a.label.localeCompare(b.label);
+    });
 }
 
 function plural(count, word, many = `${word}s`) {
@@ -33,14 +54,18 @@ export const program = {
     const win = api.window({ size: "manager", title: "Registry Report" });
     const state = { pack: "", version: "", report: null, raw: false, latest: 0 };
 
+    const installedPick = api.el("select", "om-side-select rr-installed");
+    installedPick.appendChild(api.el("option", null, "Installed"));
+    installedPick.firstChild.value = "";
     const packBox = api.el("input", "om-search rr-pack");
-    packBox.placeholder = "Pack id";
+    packBox.placeholder = "Id, pyproject name or GitHub repo";
     packBox.spellcheck = false;
     const versionPick = api.el("select", "om-side-select rr-version");
     versionPick.hidden = true;
     const rawButton = api.el("button", "om-btn rr-raw", "Raw");
     rawButton.disabled = true;
-    win.tools.append(packBox, versionPick, rawButton);
+    win.tools.append(installedPick, packBox, versionPick, rawButton);
+    let installed = [];
 
     const body = api.el("div", "rr-body");
     win.body.appendChild(body);
@@ -69,6 +94,10 @@ export const program = {
       if (report.created_at) line.appendChild(api.el("span", "rr-muted", report.created_at));
       if (report.pack.publisher) line.appendChild(api.el("span", "rr-muted", report.pack.publisher));
       titles.appendChild(line);
+      if (report.unlisted) {
+        titles.appendChild(api.el("div", "rr-muted rr-unlisted",
+          `${report.unlisted} is not on the registry.`));
+      }
       head.appendChild(titles);
       if (report.pack.repository) {
         const link = api.el("a", "rr-link", "Repository");
@@ -205,29 +234,52 @@ export const program = {
         return;
       }
       const ticket = ++state.latest;
-      state.pack = id;
       state.version = String(version || "");
       packBox.value = id;
-      win.setTitle(`Registry Report · ${id}`);
       say("Reading the registry...");
       try {
-        const query = state.version ? `?version=${encodeURIComponent(state.version)}` : "";
-        const report = await ask(`${REPORT}${encodeURIComponent(id)}${query}`);
+        const query = new URLSearchParams({ q: id });
+        if (state.version) query.set("version", state.version);
+        const report = await ask(`${REPORT}?${query}`);
         if (ticket !== state.latest) return;
         state.report = report;
+        state.pack = report.pack.id || id;
         state.version = report.version;
+        win.setTitle(`Registry Report · ${state.pack}`);
         rawButton.disabled = false;
         fillVersions(report);
         draw();
       } catch (error) {
         if (ticket !== state.latest) return;
         state.report = null;
+        win.setTitle("Registry Report");
         rawButton.disabled = true;
         versionPick.hidden = true;
         say(`No report: ${error.message}.`, "rr-empty rr-error");
       }
     };
 
+    const fillInstalled = async () => {
+      try {
+        installed = installedRows(await ask(INSTALLED, false));
+      } catch {
+        installed = [];
+      }
+      const options = installed.map((one, at) => {
+        const word = REVIEWED.includes(one.status) ? ` · ${STATUS_WORDS[one.status]}` : "";
+        const option = api.el("option", null, `${one.label}${word}${one.off ? " · off" : ""}`);
+        option.value = String(at);
+        return option;
+      });
+      installedPick.replaceChildren(installedPick.firstChild, ...options);
+      installedPick.hidden = !installed.length;
+    };
+
+    installedPick.addEventListener("change", () => {
+      const one = installed[Number(installedPick.value)];
+      installedPick.value = "";
+      if (one) void load(one.query, one.version);
+    });
     packBox.addEventListener("keydown", (event) => {
       if (event.key === "Enter") { event.preventDefault(); void load(packBox.value); }
     });
@@ -241,7 +293,9 @@ export const program = {
     api.style(`
       .rr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 18px;
         display: flex; flex-direction: column; gap: 12px; font-size: 12px; }
-      .rr-pack { width: 200px; }
+      .rr-pack { width: 240px; }
+      .rr-installed { max-width: 220px; }
+      .rr-unlisted { margin-top: 3px; }
       .rr-version { max-width: 220px; }
       .rr-empty { padding: 28px; text-align: center; opacity: .65; }
       .rr-error { color: #f85149; opacity: 1; }
@@ -310,6 +364,7 @@ export const program = {
         font-family: ui-monospace, monospace; font-size: 11px; }
     `);
 
+    void fillInstalled();
     if (carried?.pack) void load(carried.pack, carried.version);
     else {
       say("No pack.");

@@ -260,6 +260,68 @@ def _fold(name: str) -> str:
     return re.sub(r"[-_.]+", "-", (name or "").strip().lower())
 
 
+_SLUG = re.compile(r"^[\w.-]+/[\w.-]+$")
+
+_REMOTE = re.compile(r"^\s*url\s*=\s*(\S+)", re.M)
+
+
+def _slug(text: str) -> str:
+    """``owner/repo`` lowercased, from a GitHub URL or a bare slug, empty where it is neither."""
+    pair = metadata._owner_repo(text)
+    if pair is None and _SLUG.match(text or ""):
+        pair = tuple(text.split("/", 1))
+    return f"{pair[0]}/{re.sub(r'[.]git$', '', pair[1])}".lower() if pair else ""
+
+
+def _installed_remote(directory: str) -> str:
+    """The repository an installed pack was cloned from, empty where it was not."""
+    try:
+        config = installer.custom_nodes_dir() / directory / ".git" / "config"
+        found = _REMOTE.search(config.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, RuntimeError):
+        return ""
+    return found.group(1) if found else ""
+
+
+def _registry_pack_for(text: str) -> str:
+    """The registry id that a pack id, pyproject name, installed folder or GitHub repository names.
+
+    Returns:
+        The registry id, the text itself where nothing local matches it so the registry can
+        answer, or an empty string for a repository no registry pack lists.
+    """
+    asked = (text or "").strip()
+    if not asked:
+        return ""
+    entries = catalog.load()
+    by_slug = {}
+    by_id = {}
+    for entry in entries:
+        identifier = str(entry.get("id") or "")
+        if not identifier:
+            continue
+        by_id.setdefault(_fold(identifier), identifier)
+        slug = _slug(str(entry.get("repository") or ""))
+        if slug:
+            by_slug.setdefault(slug, identifier)
+    slug = _slug(asked) if ("/" in asked or ":" in asked) else ""
+    if slug:
+        return by_slug.get(slug, "")
+    folded = _fold(asked)
+    if folded in by_id:
+        return by_id[folded]
+    for pack in installer.list_installed():
+        if folded not in (_fold(pack.get("dir")), _fold(pack.get("dir", "").removesuffix(".disabled")),
+                          _fold(pack.get("id"))):
+            continue
+        if _fold(pack.get("id")) in by_id:
+            return by_id[_fold(pack.get("id"))]
+        remote = _slug(_installed_remote(str(pack.get("dir") or "")))
+        if remote in by_slug:
+            return by_slug[remote]
+    return asked
+
+
 _STATUS_TTL = 600
 
 _status_cache: dict = {}
@@ -1573,18 +1635,28 @@ def register_routes() -> None:
                 )
         return web.json_response({"ok": True, "reasons": reasons})
 
-    @PromptServer.instance.routes.get(f"{PREFIX}/registry-report/" + "{node_id}")
+    @PromptServer.instance.routes.get(f"{PREFIX}/registry-report")
     async def version_report(request: web.Request) -> web.Response:
-        """What the registry says about one version of a pack, read into plain words."""
-        node_id = request.match_info.get("node_id", "").strip()
-        if not node_id:
+        """What the registry says about one version of a pack, read into plain words.
+
+        ``q`` is a registry id, pyproject name, installed folder or GitHub repository.
+        """
+        asked = request.query.get("q", "").strip()[:300]
+        if not asked:
             return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        node_id = await asyncio.to_thread(_registry_pack_for, asked)
+        if not node_id:
+            return web.json_response(
+                {"ok": False, "reason": f"no registry pack lists {asked}"}, status=404)
         version = request.query.get("version", "").strip()
         async with aiohttp.ClientSession() as session:
             try:
                 record = await registry.fetch_node(node_id, session)
                 rows = await registry.fetch_status_rows(node_id, session)
             except registry.RegistryError as error:
+                if error.status == 404:
+                    return web.json_response(
+                        {"ok": False, "reason": f"no registry pack matches {asked}"}, status=404)
                 return web.json_response(
                     {"ok": False, "reason": error.detail or "the registry did not answer"},
                     status=502,

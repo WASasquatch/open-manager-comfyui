@@ -411,23 +411,22 @@ def build(node: dict, rows: list, version: str = "") -> dict:
     Args:
         node: The pack's registry record.
         rows: Every version of the pack, with ``status_reason`` included.
-        version: The version to report on. Empty picks the newest flagged or banned one,
-            then the newest.
+        version: The version to report on. Empty, or one the registry does not list, picks the
+            newest flagged or banned one, then the newest.
 
     Returns:
-        ``{ok, pack, version, status, created_at, verdict, notes, scan, versions, raw}``, or
-        ``{ok: False, reason}``.
+        ``{ok, pack, version, unlisted, status, created_at, verdict, notes, scan, versions,
+        raw}``, ``unlisted`` naming the version asked for where the registry does not list it,
+        or ``{ok: False, reason}``.
     """
     listed = [row for row in rows if isinstance(row, dict) and row.get("version")]
     if not listed:
         return {"ok": False, "reason": "the registry lists no versions for this pack"}
-    if version:
-        row = next((one for one in listed if one.get("version") == version), None)
-        if row is None:
-            return {"ok": False, "reason": f"the registry has no version {version}"}
-    else:
+    row = next((one for one in listed if one.get("version") == version), None) if version else None
+    if row is None:
         held = [one for one in listed if _short(one.get("status")) in ("flagged", "banned")]
         row = (held or listed)[0]
+    unlisted = version if version and row.get("version") != version else ""
 
     status = _short(row.get("status"))
     text = str(row.get("status_reason") or "").strip()
@@ -486,6 +485,7 @@ def build(node: dict, rows: list, version: str = "") -> dict:
             "repository": node.get("repository") or "",
         },
         "version": row.get("version"),
+        "unlisted": unlisted,
         "status": status,
         "created_at": str(row.get("createdAt") or "")[:10],
         "verdict": _verdict(status, trimmed, scan),

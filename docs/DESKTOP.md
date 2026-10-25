@@ -99,7 +99,9 @@ the centre of the graph view, selects it and minimises Nodes; dragging drops it 
 Escape closes the preview, then clears the search.
 
 **Registry Report** opens from the flagged or banned label on a pack's versions, its install
-dialog and the Installed list, or from the Start menu with a pack id. It reads the registry's own
+dialog and the Installed list, or from the Start menu. There, **Installed** lists every pack in
+`custom_nodes` and reports on the version installed, and the box takes a registry id, a
+pyproject name, a folder name or a GitHub repository as `owner/repo` or a URL. It reads the registry's own
 record for the version: a one-line verdict, each reviewer and registry note from first to last
 with its category in plain words, and the automated scan grouped by what each match means, with
 the file, line and surrounding code of every match. **Raw** shows the record as the registry
