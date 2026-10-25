@@ -270,6 +270,7 @@ already fixed, stands down and says so in the browser console.
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
+| Zip ties | On | Dragging across links with Z held ties them into a ribbon, with Shift as well into a straight one, horizontal, vertical or at 45 degrees; across a tie, or double-clicking it, removes it. Ties move by dragging, turn by dragging with Alt held, in 45 degree steps with Shift, and take a colour from their right-click menu. Links in a tie keep the order of their nodes and reorder as nodes move. After [comfyui-zip-ties](https://github.com/safzanpirani/comfyui-zip-ties), whose saved ties it reads; stands down when that is installed |
 | Hidden links as nubs | On | A hidden link shows a small nub in its type colour on each node's edge, in place of a type label. Hovering a nub shows the label; hovering the label shows the link |
 | No frontend_only badge | On | Nodes with no Python side carry no source badge |
 | Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
