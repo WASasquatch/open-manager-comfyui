@@ -8,6 +8,7 @@ import {
 } from "./om-nodes/resize.mjs";
 import { refreshMenuRow, watchMenu } from "./om-nodes/menu.mjs";
 import { refreshOmGrips, startOmGrips, stopOmGrips } from "./om-nodes/grips.mjs";
+import { startScrub, stopScrub } from "./om-nodes/scrub.mjs";
 
 export { refreshOmGrips };
 
@@ -113,11 +114,13 @@ function apply() {
     root.setAttribute("data-om-nodes", "");
     startResize();
     startOmGrips();
+    startScrub();
     scheduleProbe();
   } else {
     root.removeAttribute("data-om-nodes");
     stopResize();
     stopOmGrips();
+    stopScrub();
   }
   if (want !== showing) {
     showing = want;

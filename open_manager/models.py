@@ -11,6 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 __all__ = [
     "ALLOWED_HOSTS",
+    "CACHE_DIRECTORY",
     "MEDIA_DIRECTORY",
     "MEDIA_FORMATS",
     "REPO_DOWNLOADS",
@@ -91,6 +92,8 @@ MEDIA_FORMATS = _media()
 
 MEDIA_DIRECTORY = "input"
 
+CACHE_DIRECTORY = "temp"
+
 REPO_DOWNLOADS = (os.environ.get("OPEN_MANAGER_REPO_DOWNLOADS", "").strip().lower()
                   in {"1", "true", "yes", "on"})
 
@@ -126,6 +129,16 @@ def _media_root() -> str:
         import folder_paths
 
         return str(folder_paths.get_input_directory())
+    except Exception:
+        return ""
+
+
+def _cache_root() -> str:
+    """ComfyUI's temp directory, empty where it cannot be asked."""
+    try:
+        import folder_paths
+
+        return str(folder_paths.get_temp_directory())
     except Exception:
         return ""
 
@@ -243,13 +256,15 @@ def folders() -> set[str]:
         names = set()
     if _media_root():
         names.add(MEDIA_DIRECTORY)
+    if _cache_root():
+        names.add(CACHE_DIRECTORY)
     return names
 
 
 def _folder_roots(directory: str) -> list[str]:
     """Every path ComfyUI registers for a folder, in its own order."""
-    if directory == MEDIA_DIRECTORY:
-        root = _media_root()
+    if directory in (MEDIA_DIRECTORY, CACHE_DIRECTORY):
+        root = _media_root() if directory == MEDIA_DIRECTORY else _cache_root()
         return [root] if root else []
     try:
         import folder_paths
@@ -438,7 +453,7 @@ def installed_path(directory: str, name: str, subfolder: str = "") -> str:
     parts = subfolder_parts(subfolder)
     if parts is None:
         return ""
-    if directory == MEDIA_DIRECTORY:
+    if directory in (MEDIA_DIRECTORY, CACHE_DIRECTORY):
         target = destination(directory, name, "", subfolder)
         return str(target) if target is not None and target.is_file() else ""
     try:
@@ -481,7 +496,7 @@ def check(url: str, name: str, directory: str, root: str = "",
         )
     if directory not in folders():
         return False, f"{directory or 'no directory'} is not a ComfyUI folder"
-    media = directory == MEDIA_DIRECTORY
+    media = directory in (MEDIA_DIRECTORY, CACHE_DIRECTORY)
     permitted = MEDIA_FORMATS if media else SAFE_FORMATS
     if repo and not media:
         if not REPO_DOWNLOADS:

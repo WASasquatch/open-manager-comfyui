@@ -24,7 +24,7 @@ _CONST = re.compile(r"(?ms)^const ([A-Z][A-Z0-9_]*) = (.+?);$")
 
 _FIELD = re.compile(r"^  ([A-Za-z_$][\w$]*)\s*[:(]")
 
-_FIELDS = ("key", "name", "tooltip", "issues", "defaultValue", "verified")
+_FIELDS = ("key", "name", "tooltip", "issues", "options", "defaultValue", "verified")
 
 
 def folder() -> Path:
@@ -96,7 +96,8 @@ def meta(path: Path) -> dict:
     """The setting a patch declares, read from its file without running it.
 
     Returns:
-        ``{key, name, tooltip, issues, defaultValue, verified}``.
+        ``{key, name, tooltip, issues, defaultValue, verified}``, plus ``options`` for a patch
+        offering choices in place of a switch.
 
     Raises:
         ValueError: Where the file does not declare them as plain values.
@@ -132,14 +133,25 @@ def meta(path: Path) -> dict:
         raise ValueError("no key such as qolSomething")
     if not isinstance(found.get("name"), str) or not found["name"]:
         raise ValueError("no name")
-    if not isinstance(found.get("defaultValue"), bool):
-        raise ValueError("no defaultValue of true or false")
+    options = found.get("options")
+    if options is None:
+        if not isinstance(found.get("defaultValue"), bool):
+            raise ValueError("no defaultValue of true or false")
+    elif (not isinstance(options, list) or len(options) < 2
+          or not all(isinstance(one, str) and one for one in options)
+          or len(set(options)) != len(options)):
+        raise ValueError("options that are not two or more different strings")
+    elif found.get("defaultValue") not in options:
+        raise ValueError("a defaultValue that is not one of the options")
     tooltip = found.get("tooltip", "")
     issues = found.get("issues", [])
     if not isinstance(tooltip, str) or not isinstance(issues, list):
         raise ValueError("a tooltip that is not a string, or issues that are not a list")
-    return {"key": found["key"], "name": found["name"], "tooltip": tooltip, "issues": issues,
-            "defaultValue": found["defaultValue"], "verified": str(found.get("verified") or "")}
+    declared = {"key": found["key"], "name": found["name"], "tooltip": tooltip, "issues": issues,
+                "defaultValue": found["defaultValue"], "verified": str(found.get("verified") or "")}
+    if options is not None:
+        declared["options"] = options
+    return declared
 
 
 def _category(home: Path, problems: list) -> list:

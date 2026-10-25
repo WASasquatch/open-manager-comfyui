@@ -26,6 +26,7 @@ __all__ = [
     "remove",
     "delete_file",
     "redownload",
+    "relocate",
     "remove_many",
     "verify",
     "retry",
@@ -108,8 +109,11 @@ def _save() -> None:
         pass
 
 
-def state() -> dict:
+def state(ids: "set | None" = None) -> dict:
     """Every download and what it is doing.
+
+    Args:
+        ids: Only these downloads, or None for all of them.
 
     Returns:
         ``{downloads: [...], running, queued, downloaded, archived, workers, max_workers}``,
@@ -118,6 +122,8 @@ def state() -> dict:
     _load()
     rows = []
     for stored in sorted(_entries.values(), key=lambda row: -float(row.get("added_at") or 0)):
+        if ids is not None and stored.get("id") not in ids:
+            continue
         row = dict(stored)
         status = row.get("status")
         if status == "done":
@@ -509,6 +515,40 @@ def record_for(where: str) -> dict:
         if same and float(row.get("finished_at") or 0) >= float(best.get("finished_at") or 0):
             best = row
     return dict(best)
+
+
+def relocate(old: str, new: str, directory: str) -> int:
+    """Point the finished downloads that wrote a file at where it has been moved.
+
+    Args:
+        old: Where the file was written.
+        new: Where it is now.
+        directory: The folder it is now in.
+
+    Returns:
+        How many records were changed.
+    """
+    _load()
+    try:
+        before = Path(old).resolve()
+    except OSError:
+        return 0
+    moved = 0
+    for row in _entries.values():
+        written = row.get("path") or ""
+        if row.get("status") != "done" or not written:
+            continue
+        try:
+            same = Path(written).resolve() == before
+        except OSError:
+            same = False
+        if same:
+            row.update(path=new, directory=directory, name=Path(new).name, subfolder="", root="",
+                       replaces="")
+            moved += 1
+    if moved:
+        _save()
+    return moved
 
 
 def remove(download_id: str) -> bool:

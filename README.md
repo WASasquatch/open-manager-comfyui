@@ -250,6 +250,9 @@ already fixed, stands down and says so in the browser console.
 | Media Assets open workflows from files | On | A job no longer in history opens the workflow saved in its file |
 | Media Assets show files found by scans | On | Files an asset scan adds appear in Media Assets |
 | Media Assets delete files | Off | Deleting an output also deletes its file. Needs `OPEN_MANAGER_FILE_WRITES=1` |
+| Ask before downloading template media | On | Opening a template offers the media files it is missing, with Download and Ignore, in place of ComfyUI downloading them into input. Files already in input or temp are used, not fetched |
+| Template media downloads | Ask | Always leaves ComfyUI to download a template's media as it opens. Ask turns on the patch above. Never fetches nothing; the Download Manager lists what is missing |
+| Keep template media in input | Off | Template media downloads to input. Off, it downloads to temp, which ComfyUI empties when it restarts, and its nodes point at `name [temp]`. Turning it on moves the open workflow's files from temp to input and points its nodes there |
 | Nodes Manager fits its contents | On | The Nodes Manager's frame fits its contents. On screens 3000px wide and over it otherwise cuts off the right side, close button and filters |
 | Subgraph nodes show promoted previews | On | A subgraph node on the classic canvas draws the latest preview promoted to it |
 | Subgraph nodes keep their saved values | On | A subgraph node whose promoted widgets ComfyUI migrated loads with its saved values instead of the values they had at migration |
@@ -257,6 +260,8 @@ already fixed, stands down and says so in the browser console.
 | Nodes 2.0 widgets on the classic canvas | On | Curves, image compare and crop, video trim and crop, bounding boxes, colour palettes, the resolution preview and LoRA stacks work on the classic canvas, also when promoted to a subgraph. The painter, the compositor and light info show ComfyUI's own editors there. Stands down when [ComfyUI-Nodes2Classic](https://github.com/Nynxz/ComfyUI-Nodes2Classic) is installed |
 | Self-drawn widgets keep their size when zoomed | On | On Nodes 2.0, a widget that draws itself, such as a section header, draws at its node's width when it appears while zoomed in or out |
 | Panels fit their node and scroll | On | On Nodes 2.0, a panel widget that sets its own height, such as a value readout, opens at that height, grows and shrinks with its node, and scrolls |
+| Combo lists use the room on screen | On | On Nodes 2.0, a combo's list grows into the space on screen in place of about seven options |
+| Combo lists open folders as submenus | On | On Nodes 2.0, a list of files kept in folders, such as LoRAs, shows each folder as a submenu. Typing in its search box searches every file |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |

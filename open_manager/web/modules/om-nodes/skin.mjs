@@ -177,6 +177,10 @@ ${NODE} [data-testid="node-collapse-button"] {
   border-radius: 0;
   color: inherit;
 }
+${NODE} > :is([data-corner="NW"], [data-corner="NE"]) {
+  width: 10px;
+  height: 10px;
+}
 ${NODE} [data-testid="node-collapse-button"] i {
   width: 14px;
   height: 14px;
@@ -410,6 +414,9 @@ ${each(LABELS, "")} {
   color: var(--omn-widget-label);
   line-height: var(--omn-widget-height);
 }
+${each(LABELS, ":has(+ .min-w-0 .cursor-ew-resize)")} {
+  cursor: ew-resize;
+}
 ${cell()} {
   position: static;
   display: flex;
@@ -465,12 +472,11 @@ ${cell(".overflow-hidden.grow > .flex-1")} {
   padding: 0;
 }
 ${cell('[data-testid="decrement"]')} {
-  position: absolute;
-  top: 0;
-  left: 0;
-  border-radius: ${RADIUS} 0 0 ${RADIUS};
+  order: 1;
+  border-radius: 0;
 }
 ${cell('[data-testid="increment"]')} {
+  order: 1;
   border-radius: 0 ${RADIUS} ${RADIUS} 0;
 }
 ${cell(STEP)} {

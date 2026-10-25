@@ -932,8 +932,53 @@ function silhouette(ctx, area, radius) {
   }
 }
 
-function paintGlow(ctx, node, glow, scale) {
-  const area = nodeArea(node);
+const vueRoots = new WeakMap();
+
+const haloed = new WeakSet();
+
+let haloWatch = null;
+
+function vueRoot(node) {
+  const id = String(node.id);
+  const held = vueRoots.get(node);
+  if (held?.isConnected && held.getAttribute("data-node-id") === id) return held;
+  const root = document.querySelector(`.lg-node[data-node-id="${CSS.escape(id)}"]`);
+  if (root) vueRoots.set(node, root);
+  return root;
+}
+
+function haloResized(entries) {
+  let changed = false;
+  for (const { target } of entries) {
+    const node = app.canvas?.graph?.getNodeById?.(target.getAttribute("data-node-id"));
+    if (!target.isConnected || !node?.selected) {
+      haloWatch?.unobserve(target);
+      haloed.delete(target);
+      continue;
+    }
+    changed = true;
+  }
+  if (changed) app.canvas?.setDirty?.(true, false);
+}
+
+function watchHalo(root) {
+  if (haloed.has(root) || typeof ResizeObserver !== "function") return;
+  haloWatch ??= new ResizeObserver(haloResized);
+  haloed.add(root);
+  haloWatch.observe(root);
+}
+
+function vueArea(node) {
+  const root = vueRoot(node);
+  if (!root) return nodeArea(node);
+  watchHalo(root);
+  const w = root.offsetWidth;
+  const h = root.offsetHeight;
+  if (!(w > 0) || !(h > 0)) return nodeArea(node);
+  return { x: 0, y: -(Number(window.LiteGraph?.NODE_TITLE_HEIGHT) || 30), w, h };
+}
+
+function paintGlow(ctx, node, glow, scale, area = nodeArea(node)) {
   if (!area) return;
   const blur = Math.max(1, (glow.blur ?? 12) * scale);
   const pad = blur * 2 + 4;
@@ -968,7 +1013,7 @@ function installDrawHook() {
     if (window.LiteGraph?.vueNodesMode) {
       const halo = extras.glow;
       if (halo?.selected && node.selected && !this.low_quality && readerGates().glow) {
-        paintGlow(ctx, node, halo, this.ds?.scale || 1);
+        paintGlow(ctx, node, halo, this.ds?.scale || 1, vueArea(node));
       }
       return original.call(this, node, ctx, ...rest);
     }

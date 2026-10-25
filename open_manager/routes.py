@@ -61,6 +61,7 @@ from . import (
     settingsfile,
     stall,
     tdr,
+    templatemedia,
     timing,
     usertheme,
     wallpaper,
@@ -1827,10 +1828,12 @@ def register_routes() -> None:
         )
 
     @PromptServer.instance.routes.get(f"{PREFIX}/downloads")
-    async def list_downloads(_request: web.Request) -> web.Response:
-        """Every download and how far along it is."""
+    async def list_downloads(request: web.Request) -> web.Response:
+        """Every download and how far along it is, or only those named in ``ids``."""
         await downloads.start(downloads.DEFAULT_WORKERS)
-        return web.json_response(downloads.state())
+        asked = request.query.get("ids", "")
+        wanted = {one for one in asked.split(",")[:256] if one} if asked else None
+        return web.json_response(downloads.state(wanted))
 
     @PromptServer.instance.routes.post(f"{PREFIX}/downloads")
     @_json_body
@@ -2362,7 +2365,7 @@ def register_routes() -> None:
     async def model_folders(_request: web.Request) -> web.Response:
         """The model folders this ComfyUI knows, for the folder picker."""
         return web.json_response({
-            "folders": sorted(_model_folder_names()),
+            "folders": sorted(_model_folder_names() - {model_policy.CACHE_DIRECTORY}),
             "formats": sorted(model_policy.SAFE_FORMATS),
             "media_formats": sorted(model_policy.MEDIA_FORMATS),
             "media_directory": model_policy.MEDIA_DIRECTORY,
@@ -2427,6 +2430,25 @@ def register_routes() -> None:
                 "installed": model_policy.installed_path(item["directory"], item["name"]),
             })
         return web.json_response({"ok": True, "models": found})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/media/in-workflow")
+    @_json_body
+    async def media_in_workflow(request: web.Request, body: dict) -> web.Response:
+        """The template media a workflow's loader nodes name, and where each file is."""
+        found = await asyncio.to_thread(templatemedia.scan, body.get("workflow"))
+        for row in found:
+            row["trusted"] = trust.is_trusted(row["owner"], "downloads")
+        return web.json_response({"ok": True, "media": found})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/media/keep")
+    @_json_body
+    async def keep_media(request: web.Request, body: dict) -> web.Response:
+        """Move cached template media from temp into input."""
+        if not gates.DOWNLOADS:
+            return web.json_response(gates.refuse("downloads"), status=403)
+        names = body.get("names")
+        return web.json_response(
+            await asyncio.to_thread(templatemedia.keep, names if isinstance(names, list) else []))
 
     @PromptServer.instance.routes.get(f"{PREFIX}/pack-for-repo")
     async def pack_for_repo(request: web.Request) -> web.Response:

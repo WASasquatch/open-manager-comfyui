@@ -249,7 +249,7 @@ pixels.
 | `widget-height` | 14 to 40 | `NODE_WIDGET_HEIGHT` |
 | `widget-gap` | 0 to 12 | 4 |
 | `widget-inset` | 0 to 40 | 15, the space beside each widget |
-| `widget-pad` | 8 to 40 | 20, the space for − and + |
+| `widget-pad` | 8 to 40 | 20, the label's inset and the width of − and of + |
 | `slot-height` | 14 to 40 | `NODE_SLOT_HEIGHT` |
 | `title-size` | 8 to 28 | `NODE_TEXT_SIZE` |
 | `text-size` | 8 to 20 | `NODE_SUBTEXT_SIZE` |

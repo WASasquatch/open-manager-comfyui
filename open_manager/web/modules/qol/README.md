@@ -15,11 +15,13 @@ Settings > Open Manager > Quality of Life Patches.
 | `nodes/` | Node bodies, widgets, badges and node lists |
 | `search/` | The node search box |
 | `subgraphs/` | Subgraph nodes |
+| `templates/` | Workflow templates and what opening one fetches |
 
 Every `.mjs` file in a category folder is one patch. The server lists them
 (`GET /open_manager/v1/api/qol`, `open_manager/qol.py`) sorted by folder, then file, and Settings
 shows them grouped by folder. A folder inside a category holds one patch's own modules, named
-after it (`nodes/nodes2-widgets/` for `nodes/nodes2-widgets.mjs`), and is never listed.
+after it (`nodes/nodes2-widgets/` for `nodes/nodes2-widgets.mjs`), or the modules several patches
+share, named after what they share (`templates/media/`), and is never listed.
 
 ## Adding a patch
 
@@ -35,10 +37,11 @@ The file's default export:
 | `name` | The setting's label |
 | `tooltip` | The setting's tooltip |
 | `issues` | `owner/repo#number` for each issue it answers, linked beside the label |
-| `defaultValue` | Whether it is on by default |
+| `defaultValue` | Whether it is on by default, or which of its `options` |
+| `options` | Optional. Choices in place of a switch; the first leaves ComfyUI as it is and stops the patch |
 | `verified` | The frontend version it was last checked against |
 | `check()` | `""` when it can apply, otherwise the reason it cannot, logged to the console |
-| `on(track, standDown)` | Applies it. Pass every undo step to `track`; call `standDown(reason)` when ComfyUI turns out to have changed or fixed it |
+| `on(track, standDown, choice)` | Applies it. Pass every undo step to `track`; call `standDown(reason)` when ComfyUI turns out to have changed or fixed it. A patch with `options` gets the chosen one, and is stopped and started again when it changes |
 | `menu(node)`, `canvasMenu(canvas)` | Optional extra items for the node and canvas menus |
 
 The server reads `key`, `name`, `tooltip`, `issues`, `defaultValue` and `verified` from the file

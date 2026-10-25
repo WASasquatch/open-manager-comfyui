@@ -7,6 +7,7 @@ import { panelSetting } from "./settings.mjs";
 import { plusMark } from "./results.mjs";
 import { workflowChoices, workflowDocument } from "./workflows.mjs";
 import { dlPost, bytesText, dlRemember, dlRecall, nodeModels } from "./net.mjs";
+import { scanMedia, loaderDocument, mediaRow, fetchMedia } from "./template-media.mjs";
 
 const DL_POLL_BUSY = 900;
 const DL_POLL_IDLE = 4000;
@@ -575,7 +576,7 @@ function stopDownloadPolling() {
 async function addModel(refresh) {
   const how = await chooseAction("Add a download", "",
     [{ key: "workflow", label: "From a workflow", primary: true,
-       hint: "Lists the models an open workflow names" },
+       hint: "Lists the models and template media an open workflow names" },
      { key: "url", label: "From a URL", hint: "Paste a Hugging Face or GitHub link" }]);
   if (how === "url") await addModelByUrl(refresh);
   if (how === "workflow") await addModelsFromWorkflow(refresh);
@@ -726,7 +727,7 @@ async function addModelsFromWorkflow(refresh) {
   dialog.appendChild(close);
 
   const head = el("div", "om-head");
-  head.appendChild(el("div", "om-title", "Models in a workflow"));
+  head.appendChild(el("div", "om-title", "Models and media in a workflow"));
   const picker = el("select", "om-side-select om-dl-wf");
   choices.forEach((choice, index) => {
     const option = el("option", null, choice.active ? `${choice.label} (current)` : choice.label);
@@ -783,17 +784,21 @@ async function addModelsFromWorkflow(refresh) {
       return;
     }
     let answer;
+    let media;
     try {
-      answer = await dlPost("/models/in-workflow", { workflow: doc });
+      [answer, media] = await Promise.all([
+        dlPost("/models/in-workflow", { workflow: doc }),
+        scanMedia(loaderDocument(doc)),
+      ]);
     } catch {
       list.replaceChildren(el("div", "om-empty", "The workflow could not be scanned."));
       updateSummary();
       return;
     }
     if (!backdrop.isConnected) return;
-    rows = answer.models || [];
+    rows = [...(answer.models || []), ...media.map(mediaRow)];
     if (!rows.length) {
-      list.replaceChildren(el("div", "om-empty", "This workflow does not name any model downloads."));
+      list.replaceChildren(el("div", "om-empty", "This workflow does not name any downloads."));
     } else {
       const places = await Promise.all(rows.map((model) => modelRoots(model.directory)));
       if (!backdrop.isConnected) return;
@@ -810,30 +815,53 @@ async function addModelsFromWorkflow(refresh) {
     backdrop.remove();
     const perOwner = new Map();
     for (const model of picked) {
+      if (model.cached) continue;
       if (!perOwner.has(model.owner)) perOwner.set(model.owner, []);
-      perOwner.get(model.owner).push(model.name);
+      perOwner.get(model.owner).push(model);
     }
     const answered = new Map();
     const ready = [];
     for (const model of picked) {
+      if (model.cached) {
+        ready.push({ ...model, overwrite: false, root: "" });
+        continue;
+      }
       if (!answered.has(model.owner)) {
-        const names = perOwner.get(model.owner) || [model.name];
+        const mine = perOwner.get(model.owner) || [model];
+        const names = mine.map((one) => one.name);
+        const noun = mine.every((one) => one.media) ? "media files"
+          : mine.some((one) => one.media) ? "files" : "models";
         answered.set(model.owner, await confirmDownloadTrust(
           model.owner,
           names.length === 1 ? `${model.name} in this workflow`
-                             : `${names.length} models in this workflow`,
+                             : `${names.length} ${noun} in this workflow`,
           names.length !== 1,
           formatsOf(names)));
       }
       if (!answered.get(model.owner)) continue;
       ready.push({ ...model, overwrite: !!model.installed, root: model.root || "" });
     }
-    if (!ready.length || !(await confirmDiskRoom(ready))) { refresh?.(); return; }
+    const media = ready.filter((one) => one.media);
+    const fetched = ready.filter((one) => !one.media || !one.cached);
+    if (!ready.length || (fetched.length && !(await confirmDiskRoom(fetched)))) {
+      refresh?.();
+      return;
+    }
     let queued = 0;
     for (const model of ready) {
+      if (model.media) continue;
       if (await queueModel(model, { source: "from a workflow", askTrust: false })) queued += 1;
     }
-    if (queued) toast(`Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    let files = 0;
+    if (media.length) {
+      const watch = await fetchMedia(media, { askTrust: false, checkRoom: false,
+                                              source: "from a workflow" });
+      files = watch ? watch.state.total - watch.state.failed.length : 0;
+    }
+    if (queued + files) {
+      toast(files ? `Queued ${queued + files} file${queued + files === 1 ? "" : "s"}.`
+                  : `Queued ${queued} model${queued === 1 ? "" : "s"}.`, { kind: "ok" });
+    }
     refresh?.();
   };
 
@@ -852,7 +880,7 @@ function buildModelRow(model, index, boxes, onChange, roots, chosen) {
   const box = el("input", "om-dl-check");
   box.type = "checkbox";
   box.disabled = !model.allowed;
-  box.checked = model.allowed && !model.installed;
+  box.checked = model.allowed && !model.installed && !model.cached;
   box.onchange = onChange;
   boxes.set(index, box);
   row.appendChild(box);
@@ -869,6 +897,10 @@ function buildModelRow(model, index, boxes, onChange, roots, chosen) {
   } else if (model.installed) {
     const have = el("div", "om-dl-note", "On disk. Select to replace.");
     have.title = model.installed;
+    text.appendChild(have);
+  } else if (model.cached) {
+    const have = el("div", "om-dl-note", "In temp. Select to move to input.");
+    have.title = model.temp;
     text.appendChild(have);
   }
   if (model.allowed && (roots || []).length > 1) {
@@ -980,4 +1012,4 @@ async function downloadNodeModels(node) {
   }
 }
 
-export { dlPost, bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, nodeModels, addModelUrlToNode, downloadNodeModels, modelRoots, preferredRoot };
+export { dlPost, bytesText, dlWorkers, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, nodeModels, addModelUrlToNode, downloadNodeModels, modelRoots, preferredRoot };

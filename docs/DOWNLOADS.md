@@ -14,8 +14,11 @@ Manager menu, or from the command palette.
 - **Add by URL**: paste a link; the name, folder and account are read from it before anything
   is fetched.
 - **Add from a workflow**: lists the models a workflow declares, including those inside
-  subgraphs. Files already on disk are dimmed but still selectable, so a broken one can be
-  replaced.
+  subgraphs, and the example media its loader nodes take from an official template. Files
+  already on disk are dimmed but still selectable, so a broken one can be replaced.
+- **Template media**: goes to `temp`, which ComfyUI empties when it restarts, with the nodes
+  pointed at `name [temp]`; or to `input` with *Keep template media in input* on, under
+  **Quality of Life Patches**.
 - **Resumes**: a transfer continues from where it stopped rather than starting again, and
   survives a restart.
 - **Verifies**: every download is hashed as it arrives and checked against the hash the host

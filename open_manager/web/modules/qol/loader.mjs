@@ -34,16 +34,24 @@ const running = new Map();
 let started = false;
 
 function declared(meta) {
-  return !!meta && typeof meta.key === "string" && PATCH_KEY.test(meta.key)
-    && typeof meta.name === "string" && meta.name !== "" && typeof meta.defaultValue === "boolean";
+  if (!meta || typeof meta.key !== "string" || !PATCH_KEY.test(meta.key)
+    || typeof meta.name !== "string" || meta.name === "") return false;
+  const options = meta.options;
+  if (options === undefined) return typeof meta.defaultValue === "boolean";
+  return Array.isArray(options) && options.length > 1
+    && options.every((one) => typeof one === "string" && one !== "")
+    && new Set(options).size === options.length && options.includes(meta.defaultValue);
 }
 
 function metaOf(module) {
+  const options = Array.isArray(module?.options) ? module.options : undefined;
   const meta = {
     key: module?.key, name: module?.name, tooltip: String(module?.tooltip || ""),
     issues: Array.isArray(module?.issues) ? module.issues : [],
-    defaultValue: module?.defaultValue === true, verified: String(module?.verified || ""),
+    defaultValue: options ? module?.defaultValue : module?.defaultValue === true,
+    verified: String(module?.verified || ""),
   };
+  if (options) meta.options = options;
   return declared(meta) ? meta : null;
 }
 
@@ -78,7 +86,23 @@ function settingId(held) {
   return `openManager.${held.key}`;
 }
 
+function choiceOf(held) {
+  const options = held.meta.options;
+  let value;
+  if (wanted.has(held.key)) {
+    value = wanted.get(held.key);
+  } else {
+    try {
+      value = app.extensionManager?.setting?.get?.(settingId(held));
+    } catch {
+      value = undefined;
+    }
+  }
+  return options.includes(value) ? value : held.meta.defaultValue;
+}
+
 function patchWanted(held) {
+  if (held.meta.options) return choiceOf(held) !== held.meta.options[0];
   if (wanted.has(held.key)) return wanted.get(held.key) !== false;
   try {
     const value = app.extensionManager?.setting?.get?.(settingId(held));
@@ -126,8 +150,10 @@ function startPatch(held) {
   notes.delete(held.key);
   const undo = [];
   running.set(held.key, undo);
+  const given = [(step) => undo.push(step), (why) => standDown(held, undo, why)];
+  if (held.meta.options) given.push(choiceOf(held));
   try {
-    held.module.on((step) => undo.push(step), (why) => standDown(held, undo, why));
+    held.module.on(...given);
   } catch (error) {
     console.warn(`[Open Manager] ${held.meta.name}: failed and was removed`, error);
     notes.set(held.key, { state: "failed", reason: String(error?.message || error || "") });
@@ -138,6 +164,11 @@ function startPatch(held) {
 function setQolPatch(held, value) {
   wanted.set(held.key, value);
   if (!started) return;
+  if (held.meta.options) {
+    stopPatch(held);
+    if (patchWanted(held)) startPatch(held);
+    return;
+  }
   if (value === false) stopPatch(held);
   else startPatch(held);
 }
@@ -159,7 +190,8 @@ function register(held) {
       id: settingId(held),
       name: held.meta.name,
       category: ["Open Manager", "Quality of Life Patches", held.key],
-      type: "boolean",
+      type: held.meta.options ? "combo" : "boolean",
+      ...(held.meta.options ? { options: held.meta.options } : {}),
       defaultValue: held.meta.defaultValue,
       onChange: (value) => setQolPatch(held, value),
       tooltip: held.meta.tooltip,
