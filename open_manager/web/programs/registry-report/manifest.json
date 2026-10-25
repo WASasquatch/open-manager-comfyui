@@ -1,0 +1,26 @@
+{
+  "id": "registry-report",
+  "name": "Registry Report",
+  "hint": "What the Comfy Registry says about a pack version, in plain words",
+  "tags": [
+    "registry",
+    "report",
+    "flagged",
+    "banned",
+    "security",
+    "scan"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "registry-report.svg",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "amber"
+  },
+  "capabilities": [
+    "Reads the registry's reports on pack versions"
+  ]
+}

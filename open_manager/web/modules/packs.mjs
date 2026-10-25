@@ -12,6 +12,7 @@ import { repoButton, registryButton } from "./results.mjs";
 import { installedText } from "./installed.mjs";
 import { packQuery } from "./registry.mjs";
 import { nodeDragFrom } from "./node-drag.mjs";
+import { linkReport } from "./report-link.mjs";
 
 function packRoot(node) {
   return node?.closest(".om-dialog, .om-float") || null;
@@ -402,7 +403,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     }
     row.appendChild(number);
     const marks = el("div", "om-marks");
-    const mark = badge(entry.status);
+    const mark = linkReport(badge(entry.status), entry.status, pack.id, entry.version);
     mark.dataset.version = entry.version;
     mark.title = `Status: ${entry.status}`;
     marks.appendChild(mark);

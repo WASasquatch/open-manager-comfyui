@@ -44,6 +44,7 @@ from . import (
     nodemap,
     pause as run_pause,
     registry,
+    registry_report,
     risk,
     selfupdate,
     sources,
@@ -586,7 +587,8 @@ def _assessment_json(assessment: risk.Assessment) -> dict:
     }
 
 
-def _version_json(entry: registry.NodeVersion, pack_id: str, allow_banned: bool = False) -> dict:
+def _version_json(entry: registry.NodeVersion, pack_id: str, allow_banned: bool = False,
+                  reason: dict | None = None) -> dict:
     """One version, with everything worth saying about installing it.
 
     Args:
@@ -595,6 +597,7 @@ def _version_json(entry: registry.NodeVersion, pack_id: str, allow_banned: bool 
         allow_banned: Whether the reader has turned the ban block off. It decides whether a
             banned version comes back installable; the findings against it are the same
             either way.
+        reason: What the registry says about the version's status, where it says anything.
 
     Returns:
         The version as the panel draws it.
@@ -612,6 +615,7 @@ def _version_json(entry: registry.NodeVersion, pack_id: str, allow_banned: bool 
         dependencies=entry.dependencies,
         deprecated=entry.deprecated,
         compatibility=fit,
+        reason=reason,
     )
     installable, blocked_reason = _installable(entry.status, allow_banned)
     return {
@@ -660,6 +664,14 @@ def register_routes() -> None:
                     },
                     status=502,
                 )
+
+            reasons: dict = {}
+            if any(entry.status in ("flagged", "banned") for entry in versions):
+                try:
+                    reasons = await asyncio.wait_for(
+                        registry.fetch_status_details(node_id, session), timeout=8)
+                except (registry.RegistryError, asyncio.TimeoutError, aiohttp.ClientError):
+                    reasons = {}
 
             lic_name = record.license
             lic = licenses.classify(lic_name)
@@ -722,7 +734,8 @@ def register_routes() -> None:
                     ),
                 },
                 "versions": [
-                    _version_json(entry, record.node_id, allow_banned) for entry in versions
+                    _version_json(entry, record.node_id, allow_banned,
+                                  reasons.get(entry.version)) for entry in versions
                 ],
             }
         )
@@ -1560,6 +1573,28 @@ def register_routes() -> None:
                 )
         return web.json_response({"ok": True, "reasons": reasons})
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/registry-report/" + "{node_id}")
+    async def version_report(request: web.Request) -> web.Response:
+        """What the registry says about one version of a pack, read into plain words."""
+        node_id = request.match_info.get("node_id", "").strip()
+        if not node_id:
+            return web.json_response({"ok": False, "reason": "no pack named"}, status=400)
+        version = request.query.get("version", "").strip()
+        async with aiohttp.ClientSession() as session:
+            try:
+                record = await registry.fetch_node(node_id, session)
+                rows = await registry.fetch_status_rows(node_id, session)
+            except registry.RegistryError as error:
+                return web.json_response(
+                    {"ok": False, "reason": error.detail or "the registry did not answer"},
+                    status=502,
+                )
+        node = {"id": record.node_id, "name": record.name,
+                "publisher": {"name": record.publisher_name or record.publisher},
+                "repository": record.repository}
+        report = await asyncio.to_thread(registry_report.build, node, rows, version)
+        return web.json_response(report, status=200 if report.get("ok") else 404)
+
     @PromptServer.instance.routes.get(f"{PREFIX}/comfy-nodes/" + "{node_id}")
     async def comfy_nodes(request: web.Request) -> web.Response:
         """The node classes one published version of a pack registers."""
@@ -1906,8 +1941,14 @@ def register_routes() -> None:
                     method, url, headers=headers,
                     timeout=aiohttp.ClientTimeout(total=20),
                 ) as answer:
-                    if method == "GET":
+                    if method == "GET" and answer.status in (204, 404):
                         return web.json_response({"ok": True, "starred": answer.status == 204})
+                    if answer.status in (401, 403):
+                        return web.json_response(
+                            {"ok": False, "refused": True,
+                             "reason": "GitHub refused the key" if answer.status == 401
+                             else "the GitHub key has no Starring permission"},
+                            status=502)
                     if answer.status != 204:
                         return web.json_response(
                             {"ok": False, "reason": f"GitHub answered {answer.status}"},

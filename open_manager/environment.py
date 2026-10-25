@@ -9,7 +9,9 @@ import sys
 import time
 from pathlib import Path
 
-from . import paths, piptool
+from . import log, paths, piptool
+
+logger = log.get_logger("environment")
 
 __all__ = ["REFUSED", "compare", "forget", "record", "recorded", "restore", "restore_plan",
            "snapshot"]
@@ -132,9 +134,15 @@ def restore_plan(diff: dict) -> dict:
 
 def _pip(args: list[str], python: str = "") -> tuple[bool, str]:
     """Run one installer subcommand and return whether it succeeded, with trimmed output."""
+    logger.info("[Open Manager] environment: %s %s", args[0],
+                " ".join(one for one in args[1:] if not one.startswith("-")))
     try:
-        finished = piptool.run(python, args[0], list(args[1:]), timeout=TIMEOUT)
+        finished = piptool.run(
+            python, args[0], list(args[1:]), timeout=TIMEOUT,
+            echo=lambda line: logger.info("[Open Manager] environment: %s", line),
+        )
     except (OSError, subprocess.SubprocessError) as error:
+        logger.warning("[Open Manager] environment: %s did not run (%s)", args[0], error)
         return False, f"the installer could not be run ({type(error).__name__}: {error})"
     if finished is None:
         return False, piptool.describe(python)

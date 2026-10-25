@@ -1,15 +1,16 @@
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
-import { el, openUrl, badge, closeOn, stateRow, findingCard, toastHost, toastShut, toast, notify, confirmAction, chooseAction, openRowMenu, panel, countNote } from "./ui.mjs";
+import { el, badge, closeOn, stateRow, findingCard, toastHost, toastShut, toast, notify, confirmAction, chooseAction, openRowMenu, panel, countNote } from "./ui.mjs";
 import { scanThenFinish, openScanDialog } from "./packs.mjs";
 import { loadingBlock } from "./markdown.mjs";
-import { keysHeld, openAboutDialog, vtReady, vtRemaining, panelSetting } from "./settings.mjs";
+import { keysHeld, loadKeys, openAboutDialog, vtReady, vtRemaining, panelSetting } from "./settings.mjs";
 import { quickInstall } from "./pack-extras.mjs";
 import { countText, dayText } from "./results.mjs";
 import { refreshInstalledIfActive } from "./discovery.mjs";
 import { isRelease, updateInstalled, isHeld, toggleHold, isInstalledUpdatable, togglePack } from "./installed.mjs";
 import { sinceText, allowBanned, browseTopic } from "./registry.mjs";
 import { dlPost } from "./net.mjs";
+import { linkReport } from "./report-link.mjs";
 
 async function appendImpact(packId, version, slot, gate, policy, base) {
   const ticket = (slot._omTicket || 0) + 1;
@@ -129,7 +130,7 @@ function confirmInstall(packId, entry, change) {
 
     const head = el("div", "om-head");
     head.appendChild(el("div", "om-title", `Install ${packId} ${entry.version}`));
-    head.appendChild(badge(entry.status));
+    head.appendChild(linkReport(badge(entry.status), entry.status, packId, entry.version));
     dialog.appendChild(head);
 
     const body = el("div", "om-body");
@@ -1088,45 +1089,55 @@ function repoOwnerName(url) {
 }
 
 function makeStarButton(repository, stars) {
-  const button = el("button", "om-btn om-star");
-  button.appendChild(document.createTextNode(stars != null ? `★ ${stars.toLocaleString()}` : "☆ Star"));
-  button.title = "Star on GitHub";
-  button.onclick = () => starRepo(repository, button);
-  reflectStar(repository, button);
-  return button;
+  const slot = el("span", "om-star-slot");
+  const count = stars != null && Number.isFinite(Number(stars)) ? Number(stars).toLocaleString() : "";
+  const showCount = (why = "") => {
+    if (!count) { slot.replaceChildren(); return; }
+    const tally = el("span", "om-star-count", `★ ${count}`);
+    tally.title = why ? `GitHub stars\n${why}` : "GitHub stars";
+    slot.replaceChildren(tally);
+  };
+  showCount();
+  if (repoOwnerName(repository)) reflectStar(repository, slot, count, showCount);
+  return slot;
 }
 
-async function reflectStar(repository, button) {
-  if (!repoOwnerName(repository) || !keysHeld.github) return;
+async function reflectStar(repository, slot, count, showCount) {
+  if (!keysHeld.github) await loadKeys();
+  if (!keysHeld.github) return;
+  const refusal = (reason) => `${reason.charAt(0).toUpperCase()}${reason.slice(1)}`;
+  let answer = null;
   try {
-    const answer = await dlPost("/star", { repo: repository, action: "check" });
-    if (answer?.starred) {
-      button.classList.add("om-starred");
-      button.firstChild.textContent = "★ Starred";
-    }
+    answer = await dlPost("/star", { repo: repository, action: "check" });
   } catch {
+    answer = null;
   }
-}
-
-async function starRepo(repository, button) {
-  const parts = repoOwnerName(repository);
-  if (!parts) { if (repository) openUrl(repository); return; }
-  const openRepo = () =>
-    window.open(`https://github.com/${parts.owner}/${parts.repo}`, "_blank", "noopener,noreferrer");
-  if (!keysHeld.github) { openRepo(); return; }
-  const starred = button.classList.contains("om-starred");
-  const answer = await dlPost("/star",
-    { repo: repository, action: starred ? "unstar" : "star" }).catch((error) => ({
-      ok: false, reason: error.message,
-    }));
   if (!answer?.ok) {
-    notify("Could not star", `${answer?.reason || "GitHub refused"}. Opening the repository instead.`);
-    openRepo();
+    showCount(answer?.refused ? refusal(answer.reason) : "");
     return;
   }
-  button.classList.toggle("om-starred", !!answer.starred);
-  button.firstChild.textContent = answer.starred ? "★ Starred" : "☆ Star";
-  toast(answer.starred ? "Starred on GitHub." : "Unstarred on GitHub.", { kind: "ok" });
+  const button = el("button", "om-btn om-star");
+  const paint = (starred) => {
+    button.classList.toggle("om-starred", starred);
+    button.textContent = `${starred ? "★ Starred" : "☆ Star"}${count ? ` ${count}` : ""}`;
+    button.title = starred ? "Unstar on GitHub" : "Star on GitHub";
+  };
+  paint(!!answer.starred);
+  button.onclick = async () => {
+    button.disabled = true;
+    const starred = button.classList.contains("om-starred");
+    const done = await dlPost("/star", { repo: repository, action: starred ? "unstar" : "star" })
+      .catch((error) => ({ ok: false, reason: error.message }));
+    button.disabled = false;
+    if (!done?.ok) {
+      notify(starred ? "Not unstarred" : "Not starred", done?.reason || "GitHub refused.");
+      if (done?.refused) showCount(refusal(done.reason));
+      return;
+    }
+    paint(!!done.starred);
+    toast(done.starred ? "Starred on GitHub." : "Unstarred on GitHub.", { kind: "ok" });
+  };
+  slot.replaceChildren(button);
 }
 
 function tagChip(tag) {

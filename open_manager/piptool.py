@@ -6,7 +6,9 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from typing import Callable
 
 __all__ = ["available", "command", "describe", "forget", "kind", "run"]
 
@@ -119,7 +121,8 @@ def command(python: str, subcommand: str, args: list[str]) -> list[str] | None:
 
 
 def run(
-    python: str, subcommand: str, args: list[str], timeout: int = 600, cwd: str | None = None
+    python: str, subcommand: str, args: list[str], timeout: int = 600, cwd: str | None = None,
+    echo: Callable[[str], None] | None = None,
 ) -> subprocess.CompletedProcess | None:
     """Run one pip subcommand, or answer ``None`` where nothing can run it.
 
@@ -129,6 +132,8 @@ def run(
         args: Arguments after the subcommand.
         timeout: Seconds before the call is abandoned.
         cwd: Directory to run in.
+        echo: Called with each line of output as it arrives. Output is then one stream,
+            returned as ``stdout``.
 
     Returns:
         The finished process, or ``None``.
@@ -142,7 +147,48 @@ def run(
         return None
     surroundings = dict(os.environ)
     surroundings["PYTHONIOENCODING"] = "utf-8"
-    return subprocess.run(
-        argv, capture_output=True, timeout=timeout, check=False,
-        encoding="utf-8", errors="replace", cwd=cwd, env=surroundings,
+    if echo is None:
+        return subprocess.run(
+            argv, capture_output=True, timeout=timeout, check=False,
+            encoding="utf-8", errors="replace", cwd=cwd, env=surroundings,
+        )
+    return _streamed(argv, timeout, cwd, surroundings, echo)
+
+
+def _streamed(argv: list[str], timeout: int, cwd: str | None, env: dict,
+              echo: Callable[[str], None]) -> subprocess.CompletedProcess:
+    """Run a command, handing each line of its output to ``echo`` as it arrives.
+
+    Returns:
+        The finished process, its whole output in ``stdout``.
+
+    Raises:
+        OSError: Where the command could not be started.
+        subprocess.TimeoutExpired: Where it did not finish in time.
+    """
+    process = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+        encoding="utf-8", errors="replace", cwd=cwd, env=env,
     )
+    lines: list[str] = []
+
+    def pump() -> None:
+        for line in process.stdout:
+            lines.append(line)
+            text = line.rstrip()
+            if text:
+                try:
+                    echo(text)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        reader.join(5)
+        raise
+    reader.join(5)
+    return subprocess.CompletedProcess(argv, process.returncode, "".join(lines), "")

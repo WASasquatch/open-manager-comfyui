@@ -38,6 +38,53 @@ KNOWN_FORMATS = frozenset({
     ".pkl", ".npz", ".yaml", ".msgpack",
 })
 
+CONFIG_FORMATS = frozenset({".yaml"})
+
+
+def _identity(stat: os.stat_result) -> str:
+    """The physical file a stat describes, shared by every link, junction and hard link to it.
+
+    Returns:
+        ``device:inode``, or an empty string where the filesystem gives no inode.
+    """
+    return f"{stat.st_dev}:{stat.st_ino}" if stat.st_ino else ""
+
+
+def _identity_of(one: dict, look: bool) -> str:
+    """A listed file's physical identity, from the index or, with ``look``, from disk."""
+    held = one.get("id")
+    if isinstance(held, str) or not look:
+        return held or ""
+    try:
+        return _identity(os.stat(one["path"]))
+    except (OSError, KeyError):
+        return ""
+
+
+def _direct(path: str) -> bool:
+    """Whether a path reaches its file without passing through a link or junction."""
+    try:
+        return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.abspath(path))
+    except (OSError, ValueError):
+        return True
+
+
+def _distinct(members: list, look: bool = True) -> list:
+    """One row per physical file among the members, by its direct path where one is listed."""
+    kept: list = []
+    at: dict[str, int] = {}
+    for one in members:
+        identity = _identity_of(one, look)
+        if not identity:
+            kept.append(one)
+            continue
+        if identity not in at:
+            at[identity] = len(kept)
+            kept.append(one)
+        elif look and not _direct(kept[at[identity]]["path"]) and _direct(one["path"]):
+            kept[at[identity]] = one
+    return kept
+
 
 def _dir() -> Path:
     """Where the library's own files are kept."""
@@ -188,6 +235,7 @@ def index(refresh: bool = False) -> dict:
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
                     "format": suffix,
+                    "id": _identity(stat),
                 })
                 if len(files) >= MAX_FILES:
                     truncated = True
@@ -240,6 +288,7 @@ def _with_finished_downloads(held: dict) -> dict:
             "size": stat.st_size,
             "mtime": stat.st_mtime,
             "format": suffix,
+            "id": _identity(stat),
         })
     held["downloads_at"] = max(one["finished_at"] for one in fresh)
     _write("model_index.json", held)
@@ -286,11 +335,16 @@ def duplicates(level: str = "names") -> dict:
     files = index().get("files") or []
     buckets: dict[tuple, list] = {}
     for one in files:
+        if os.path.splitext(one["name"])[1].lower() in CONFIG_FORMATS:
+            continue
         buckets.setdefault((one["size"], one["name"].lower()), []).append(one)
 
     groups = []
     collisions = []
     for (size, _name), members in buckets.items():
+        if len(members) < 2:
+            continue
+        members = _distinct(members)
         if len(members) < 2:
             continue
         group = {
@@ -385,7 +439,7 @@ def storage(largest: int = 15) -> dict:
         "partials": sorted(partials, key=lambda one: -one["size"]),
         "partial_bytes": waste,
         "duplicate_bytes": duplicates("names").get("candidate_bytes", 0),
-        "total": sum(one["size"] for one in files),
+        "total": sum(one["size"] for one in _distinct(files, look=False)),
         "files": len(files),
     }
 

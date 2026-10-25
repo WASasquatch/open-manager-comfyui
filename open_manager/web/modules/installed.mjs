@@ -1,6 +1,7 @@
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
 import { el, toast, notify, chooseAction } from "./ui.mjs";
+import { linkReport } from "./report-link.mjs";
 import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, packName, installedMenu, enqueueInstall, install, byTrustedAuthor, reviewOf, reviewChip } from "./installs.mjs";
 import { openPack, openRepoPack } from "./packs.mjs";
 import { loadingBlock } from "./markdown.mjs";
@@ -362,7 +363,7 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
   }
   if (cost?.failed) meta.appendChild(el("span", "om-upd om-cost-failed", "import failed"));
   const review = reviewChip(pack.status);
-  if (review) meta.appendChild(review);
+  if (review) meta.appendChild(linkReport(review, pack.status, pack.registry_id, pack.version));
   if (updatable) meta.appendChild(el("span", "om-upd", `update → ${pack.latest}`));
   else if (selfUpdateTarget(pack)) {
     meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));

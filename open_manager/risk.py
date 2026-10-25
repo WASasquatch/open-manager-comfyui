@@ -130,16 +130,13 @@ _SCANNER_NOTE = (
 _STATUS_TEXT = {
     "flagged": (
         "caution",
-        "Flagged by the registry's automated scan",
-        "The registry marked this version flagged and publishes no reason, category or "
-        "report for it.",
+        "Flagged by the registry",
+        "The registry marked this version flagged.",
     ),
     "banned": (
         "critical",
         _BANNED_TITLE,
-        "The registry banned this version. Bans are meant for harmful versions and carry no "
-        "published reason, category or report.\n\n"
-        + _SCANNER_NOTE,
+        "The registry banned this version.",
     ),
     "deleted": (
         "caution",
@@ -154,6 +151,23 @@ _STATUS_TEXT = {
 }
 
 
+def _reason_lines(reason: dict) -> list[str]:
+    """Evidence lines for what the registry says about a version's status."""
+    lines = []
+    if reason.get("message"):
+        lines.append(f"reason: {reason['message']}")
+    for note in reason.get("notes") or ():
+        lines.append(f"earlier: {note}")
+    matches = int(reason.get("matches") or 0)
+    if matches:
+        kinds = ", ".join(f"{kind} ({count})" for kind, count in reason.get("kinds") or ())
+        lines.append(f"scan: {matches} match{'' if matches == 1 else 'es'}"
+                     + (f": {kinds}" if kinds else ""))
+    if reason.get("places"):
+        lines.append("first matches: " + ", ".join(reason["places"]))
+    return lines
+
+
 def assess_version(
     pack_id: str,
     version: str,
@@ -161,6 +175,7 @@ def assess_version(
     dependencies: Iterable[str] = (),
     deprecated: bool = False,
     compatibility: dict | None = None,
+    reason: dict | None = None,
 ) -> Assessment:
     """Everything worth saying about installing one published version.
 
@@ -172,6 +187,8 @@ def assess_version(
         deprecated: Whether the publisher marked the version deprecated.
         compatibility: The result of :func:`.compat.check` for this version, where the
             version declared anything.
+        reason: What the registry says about the version's status, as
+            :func:`.registry.fetch_status_details` answers it.
 
     Returns:
         An :class:`Assessment`.
@@ -192,12 +209,20 @@ def assess_version(
     known = _STATUS_TEXT.get(status)
     if known is not None:
         severity, title, detail = known
+        evidence = [f"registry status: {status}", f"version: {version}"]
+        if status in ("flagged", "banned"):
+            told = _reason_lines(reason or {})
+            evidence.extend(told)
+            if not told:
+                detail += " It gives no reason."
+            if status == "banned":
+                detail += "\n\n" + _SCANNER_NOTE
         findings.append(
             Finding(
                 severity=severity,
                 title=title,
                 detail=detail,
-                evidence=(f"registry status: {status}", f"version: {version}"),
+                evidence=tuple(evidence),
             )
         )
     elif status and status != "active":

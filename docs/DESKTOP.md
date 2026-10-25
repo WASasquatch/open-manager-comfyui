@@ -74,6 +74,7 @@ Open Manager → Windows → Taskbar along the bottom** on.
 | ComfyUI Settings | Every ComfyUI setting, in a window you can leave open | Start menu, ComfyUI |
 | Console | ComfyUI's console output, live, in colour | Start menu, ComfyUI |
 | Scratch | A pad for short notes | Start menu |
+| Registry Report | What the Comfy Registry says about a flagged or banned pack version, in plain words | Start menu, or a click on a flagged or banned label |
 | Attack of the Nodes | A game | Start menu, Games |
 | Image Viewer | Zoom, fit, rotate, crop, save | opened by what needs it |
 | Video Player | Video and audio | opened by what needs it |
@@ -96,6 +97,13 @@ preview: the node as the graph draws it, with its sockets named and coloured by 
 at their defaults, and its description. Double-click, Enter or **Add to graph** puts the node at
 the centre of the graph view, selects it and minimises Nodes; dragging drops it where it lands.
 Escape closes the preview, then clears the search.
+
+**Registry Report** opens from the flagged or banned label on a pack's versions, its install
+dialog and the Installed list, or from the Start menu with a pack id. It reads the registry's own
+record for the version: a one-line verdict, each reviewer and registry note from first to last
+with its category in plain words, and the automated scan grouped by what each match means, with
+the file, line and surrounding code of every match. **Raw** shows the record as the registry
+sent it.
 
 **Video Player** plays what it opens and stops at the end. **Loop** or **Play next** carries
 on instead, one at a time, and is remembered. Left and right arrows change file, except on the

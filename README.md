@@ -112,6 +112,10 @@ are set and by which variable.
 The value is the key itself: `set HF_TOKEN=hf_xxx` on Windows, `export HF_TOKEN=hf_xxx` on Linux
 and macOS, in the file that starts ComfyUI. See [Launch files](#launch-files).
 
+Starring needs a GitHub token that may read and change stars: a fine-grained token with the
+**Starring** account permission set to read and write, or a classic token with `public_repo`.
+Without one, a pack page shows its star count only.
+
 ---
 
 ## Packs

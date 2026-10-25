@@ -17,6 +17,8 @@ __all__ = [
     "RegistryError",
     "Resolution",
     "fetch_node",
+    "fetch_status_details",
+    "fetch_status_rows",
     "fetch_status_reasons",
     "fetch_versions",
     "install_target",
@@ -419,6 +421,95 @@ def _summarise_reason(raw: str) -> str:
     return f"{total} finding(s): {named}"
 
 
+_REASON_PLACES = 3
+
+_REASON_NOTES = 3
+
+
+def _scan_findings(value) -> list:
+    """The scan findings one status message holds, empty where it holds none."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _reason_detail(raw: str) -> dict:
+    """What the registry says about one version's status.
+
+    Args:
+        raw: The ``status_reason`` field as the registry sent it.
+
+    Returns:
+        ``{message, notes, matches, kinds, places}``: the registry's current reason, its
+        earlier notes, how many scan matches it lists, the commonest kinds as ``[kind, count]``
+        and the first files matched as ``file:line``. Empty where it says nothing.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return {"message": text[:400], "notes": [], "matches": 0, "kinds": [], "places": []}
+
+    message = ""
+    notes: list[str] = []
+    found: list = []
+    if isinstance(parsed, dict):
+        message = str(parsed.get("message") or "").strip()[:400]
+        history = parsed.get("statusHistory")
+        for entry in history if isinstance(history, list) else []:
+            said = entry.get("message") if isinstance(entry, dict) else None
+            listed = _scan_findings(said)
+            if listed:
+                found = listed
+            elif isinstance(said, str):
+                note = said.strip()[:400]
+                if note and note != message and note not in notes:
+                    notes.append(note)
+    else:
+        found = _scan_findings(parsed)
+
+    from . import registry_report
+
+    kinds: dict[str, int] = {}
+    places: list[str] = []
+    for item in found:
+        shape = registry_report.normal(item)
+        label = registry_report.SCAN_KINDS.get(shape["kind"], ("",))[0] or shape["rule"] \
+            or shape["kind"]
+        kinds[label] = kinds.get(label, 0) + 1
+        if shape["file"] and len(places) < _REASON_PLACES:
+            places.append(f"{shape['file']}:{shape['line']}" if shape["line"] else shape["file"])
+    if not (message or notes or found):
+        return {}
+    ordered = sorted(kinds.items(), key=lambda pair: (-pair[1], pair[0]))
+    return {
+        "message": message,
+        "notes": notes[-_REASON_NOTES:],
+        "matches": len(found),
+        "kinds": [list(pair) for pair in ordered[:_REASON_KINDS]],
+        "places": places,
+    }
+
+
+async def fetch_status_rows(node_id: str, session: aiohttp.ClientSession) -> list:
+    """Every version of a pack with the reason for its status, as the registry sent them."""
+    key = f"status-rows:{node_id}"
+    hit = _cached(key)
+    if hit is not None:
+        return hit
+    payload = await _get(
+        session, f"{BASE_URL}/nodes/{node_id}/versions?include_status_reason=true"
+    )
+    rows = payload if isinstance(payload, list) else payload.get("versions", [])
+    _cache[key] = (time.monotonic(), rows)
+    return rows
+
+
 async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> dict:
     """Why each version of a pack carries its status.
 
@@ -432,23 +523,38 @@ async def fetch_status_reasons(node_id: str, session: aiohttp.ClientSession) -> 
     Raises:
         RegistryError: Where the registry did not answer.
     """
-    key = f"reasons:{node_id}"
-    hit = _cached(key)
-    if hit is not None:
-        return hit
-
-    payload = await _get(
-        session, f"{BASE_URL}/nodes/{node_id}/versions?include_status_reason=true"
-    )
-    rows = payload if isinstance(payload, list) else payload.get("versions", [])
     reasons = {}
-    for row in rows:
+    for row in await fetch_status_rows(node_id, session):
         version = row.get("version", "")
         summary = _summarise_reason(row.get("status_reason", ""))
         if version and summary:
             reasons[version] = summary
-    _cache[key] = (time.monotonic(), reasons)
     return reasons
+
+
+async def fetch_status_details(node_id: str, session: aiohttp.ClientSession) -> dict:
+    """What the registry says about each version that is not plainly active.
+
+    Args:
+        node_id: Registry identifier.
+        session: Session the request runs on.
+
+    Returns:
+        ``{version: detail}`` as :func:`_reason_detail` answers, for versions it says
+        anything about.
+
+    Raises:
+        RegistryError: Where the registry did not answer.
+    """
+    details = {}
+    for row in await fetch_status_rows(node_id, session):
+        version = row.get("version", "")
+        if not version or _short_status(row.get("status", "")) == "active":
+            continue
+        detail = _reason_detail(row.get("status_reason", ""))
+        if detail:
+            details[version] = detail
+    return details
 
 
 _NODE_PAGE_CAP = 8

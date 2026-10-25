@@ -17,7 +17,9 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import paths, piptool
+from . import log, paths, piptool
+
+logger = log.get_logger("installer")
 
 __all__ = [
     "InstallResult",
@@ -369,6 +371,18 @@ def _requirements_in_archive(archive: Path) -> list[str]:
     return lines
 
 
+def _report(name: str, result: InstallResult) -> InstallResult:
+    """Say in ComfyUI's output how an install ended."""
+    if not result.ok:
+        logger.warning("[Open Manager] %s not installed: %s", name, result.reason)
+    elif result.pip_ran and not result.pip_ok:
+        logger.warning("[Open Manager] %s installed in %s; its requirements did not install",
+                       name, result.directory)
+    else:
+        logger.info("[Open Manager] %s installed in %s", name, result.directory)
+    return result
+
+
 def install_repo(
     repo_url: str,
     python: str = "",
@@ -390,6 +404,19 @@ def install_repo(
     Returns:
         An :class:`InstallResult`.
     """
+    logger.info("[Open Manager] installing %s%s", repo_url, f" at {ref}" if ref else "")
+    return _report(repo_url, _install_repo(repo_url, python, with_deps, ref, overwrite, policy))
+
+
+def _install_repo(
+    repo_url: str,
+    python: str,
+    with_deps: bool,
+    ref: str,
+    overwrite: bool,
+    policy: str,
+) -> InstallResult:
+    """The work of :func:`install_repo`."""
     match = _GITHUB_REPO.search(repo_url or "")
     if not match:
         return InstallResult(ok=False, reason="not a GitHub repository")
@@ -436,6 +463,8 @@ def install_repo(
         except RuntimeError as error:
             _remove_tree(target)
             return InstallResult(ok=False, reason=str(error))
+        logger.info("[Open Manager] %s: %d files from %s written to %s",
+                    repo, len(written), landed, target)
         (target / ".tracking").write_text("\n".join(written) + "\n", encoding="utf-8")
         (target / MARKER).write_text(
             json.dumps({"id": repo, "version": f"git:{landed}", "installed_at": time.time()}),
@@ -762,8 +791,12 @@ def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
         )
     if swapped:
         notes.append("Substituted by your overrides: " + "; ".join(swapped))
+    name = directory.name
+    for note in notes:
+        logger.info("[Open Manager] %s: %s", name, note)
     if not keep:
         said = "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
+        logger.info("[Open Manager] %s: no requirements to install", name)
         return {"ok": True, "output": said, "requirements": [], "errors": [],
                 "installer": piptool.kind(python)}
 
@@ -775,18 +808,28 @@ def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
                 "requirements": keep, "errors": [f"requirements could not be prepared ({error})"],
                 "installer": piptool.kind(python)}
 
+    logger.info("[Open Manager] %s: installing %d requirement%s with %s: %s", name, len(keep),
+                "" if len(keep) == 1 else "s", piptool.kind(python) or "pip", ", ".join(keep))
     try:
         finished = piptool.run(
-            python, "install", ["--no-input", "-r", str(filtered)], timeout=PIP_TIMEOUT
+            python, "install", ["--no-input", "-r", str(filtered)], timeout=PIP_TIMEOUT,
+            echo=lambda line: logger.info("[Open Manager] %s: %s", name, line),
         )
     except (OSError, subprocess.SubprocessError) as error:
         said = f"the installer could not be run ({type(error).__name__}: {error})"
+        logger.warning("[Open Manager] %s: %s", name, said)
         return {"ok": False, "output": said, "requirements": keep, "errors": [said],
                 "installer": piptool.kind(python)}
     if finished is None:
         said = piptool.describe(python)
+        logger.warning("[Open Manager] %s: %s", name, said)
         return {"ok": False, "output": said, "requirements": keep, "errors": [said],
                 "installer": "none"}
+    if finished.returncode == 0:
+        logger.info("[Open Manager] %s: requirements installed", name)
+    else:
+        logger.warning("[Open Manager] %s: requirements did not install (exit code %d)",
+                       name, finished.returncode)
     try:
         filtered.unlink()
     except OSError:
@@ -859,11 +902,14 @@ def uninstall(node_id: str) -> InstallResult:
         return InstallResult(ok=True, reason="was not installed")
     target = directory.resolve()
     if target == root or target.parent != root:
+        logger.warning("[Open Manager] %s not removed: it is outside custom_nodes", node_id)
         return InstallResult(ok=False, reason="refusing to remove outside custom_nodes")
     try:
         _remove_tree(target)
     except OSError as error:
+        logger.warning("[Open Manager] %s not removed: %s", target.name, error)
         return InstallResult(ok=False, directory=str(target), reason=f"removal failed: {error}")
+    logger.info("[Open Manager] removed %s", target)
     return InstallResult(ok=True, directory=str(target), restart_required=True)
 
 
@@ -973,6 +1019,21 @@ def install(
         An :class:`InstallResult`. Never raises for an expected failure; the reason travels
         in the result.
     """
+    logger.info("[Open Manager] installing %s %s", node_id, version)
+    return _report(node_id, _install(node_id, version, download_url, python, with_deps,
+                                     overwrite, policy))
+
+
+def _install(
+    node_id: str,
+    version: str,
+    download_url: str,
+    python: str,
+    with_deps: bool,
+    overwrite: bool,
+    policy: str,
+) -> InstallResult:
+    """The work of :func:`install`."""
     if not download_url:
         return InstallResult(ok=False, reason="the registry gave no download URL")
 
@@ -998,6 +1059,7 @@ def install(
     tmp = Path(tempfile.mkdtemp(prefix="open_manager_"))
     archive = tmp / "node.zip"
     try:
+        logger.info("[Open Manager] %s: downloading %s", node_id, download_url)
         _download(download_url, archive)
         target.mkdir(parents=True, exist_ok=True)
         try:
@@ -1005,6 +1067,7 @@ def install(
         except RuntimeError as error:
             _remove_tree(target)
             return InstallResult(ok=False, reason=str(error))
+        logger.info("[Open Manager] %s: %d files written to %s", node_id, len(written), target)
         (target / ".tracking").write_text("\n".join(written) + "\n", encoding="utf-8")
         (target / MARKER).write_text(
             json.dumps({"id": node_id, "version": version, "installed_at": time.time()}),
