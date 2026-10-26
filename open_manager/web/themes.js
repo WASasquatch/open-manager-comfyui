@@ -1360,11 +1360,9 @@ function stripVueNode(root) {
   root.style.removeProperty("--node-component-header-surface");
   root.style.removeProperty("--node-header");
   root.style.removeProperty("--component-node-background");
+  root.removeAttribute(VUE_WASH);
   const inner = vueInnerOf(root);
-  if (inner) {
-    inner.style.removeProperty("--component-node-background");
-    inner.style.removeProperty("background-color");
-  }
+  if (inner) inner.style.removeProperty("--component-node-background");
   clearVueFoot(root);
   const header = vueHeaderOf(root);
   if (header) {
@@ -1439,10 +1437,9 @@ function paintVueNode(root, extras) {
     root.style.setProperty("--node-component-header-surface", flat);
     root.style.setProperty("--node-header", flat);
     const inner = vueInnerOf(root);
-    if (inner) {
-      inner.style.setProperty("--component-node-background", wash);
-      inner.style.setProperty("background-color", "transparent", "important");
-    }
+    if (inner) inner.style.setProperty("--component-node-background", wash);
+    vueSheet();
+    root.setAttribute(VUE_WASH, "");
     const painted = vueBodyOf(root);
     if (painted) painted.style.setProperty("background-color", wash, "important");
     if (header && !header.style.backgroundImage) {
@@ -1457,11 +1454,9 @@ function paintVueNode(root, extras) {
     else paintVueFoot(root, header ? header.style.backgroundImage : "", contrastOn(flat));
   } else {
     root.style.removeProperty("--component-node-background");
+    root.removeAttribute(VUE_WASH);
     const inner = vueInnerOf(root);
-    if (inner) {
-      inner.style.removeProperty("--component-node-background");
-      inner.style.removeProperty("background-color");
-    }
+    if (inner) inner.style.removeProperty("--component-node-background");
     const painted = vueBodyOf(root);
     if (painted) painted.style.removeProperty("background-color");
     clearVueFoot(root);
@@ -1505,6 +1500,8 @@ function paintVueNode(root, extras) {
 const VUE_GLYPH_STYLE = "om-vue-title";
 const vueGlyphRules = new Map();
 
+const VUE_WASH = "data-om-wash";
+
 const VUE_TITLE_LINE = 16;
 
 function vueSheet() {
@@ -1515,7 +1512,8 @@ function vueSheet() {
   sheet.textContent = '.lg-node [data-testid="node-title"][data-om-icon]::before{'
     + 'content:"";flex:0 0 auto;width:var(--om-icon-w);height:var(--om-icon-h);'
     + 'background-image:var(--om-icon);background-repeat:no-repeat;'
-    + 'background-position:center;background-size:contain;}';
+    + 'background-position:center;background-size:contain;}'
+    + `.lg-node[${VUE_WASH}]>[data-testid="node-inner-wrapper"]{background-color:transparent !important;}`;
   document.head.appendChild(sheet);
   return sheet;
 }
