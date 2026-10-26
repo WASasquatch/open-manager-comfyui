@@ -115,9 +115,9 @@ function versionSwitch(installed, chosen) {
 }
 
 const INSTALL_POLICIES = [
-  ["new", "Skip anything that would change an installed package"],
-  ["upgrade", "Allow upgrades, skip downgrades"],
-  ["downgrade", "Allow downgrades, skip upgrades"],
+  ["new", "Leave packages others use as they are"],
+  ["upgrade", "Allow upgrades, keep packages others use from downgrading"],
+  ["downgrade", "Allow downgrades, keep packages others use from upgrading"],
   ["all", "Install everything the pack asks for"],
 ];
 

@@ -565,10 +565,11 @@ app.registerExtension({
       options: ["new", "upgrade", "downgrade", "all"],
       defaultValue: "new",
       tooltip: "The starting choice in the install dialog, which every install can change. "
-        + "'new' installs only what is not here yet and holds back any requirement that would "
-        + "replace an installed package. 'upgrade' allows upgrades and holds back downgrades, "
-        + "'downgrade' the reverse. 'all' installs exactly what the pack asks for. Held-back "
-        + "requirements are named in the install output.",
+        + "'new' holds back any requirement that would replace a package ComfyUI, an installed "
+        + "package or another pack uses. 'upgrade' allows upgrades and holds back downgrades of "
+        + "those, 'downgrade' the reverse. 'all' installs exactly what the pack asks for. A "
+        + "package only the pack itself uses changes as it asks under every choice. Held-back "
+        + "requirements are named before the install and in its issues.",
     },
     {
       id: "openManager.groupAlign",

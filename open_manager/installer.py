@@ -838,19 +838,100 @@ def _replacements(lines: list[str], python: str) -> dict[str, tuple[str, str]]:
     return found
 
 
+def _fold_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", str(name or "").strip().lower())
+
+
+def _who(users: list[str]) -> str:
+    names = sorted(set(users), key=lambda one: (one != "ComfyUI", one.lower()))
+    if len(names) <= 2:
+        return " and ".join(names)
+    return f"{names[0]}, {names[1]} and {len(names) - 2} more"
+
+
+def _users(python: str, skip: Path | None) -> dict | None:
+    """What in this install asks for each package.
+
+    Args:
+        python: Interpreter the install targets.
+        skip: The pack being installed, whose own requirements do not count.
+
+    Returns:
+        ``{folded name: [user, ...]}`` naming ComfyUI, installed distributions and other
+        packs, or None where the target is another interpreter, whose packages are not read.
+    """
+    if python and os.path.normcase(python) != os.path.normcase(sys.executable):
+        return None
+    from . import deps
+
+    found: dict = {}
+
+    def add(name: str, user: str) -> None:
+        key = _fold_name(name)
+        if key and user not in found.setdefault(key, []):
+            found[key].append(user)
+
+    for name in deps.comfyui_core():
+        add(name, "ComfyUI")
+    try:
+        from importlib.metadata import distributions
+        from packaging.requirements import Requirement
+
+        for dist in distributions():
+            owner = str(dist.metadata.get("Name") or "")
+            for raw in dist.requires or ():
+                try:
+                    wanted = Requirement(raw)
+                except Exception:
+                    continue
+                if wanted.marker is not None:
+                    try:
+                        if not wanted.marker.evaluate({"extra": ""}):
+                            continue
+                    except Exception:
+                        continue
+                if owner and _fold_name(owner) != _fold_name(wanted.name):
+                    add(wanted.name, owner)
+    except Exception:
+        return None
+    try:
+        own = skip.resolve() if skip is not None else None
+        packs = sorted(custom_nodes_dir().iterdir())
+    except (OSError, RuntimeError):
+        packs = []
+    for child in packs:
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        try:
+            if own is not None and child.resolve() == own:
+                continue
+        except OSError:
+            continue
+        label = child.name[: -len(".disabled")] if child.name.endswith(".disabled") else child.name
+        for line in _requirements(child):
+            name = _requirement_name(line)
+            if name:
+                add(name, label)
+    return found
+
+
 def plan_requirements(
     lines: list[str],
     policy: str = "all",
     python: str = "",
+    skip: Path | None = None,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     """What will be handed to pip, and what changed on the way.
 
     Args:
         lines: Requirement lines as the pack wrote them.
         policy: One of :data:`INSTALL_POLICIES`. ``all`` installs as the pack asks;
-            ``new`` refuses every requirement that would replace an installed package;
-            ``upgrade`` and ``downgrade`` refuse the opposite direction.
+            ``new`` refuses every requirement that would replace an installed package
+            that ComfyUI, an installed distribution or another pack uses; ``upgrade`` and
+            ``downgrade`` refuse the opposite direction. A package nothing else uses changes
+            as the pack asks under every policy.
         python: Interpreter the install targets, for reading what is installed.
+        skip: The pack being installed, whose own requirements do not make a package used.
 
     Returns:
         ``(to_install, held_back, substituted, redirects)``. ``held_back`` names the
@@ -862,6 +943,7 @@ def plan_requirements(
     overrides = pip_overrides()
     chosen = install_policy(policy) if policy else "all"
     replacing = _replacements(lines, python) if chosen != "all" else {}
+    users: dict | None | bool = False
     keep: list[str] = []
     held: list[str] = []
     swapped: list[str] = []
@@ -881,11 +963,16 @@ def plan_requirements(
             continue
         moved = replacing.get(line.strip()) or replacing.get(line)
         if moved and _policy_holds(chosen, moved[0]):
-            way = {"downgrade": "would downgrade", "upgrade": "would upgrade"}.get(
-                moved[0], "would replace"
-            )
-            held.append(f"{line.strip()} ({way} {name or 'it'} {moved[1]})")
-            continue
+            if users is False:
+                users = _users(python, skip)
+            who = None if users is None else users.get(_fold_name(name), [])
+            if who is None or who:
+                way = {"downgrade": "would downgrade", "upgrade": "would upgrade"}.get(
+                    moved[0], "would replace"
+                )
+                using = f", which {_who(who)} {'uses' if len(who) == 1 else 'use'}" if who else ""
+                held.append(f"{line.strip()} ({way} {name or 'it'} {moved[1]}{using})")
+                continue
         keep.append(line)
     return keep, held, swapped, redirects
 
@@ -924,7 +1011,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
         with its reason.
     """
     keep, held, swapped, redirects = plan_requirements(
-        _requirements(directory) if lines is None else list(lines), policy, python
+        _requirements(directory) if lines is None else list(lines), policy, python, directory
     )
     refused = [line for line in held if " (would " in line]
     notes = []

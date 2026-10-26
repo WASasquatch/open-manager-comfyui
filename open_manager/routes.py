@@ -629,12 +629,14 @@ def _installable(status: str, allowed: bool = False) -> tuple[bool, str]:
     return True, ""
 
 
-async def _impact_report(lines: list[str], policy: str) -> dict:
+async def _impact_report(lines: list[str], policy: str, skip=None) -> dict:
     """What installing some requirement lines would change here, without installing them.
 
     Args:
         lines: Requirement lines as the pack writes them.
         policy: An install policy, or empty to judge the lines as written.
+        skip: The installed copy of the pack, whose own requirements do not make a package
+            used by something else.
 
     Returns:
         ``{held, held_findings, checked, failure, additive_only, additions, replacements,
@@ -646,7 +648,7 @@ async def _impact_report(lines: list[str], policy: str) -> dict:
     held: list[str] = []
     if policy:
         lines, held, _swapped, redirects = await asyncio.to_thread(
-            installer.plan_requirements, asked, installer.install_policy(policy), ""
+            installer.plan_requirements, asked, installer.install_policy(policy), "", skip
         )
         held = held + redirects
     report = await asyncio.to_thread(impact.analyse, lines, "")
@@ -2761,7 +2763,8 @@ def register_routes() -> None:
                 lines = await asyncio.to_thread(installer.archive_requirements, entry.download_url)
             except RuntimeError:
                 pass
-        report = await _impact_report(lines, policy)
+        placed = await asyncio.to_thread(installer.resolve_install_dir, node_id)
+        report = await _impact_report(lines, policy, placed)
         return web.json_response({"pack": node_id, "version": version, **report})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/optional-impact")
@@ -2778,7 +2781,7 @@ def register_routes() -> None:
         lines, used = await asyncio.to_thread(
             optional_groups.lines_for, directory, [str(name) for name in names[:64]]
         )
-        report = await _impact_report(lines, str((body or {}).get("policy") or ""))
+        report = await _impact_report(lines, str((body or {}).get("policy") or ""), directory)
         return web.json_response({"ok": True, "pack": pack_id, "groups": used, **report})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install")
