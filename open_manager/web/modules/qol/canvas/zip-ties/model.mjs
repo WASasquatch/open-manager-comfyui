@@ -10,6 +10,14 @@ const PAD = 4;
 
 const SPLINE_MODE = 2;
 
+const LINEAR_MODE = 1;
+
+const STRAIGHT_MODE = 0;
+
+const LINEAR_LEAD = 15;
+
+const STRAIGHT_LEAD = 10;
+
 const CENTER = 5;
 
 const DIRECTIONS = { 1: [0, -1], 2: [0, 1], 3: [-1, 0], 4: [1, 0] };
@@ -315,6 +323,15 @@ function nudge(point, direction, reach) {
 
 function polyline(mode, part) {
   const { a, b } = part;
+  if (mode === LINEAR_MODE) {
+    return [a, nudge(a, part.sd || 4, LINEAR_LEAD), nudge(b, part.ed || 3, LINEAR_LEAD), b];
+  }
+  if (mode === STRAIGHT_MODE) {
+    const out = nudge(a, part.sd || 4, STRAIGHT_LEAD);
+    const into = nudge(b, part.ed || 3, STRAIGHT_LEAD);
+    const middle = (out[0] + into[0]) / 2;
+    return [a, out, [middle, out[1]], [middle, into[1]], into, b];
+  }
   if (mode !== undefined && mode !== SPLINE_MODE) return [a, b];
   const reach = Math.hypot(b[0] - a[0], b[1] - a[1]) * SPLINE;
   const c0 = part.startControl

@@ -267,6 +267,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Nodes 2.0 widgets on the classic canvas | On | Curves, image compare and crop, video trim and crop, bounding boxes, colour palettes, the resolution preview and LoRA stacks work on the classic canvas, also when promoted to a subgraph. The painter, the compositor and light info show ComfyUI's own editors there. Stands down when [ComfyUI-Nodes2Classic](https://github.com/Nynxz/ComfyUI-Nodes2Classic) is installed |
 | Self-drawn widgets keep their size when zoomed | On | On Nodes 2.0, a widget that draws itself, such as a section header, draws at its node's width when it appears while zoomed in or out |
 | Panels fit their node and scroll | On | On Nodes 2.0, a panel widget that sets its own height, such as a value readout, opens at that height, grows and shrinks with its node, and scrolls |
+| Node error and Enter buttons in the title bar | On | On Nodes 2.0, the Error, Enter subgraph and advanced inputs buttons sit in the node's title bar in place of tabs hanging below the node. A node left with room for the tab shrinks to its content once |
 | Combo lists use the room on screen | On | On Nodes 2.0, a combo's list grows into the space on screen in place of about seven options |
 | Combo lists open folders as submenus | On | On Nodes 2.0, a list of files kept in folders, such as LoRAs, shows each folder as a submenu. Typing in its search box searches every file |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |

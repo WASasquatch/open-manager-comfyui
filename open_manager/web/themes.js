@@ -1326,6 +1326,35 @@ function vueInnerOf(root) {
   return root.querySelector("[data-testid='node-inner-wrapper']");
 }
 
+const VUE_TABS = "button[data-testid='subgraph-enter-button'], "
+  + "button[data-testid='advanced-inputs-button']";
+
+const VUE_FOOT_TUCK = "1.25rem";
+
+function vueFootOf(root) {
+  const tab = root.querySelector(`${VUE_TABS}, button[class*="bg-destructive"]`);
+  const foot = tab?.parentElement;
+  return foot && foot.parentElement === root ? foot : null;
+}
+
+function clearVueFoot(root) {
+  for (const tab of root.querySelectorAll(VUE_TABS)) {
+    tab.style.backgroundImage = "";
+    tab.style.removeProperty("color");
+  }
+  const foot = vueFootOf(root);
+  if (foot) foot.style.removeProperty("clip-path");
+}
+
+function paintVueFoot(root, band, ink) {
+  for (const tab of root.querySelectorAll(VUE_TABS)) {
+    tab.style.backgroundImage = band;
+    tab.style.setProperty("color", ink);
+  }
+  const foot = vueFootOf(root);
+  if (foot) foot.style.setProperty("clip-path", `inset(${VUE_FOOT_TUCK} 0 0 0)`);
+}
+
 function stripVueNode(root) {
   stripOmNode(root, vueHeaderOf(root));
   root.style.removeProperty("--node-component-header-surface");
@@ -1336,9 +1365,7 @@ function stripVueNode(root) {
     inner.style.removeProperty("--component-node-background");
     inner.style.removeProperty("background-color");
   }
-  for (const part of root.querySelectorAll('[class*="footer"]')) {
-    part.style.backgroundImage = "";
-  }
+  clearVueFoot(root);
   const header = vueHeaderOf(root);
   if (header) {
     header.style.removeProperty("--node-component-slot-text");
@@ -1406,9 +1433,11 @@ function paintVueNode(root, extras) {
   if (washable) {
     const [red, green, blue] = channels(asRendered(bodyColour(node)));
     const wash = `rgba(${red},${green},${blue},${solidity})`;
+    const flat = shown
+      || asRendered(node.color || window.LiteGraph?.NODE_DEFAULT_COLOR || "#333333");
     root.style.setProperty("--component-node-background", wash);
-    root.style.setProperty("--node-component-header-surface", "transparent");
-    root.style.setProperty("--node-header", "transparent");
+    root.style.setProperty("--node-component-header-surface", flat);
+    root.style.setProperty("--node-header", flat);
     const inner = vueInnerOf(root);
     if (inner) {
       inner.style.setProperty("--component-node-background", wash);
@@ -1417,14 +1446,15 @@ function paintVueNode(root, extras) {
     const painted = vueBodyOf(root);
     if (painted) painted.style.setProperty("background-color", wash, "important");
     if (header && !header.style.backgroundImage) {
-      const flat = shown
-        || asRendered(node.color || window.LiteGraph?.NODE_DEFAULT_COLOR || "#333333");
       header.style.backgroundImage = `linear-gradient(${flat}, ${flat})`;
     }
-    const band = header ? header.style.backgroundImage : "";
-    for (const part of root.querySelectorAll('[class*="footer"]')) {
-      part.style.backgroundImage = band;
+    if (header && !shown) {
+      header.style.setProperty("--node-component-slot-text", contrastOn(flat));
+      if (om) header.style.removeProperty("color");
+      else header.style.setProperty("color", contrastOn(flat));
     }
+    if (om) clearVueFoot(root);
+    else paintVueFoot(root, header ? header.style.backgroundImage : "", contrastOn(flat));
   } else {
     root.style.removeProperty("--component-node-background");
     const inner = vueInnerOf(root);
@@ -1434,6 +1464,7 @@ function paintVueNode(root, extras) {
     }
     const painted = vueBodyOf(root);
     if (painted) painted.style.removeProperty("background-color");
+    clearVueFoot(root);
   }
 
   const shade = facetFor(extras, node, "shadow");
