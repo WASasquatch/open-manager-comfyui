@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -61,6 +63,7 @@ class InstallResult:
         pip_requirements: The requirement lines pip was actually given, after anything held
             back or substituted.
         pip_errors: The lines of pip's output that say what went wrong.
+        pip_held: The requirements the install policy refused, each with its reason.
         installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
         optional_unseen: Optional groups the pack declares that the user has not been offered.
@@ -77,6 +80,7 @@ class InstallResult:
     pip_output: str = ""
     pip_requirements: tuple[str, ...] = ()
     pip_errors: tuple[str, ...] = ()
+    pip_held: tuple[str, ...] = ()
     installer: str = ""
     restart_required: bool = False
     optional_unseen: tuple[str, ...] = ()
@@ -94,6 +98,7 @@ class InstallResult:
             "pip_output": self.pip_output,
             "pip_requirements": list(self.pip_requirements),
             "pip_errors": list(self.pip_errors),
+            "pip_held": list(self.pip_held),
             "installer": self.installer,
             "restart_required": self.restart_required,
             "optional_unseen": list(self.optional_unseen),
@@ -208,6 +213,94 @@ def resolve_install_dir(node_id: str) -> Path | None:
         if _norm(child.name) == want or _norm(_pyproject_name(child)) == want:
             return child
     return None
+
+
+ARCHIVE_KEEP = 3600
+
+_kept_archives: dict = {}
+
+_archive_lock = threading.Lock()
+
+
+def _archive_folder() -> Path:
+    folder = Path(tempfile.gettempdir()) / "open_manager_archives"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _prune_archives() -> None:
+    """Forget and delete archives kept longer than :data:`ARCHIVE_KEEP`. Called under the lock."""
+    now = time.time()
+    for url, (path, at) in list(_kept_archives.items()):
+        if now - at > ARCHIVE_KEEP or not path.is_file():
+            _kept_archives.pop(url, None)
+    kept = {path for path, _at in _kept_archives.values()}
+    try:
+        for one in _archive_folder().iterdir():
+            if one not in kept and now - one.stat().st_mtime > ARCHIVE_KEEP:
+                one.unlink()
+    except OSError:
+        pass
+
+
+def fetch_archive(url: str) -> Path:
+    """A registry archive on disk, downloaded once and kept for the install that follows.
+
+    Args:
+        url: Artifact URL.
+
+    Returns:
+        The archive's path.
+
+    Raises:
+        RuntimeError: Where it could not be downloaded.
+    """
+    with _archive_lock:
+        _prune_archives()
+        held = _kept_archives.get(url)
+        if held and held[0].is_file():
+            return held[0]
+    path = _archive_folder() / (hashlib.sha256(url.encode("utf-8")).hexdigest()[:32] + ".zip")
+    partial = path.with_name(path.name + ".part")
+    _download(url, partial)
+    os.replace(partial, path)
+    with _archive_lock:
+        _kept_archives[url] = (path, time.time())
+    return path
+
+
+def _take_archive(url: str) -> Path | None:
+    """The archive :func:`fetch_archive` kept for a URL, handed over and forgotten."""
+    with _archive_lock:
+        held = _kept_archives.pop(url, None)
+    if held and held[0].is_file() and time.time() - held[1] <= ARCHIVE_KEEP:
+        return held[0]
+    return None
+
+
+def archive_requirements(url: str) -> list[str]:
+    """The requirement lines installing a registry archive would hand to pip.
+
+    Args:
+        url: Artifact URL.
+
+    Returns:
+        The non-comment lines of the ``requirements.txt`` at the archive's root, as
+        :func:`_requirements` reads them once the archive is placed.
+
+    Raises:
+        RuntimeError: Where the archive could not be downloaded or read.
+    """
+    path = fetch_archive(url)
+    try:
+        with zipfile.ZipFile(path) as zipped:
+            name = next((one for one in zipped.namelist()
+                         if one.replace("\\", "/").lstrip("./") == "requirements.txt"), "")
+            body = zipped.read(name).decode("utf-8", errors="replace") if name else ""
+    except (OSError, KeyError, zipfile.BadZipFile) as error:
+        raise RuntimeError(f"the archive could not be read ({error})") from error
+    return [line.strip() for line in body.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
 
 
 def _download(url: str, target: Path) -> None:
@@ -488,6 +581,7 @@ def _install_repo(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
+        result.pip_held = tuple(_ran.get("held", ()))
     return _optional_after(result, target)
 
 
@@ -824,13 +918,15 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
         label: What the lines are, as the log names them.
 
     Returns:
-        ``{ok, output, requirements, errors, installer}``. ``output`` names what was held
-        back or substituted. ``errors`` is what pip said went wrong. ``installer`` is
-        ``pip``, ``uv`` or ``none``.
+        ``{ok, output, requirements, errors, installer, held}``. ``output`` names what was
+        held back or substituted. ``errors`` is what pip said went wrong. ``installer`` is
+        ``pip``, ``uv`` or ``none``. ``held`` names the requirements the policy refused, each
+        with its reason.
     """
     keep, held, swapped, redirects = plan_requirements(
         _requirements(directory) if lines is None else list(lines), policy, python
     )
+    refused = [line for line in held if " (would " in line]
     notes = []
     if held:
         notes.append("Held back to protect the running install: " + ", ".join(held))
@@ -848,7 +944,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
         said = "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
         logger.info("[Open Manager] %s: no %s to install", name, label)
         return {"ok": True, "output": said, "requirements": [], "errors": [],
-                "installer": piptool.kind(python)}
+                "installer": piptool.kind(python), "held": refused}
 
     filtered = directory / ".open_manager_requirements.txt"
     try:
@@ -856,7 +952,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
     except OSError as error:
         return {"ok": False, "output": f"requirements could not be prepared ({error})",
                 "requirements": keep, "errors": [f"requirements could not be prepared ({error})"],
-                "installer": piptool.kind(python)}
+                "installer": piptool.kind(python), "held": refused}
 
     logger.info("[Open Manager] %s: installing %d requirement%s with %s: %s", name, len(keep),
                 "" if len(keep) == 1 else "s", piptool.kind(python) or "pip", ", ".join(keep))
@@ -869,12 +965,12 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
         said = f"the installer could not be run ({type(error).__name__}: {error})"
         logger.warning("[Open Manager] %s: %s", name, said)
         return {"ok": False, "output": said, "requirements": keep, "errors": [said],
-                "installer": piptool.kind(python)}
+                "installer": piptool.kind(python), "held": refused}
     if finished is None:
         said = piptool.describe(python)
         logger.warning("[Open Manager] %s: %s", name, said)
         return {"ok": False, "output": said, "requirements": keep, "errors": [said],
-                "installer": "none"}
+                "installer": "none", "held": refused}
     if finished.returncode == 0:
         logger.info("[Open Manager] %s: %s installed", name, label)
     else:
@@ -894,6 +990,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
         "requirements": keep,
         "errors": list(pip_trouble(output)),
         "installer": piptool.kind(python),
+        "held": refused,
     }
 
 
@@ -1109,8 +1206,14 @@ def _install(
     tmp = Path(tempfile.mkdtemp(prefix="open_manager_"))
     archive = tmp / "node.zip"
     try:
-        logger.info("[Open Manager] %s: downloading %s", node_id, download_url)
-        _download(download_url, archive)
+        kept = _take_archive(download_url)
+        if kept is not None:
+            logger.info("[Open Manager] %s: using %s, downloaded for the review", node_id,
+                        download_url)
+            shutil.move(str(kept), str(archive))
+        else:
+            logger.info("[Open Manager] %s: downloading %s", node_id, download_url)
+            _download(download_url, archive)
         target.mkdir(parents=True, exist_ok=True)
         try:
             written = _extract(archive, target)
@@ -1138,4 +1241,5 @@ def _install(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
+        result.pip_held = tuple(_ran.get("held", ()))
     return _optional_after(result, target)

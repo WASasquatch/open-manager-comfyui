@@ -333,9 +333,10 @@ The registry address is `BASE_URL` in `open_manager/registry.py`, and `BASE` in
 ### Requirements
 
 `torch`, `torchaudio`, `torchsde` and `torchvision` are never installed from a pack's
-requirements: they carry the build your ComfyUI was set up with. Anything held back is named
-in the install output. To substitute a package, map it in
-`user/open_manager/pip_overrides.json`:
+requirements: they carry the build your ComfyUI was set up with. The check before an install
+reads the `requirements.txt` the install hands to pip. Anything held back, by that rule or by
+the install policy, is named there and in the install's issues. To substitute a package, map
+it in `user/open_manager/pip_overrides.json`:
 
 ```json
 { "opencv-python": "opencv-python-headless>=4.9" }

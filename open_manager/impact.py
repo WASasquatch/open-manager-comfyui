@@ -217,10 +217,7 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
 
     report, skipped = _resolve(interpreter, wanted)
     if skipped:
-        unresolved = list(unresolved) + [
-            f"{name} (publishes no wheel, so it was left out of this preview)"
-            for name in skipped
-        ]
+        unresolved = list(unresolved) + [f"{name}{SOURCE_ONLY}" for name in skipped]
 
     if isinstance(report, str):
         return Impact(failure=report, checked=True, unresolved=tuple(unresolved))
@@ -278,6 +275,8 @@ def _resolvable(requirements: Sequence[str]) -> tuple[list[str], list[str]]:
             unresolved.append(line)
     return resolvable, unresolved
 
+
+SOURCE_ONLY = " (publishes no wheel, so it was left out of this preview)"
 
 _NO_WHEEL = re.compile(
     r"No matching distribution found for ([A-Za-z0-9][A-Za-z0-9._-]*)"
@@ -382,15 +381,27 @@ def findings_from(impact: Impact) -> list[dict]:
         Finding dictionaries, most serious first, shaped for :mod:`.risk`.
     """
     found: list[dict] = []
-    if impact.unresolved:
+    built = [line[: -len(SOURCE_ONLY)] for line in impact.unresolved if line.endswith(SOURCE_ONLY)]
+    other = [line for line in impact.unresolved if not line.endswith(SOURCE_ONLY)]
+    if built:
         found.append(
             {
                 "severity": "caution",
-                "title": f"{len(impact.unresolved)} requirement(s) not assessed",
+                "title": f"{len(built)} requirement(s) build from source",
+                "detail": "They publish no wheel, so installing them runs their own build code, "
+                          "and this preview cannot say which versions they bring.",
+                "evidence": tuple(built[:8]),
+            }
+        )
+    if other:
+        found.append(
+            {
+                "severity": "caution",
+                "title": f"{len(other)} requirement(s) not assessed",
                 "detail": "These name a URL, a repository or a path, or set a pip option. "
                           "They are installed as written if you continue, apart from any "
                           "option Open Manager holds back.",
-                "evidence": tuple(impact.unresolved[:8]),
+                "evidence": tuple(other[:8]),
             }
         )
     if impact.failure:

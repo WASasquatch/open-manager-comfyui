@@ -42,11 +42,9 @@ async function paintImpact(slot, gate, base, fetchReport) {
   if (slot._omTicket !== ticket) return;
 
   slot.replaceChildren();
-  if (report.additive_only) {
-    slot.appendChild(stateRow("No dependency changes"));
-  } else {
-    for (const finding of report.findings || []) slot.appendChild(findingCard(finding));
-  }
+  const findings = [...(report.held_findings || []), ...(report.findings || [])];
+  if (!findings.length) slot.appendChild(stateRow("No dependency changes"));
+  for (const finding of findings) slot.appendChild(findingCard(finding));
   if (report.held?.length) slot.appendChild(heldList(report.held));
   if (report.dependencies?.length) slot.appendChild(dependencyList(report.dependencies));
   const replacements = report.replacements || [];
@@ -516,6 +514,7 @@ async function runInstallQueue() {
   const progress = toast("", { sticky: true });
   let done = 0;
   const issues = [];
+  const heldNotes = [];
   while (installQueue.length) {
     const job = installQueue.shift();
     done += 1;
@@ -557,6 +556,9 @@ async function runInstallQueue() {
         issues.push(`${job.name}: ${first || "requirements did not install cleanly"}`);
         failures.push({ job, result, summary });
       }
+      if (result.pip_held?.length) {
+        heldNotes.push(`${job.name}: held back by the install policy: ${result.pip_held.join(", ")}`);
+      }
       if (result.optional_unseen?.length || result.optional_pending?.length) {
         optionalOffers.push({ packId: job.packId, name: job.name,
                               policy: job.policy || installPolicyDefault() });
@@ -580,9 +582,10 @@ async function runInstallQueue() {
   for (const offer of restoreOffers) {
     await offerRestore(offer.id, offer.name).catch(() => {});
   }
-  if (issues.length) {
-    progress.settle(`Finished with ${issues.length} issue(s).`, "warn", 9000);
-    notify("Install issues", issues.join("\n"));
+  const told = [...issues, ...heldNotes];
+  if (told.length) {
+    progress.settle(`Finished with ${told.length} issue(s).`, "warn", 9000);
+    notify("Install issues", told.join("\n"));
   } else {
     progress.settle(`${done} pack(s) installed.`, "ok", 6000);
   }

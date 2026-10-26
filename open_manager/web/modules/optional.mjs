@@ -205,7 +205,12 @@ async function installGroups(packId, name, groups, policy) {
     result = { ok: false, output: error.message, errors: [error.message], requirements: [] };
   }
   if (result.ok) {
-    progress.settle(`${name}: ${what} installed.`, "ok", 6000);
+    if (result.held?.length) {
+      progress.settle(`${name}: ${what} installed. Held back by the install policy: `
+        + `${result.held.join(", ")}`, "warn", 12000);
+    } else {
+      progress.settle(`${name}: ${what} installed.`, "ok", 6000);
+    }
     if (result.restart_required) remindRestart();
     return result;
   }

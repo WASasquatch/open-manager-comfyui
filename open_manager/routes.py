@@ -637,8 +637,10 @@ async def _impact_report(lines: list[str], policy: str) -> dict:
         policy: An install policy, or empty to judge the lines as written.
 
     Returns:
-        ``{held, checked, failure, additive_only, additions, replacements, findings,
-        dependencies}``, as the install confirmation draws them.
+        ``{held, held_findings, checked, failure, additive_only, additions, replacements,
+        findings, dependencies}``, as the install confirmation draws them.
+        ``held_findings`` names each requirement the policy refuses that what is installed
+        does not meet.
     """
     asked = list(lines)
     held: list[str] = []
@@ -648,7 +650,25 @@ async def _impact_report(lines: list[str], policy: str) -> dict:
         )
         held = held + redirects
     report = await asyncio.to_thread(impact.analyse, lines, "")
+    dependencies = deps.check(asked)
+    by_raw = {item.get("raw", ""): item for item in dependencies}
+    unmet = []
+    for line in held:
+        if " (would " not in line:
+            continue
+        raw = line.split(" (would ", 1)[0]
+        item = by_raw.get(raw)
+        if item and item.get("status") == "conflict":
+            unmet.append({
+                "severity": "caution",
+                "title": f"{raw} held back by the install policy",
+                "detail": f"{item.get('name', raw)} {item.get('installed', '')} stays installed, "
+                          "which this requirement does not accept, so the pack may not load.",
+                "evidence": [],
+                "reference": "",
+            })
     return {
+        "held_findings": unmet,
         "held": held,
         "checked": report.checked,
         "failure": report.failure,
@@ -675,7 +695,7 @@ async def _impact_report(lines: list[str], policy: str) -> dict:
             }
             for found in impact.findings_from(report)
         ],
-        "dependencies": deps.check(asked),
+        "dependencies": dependencies,
     }
 
 
@@ -1723,6 +1743,7 @@ def register_routes() -> None:
             "output": ran["output"],
             "requirements": ran["requirements"],
             "errors": ran["errors"],
+            "held": ran.get("held", []),
             "installer": ran.get("installer", ""),
             "environment": diff,
             "environment_id": record,
@@ -2734,7 +2755,13 @@ def register_routes() -> None:
         if entry is None:
             return web.json_response({"error": f"no version {version}"}, status=404)
 
-        report = await _impact_report(list(entry.dependencies), policy)
+        lines = list(entry.dependencies)
+        if entry.download_url:
+            try:
+                lines = await asyncio.to_thread(installer.archive_requirements, entry.download_url)
+            except RuntimeError:
+                pass
+        report = await _impact_report(lines, policy)
         return web.json_response({"pack": node_id, "version": version, **report})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/optional-impact")
