@@ -20,8 +20,7 @@ const DAMP = 0.982;
 const ITERATIONS = 10;
 const CALM = 0.02;
 const CALM_STEPS = 24;
-const MATCH = 60;
-const FORGET_MS = 4000;
+const LEAP = 400;
 const MOVED = 0.01;
 
 const ropes = new WeakMap();
@@ -171,41 +170,49 @@ function advance(rope, now) {
   }
 }
 
-function pick(list, ax, ay, bx, by, now) {
-  let best = null;
-  let bestScore = MATCH;
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const rope = list[i];
-    if (now - rope.seen > FORGET_MS) {
-      list.splice(i, 1);
-      continue;
-    }
-    const score = Math.hypot(rope.ax - ax, rope.ay - ay) + Math.hypot(rope.bx - bx, rope.by - by);
-    if (score < bestScore) {
-      bestScore = score;
-      best = rope;
-    }
+function slotOf(key, frame) {
+  let held = ropes.get(key);
+  if (!held) {
+    held = { list: [], frame, next: 0 };
+    ropes.set(key, held);
   }
-  return best;
+  if (held.frame !== frame) {
+    if (held.next && held.list.length > held.next) held.list.length = held.next;
+    held.frame = frame;
+    held.next = 0;
+  }
+  const index = held.next;
+  held.next += 1;
+  return { list: held.list, index };
 }
 
-export function ropeTrack(owner, a, b, sd, ed, sc, ec, now, live) {
-  const key = owner && typeof owner === "object" ? owner : DRAG;
-  let list = ropes.get(key);
-  if (!list) {
-    list = [];
-    ropes.set(key, list);
+function carry(rope, ax, ay, bx, by) {
+  const leap = Math.max(Math.hypot(ax - rope.ax, ay - rope.ay), Math.hypot(bx - rope.bx, by - rope.by));
+  if (leap < LEAP) return;
+  const dx = (ax - rope.ax + bx - rope.bx) / 2;
+  const dy = (ay - rope.ay + by - rope.by) / 2;
+  for (let i = 0; i < rope.n; i += 1) {
+    rope.x[i] += dx;
+    rope.y[i] += dy;
+    rope.px[i] += dx;
+    rope.py[i] += dy;
   }
+}
+
+export function ropeTrack(owner, a, b, sd, ed, sc, ec, now, live, frame) {
+  const key = owner && typeof owner === "object" ? owner : DRAG;
+  const { list, index } = slotOf(key, frame);
   const [ax, ay] = lead(a, sd, sc);
   const [bx, by] = lead(b, ed, ec);
-  let rope = pick(list, ax, ay, bx, by, now);
+  let rope = list[index];
   const span = Math.hypot(bx - ax, by - ay);
   if (!rope) {
     rope = make(countFor(span));
     Object.assign(rope, { ax, ay, bx, by, seen: now, last: now });
     hang(rope);
-    list.push(rope);
+    list[index] = rope;
   }
+  carry(rope, ax, ay, bx, by);
   const shifted = Math.abs(rope.ax - ax) > MOVED || Math.abs(rope.ay - ay) > MOVED
     || Math.abs(rope.bx - bx) > MOVED || Math.abs(rope.by - by) > MOVED;
   rope.ax = ax;
@@ -215,7 +222,6 @@ export function ropeTrack(owner, a, b, sd, ed, sc, ec, now, live) {
   rope.seen = now;
   const wanted = countFor(span);
   if (Math.abs(wanted - rope.n) > Math.max(2, rope.n * 0.3)) {
-    const index = list.indexOf(rope);
     rope = resample(rope, wanted);
     list[index] = rope;
     rope.still = false;

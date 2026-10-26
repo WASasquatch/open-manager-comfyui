@@ -189,7 +189,7 @@ function shapeFor(segment, context, a, b, sd, ed, sc, ec, now, live) {
       ?? trackFor(segment, STRAIGHT, a, b, sd, ed, sc, ec);
   }
   if (state.path === PHYSICS) {
-    const hung = ropeTrack(segment, a, b, sd, ed, sc, ec, now, live);
+    const hung = ropeTrack(segment, a, b, sd, ed, sc, ec, now, live, app.canvas?.frame ?? now);
     if (hung.busy) state.busy += 1;
     return hung.track;
   }
