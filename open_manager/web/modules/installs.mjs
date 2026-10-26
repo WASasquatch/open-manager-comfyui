@@ -13,7 +13,19 @@ import { dlPost } from "./net.mjs";
 import { linkReport } from "./report-link.mjs";
 import { offerOptional } from "./optional.mjs";
 
-async function appendImpact(packId, version, slot, gate, policy, base) {
+function appendImpact(packId, version, slot, gate, policy, base) {
+  return paintImpact(slot, gate, base, async () => {
+    const answer = await api.fetchApi(
+      `${API}/impact/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`
+      + `?${new URLSearchParams({ policy })}`
+    );
+    const report = await answer.json();
+    if (!answer.ok) throw new Error(report.detail || `HTTP ${answer.status}`);
+    return report;
+  });
+}
+
+async function paintImpact(slot, gate, base, fetchReport) {
   const ticket = (slot._omTicket || 0) + 1;
   slot._omTicket = ticket;
   gate.textContent = base.label;
@@ -21,12 +33,7 @@ async function appendImpact(packId, version, slot, gate, policy, base) {
   slot.replaceChildren(el("div", "om-why", "Checking dependencies..."));
   let report;
   try {
-    const answer = await api.fetchApi(
-      `${API}/impact/${encodeURIComponent(packId)}/${encodeURIComponent(version)}`
-      + `?${new URLSearchParams({ policy })}`
-    );
-    report = await answer.json();
-    if (!answer.ok) throw new Error(report.detail || `HTTP ${answer.status}`);
+    report = await fetchReport();
   } catch (error) {
     if (slot._omTicket !== ticket) return;
     slot.replaceChildren(el("div", "om-why", `Dependency impact unavailable: ${error.message}`));
@@ -550,17 +557,7 @@ async function runInstallQueue() {
         issues.push(`${job.name}: ${first || "requirements did not install cleanly"}`);
         failures.push({ job, result, summary });
       }
-      if (result.optional_ran?.length && result.optional_ok === false) {
-        const what = result.optional_ran.join(", ");
-        const first = (result.optional_errors || [])[0];
-        issues.push(`${job.name} ${what}: ${first || "optional requirements did not install"}`);
-        failures.push({
-          job: { ...job, name: `${job.name} ${what}` },
-          result: { ...result, pip_errors: result.optional_errors || [],
-                    pip_output: result.optional_output || "", pip_requirements: [] },
-        });
-      }
-      if (result.optional_unseen?.length) {
+      if (result.optional_unseen?.length || result.optional_pending?.length) {
         optionalOffers.push({ packId: job.packId, name: job.name,
                               policy: job.policy || installPolicyDefault() });
       }
@@ -1062,7 +1059,7 @@ async function installFromRepo(pack, control) {
     }
     remindRestart();
     const folder = String(result.directory || "").split(/[\\/]/).pop();
-    if (folder && result.optional_unseen?.length) {
+    if (folder && (result.optional_unseen?.length || result.optional_pending?.length)) {
       await offerOptional(folder, pack.title || pack.repo, installPolicyDefault()).catch(() => {});
     }
   } else {
@@ -1170,4 +1167,4 @@ function tagChip(tag) {
   return chip;
 }
 
-export { installPolicyDefault, showInstallFailure, offerRestore, compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };
+export { INSTALL_POLICIES, paintImpact, installPolicyDefault, showInstallFailure, offerRestore, compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };

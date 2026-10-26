@@ -130,14 +130,16 @@ Without one, a pack page shows its star count only.
 | Licences | Per pack, sortable |
 | Your own repos | By URL or `owner/repo`, kept in `user/` |
 | Any ref | Branch, tag or commit |
-| Optional requirements | Each group a pack offers, or all of them, after it installs or from its page; the chosen ones follow updates |
+| Optional requirements | Each group a pack offers, or all of them, after it installs or from its page, with the same dependency check as an install; an update that leaves a chosen group short offers it again |
 | Workflow gaps | Missing nodes, and which pack won a duplicate name |
+| Import failures | Each failed pack's error from ComfyUI's log, its traceback a click away |
 | Workflow packs | Each pack the open workflow uses, with node ids to copy |
 | Themes | Gradients, icons, backdrops |
 | Fast sync | Whole registry in seconds |
 
 Findings reword the confirmation. A registry ban blocks Install until *Install versions the
-registry has banned* is on.
+registry has banned* is on. A pack that asks for a ComfyUI major version above yours, such as
+the `>=1.0.0` pyproject templates carry, is not reported as incompatible.
 
 ## Beyond packs
 
@@ -406,10 +408,11 @@ numbered variant such as `hdr-1.png` counts too. Workflows without one show as a
 
 Optional dependencies need no field. Open Manager reads them from the files Python projects
 already use and offers each group once your pack installs, one at a time or all together, and
-again from the *Optional* tab on your page. The groups a user picks install again whenever your
-pack updates, under the same rules as `requirements.txt`: the install policy, the packages held
-back to protect ComfyUI, and the user's substitutions. `requirements.txt` stays the base
-install.
+again from the *Optional* tab on your page. Choosing groups shows what they would change before
+anything installs, as a pack install does, and they install under the same rules as
+`requirements.txt`: the install policy, the packages held back to protect ComfyUI, and the
+user's substitutions. When an update leaves a group the user chose short, it is offered again,
+ticked. `requirements.txt` stays the base install.
 
 | Declared as | Group name |
 | --- | --- |

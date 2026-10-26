@@ -17,6 +17,46 @@ const CONFLICT_TEXT = {
 
 const REVIEWED = new Set(["pending", "banned"]);
 
+const BOUND = /(<=|>=|<|>|===|==|!=|~=|\^|~)?\s*v?(\d+(?:\.\d+)*)/g;
+
+const FLOOR = new Set([">=", ">", "===", "==", "~=", "^", "~"]);
+
+function versionParts(text) {
+  const found = String(text || "").match(/\d+(?:\.\d+)*/);
+  return found ? found[0].split(".").map(Number) : null;
+}
+
+function compareParts(a, b) {
+  for (let at = 0; at < Math.max(a.length, b.length); at += 1) {
+    const diff = (a[at] || 0) - (b[at] || 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+function floorOf(spec) {
+  let best = null;
+  for (const match of String(spec || "").matchAll(BOUND)) {
+    if (!FLOOR.has(match[1] || "==")) continue;
+    const parts = match[2].split(".").map(Number);
+    if (!best || compareParts(parts, best) > 0) best = parts;
+  }
+  return best;
+}
+
+function newestComfyUI() {
+  return versionParts(hostStores()?.get?.("release")?.recentRelease?.version);
+}
+
+function unreleasedComfyUI(one) {
+  const floor = floorOf(one.required);
+  const mine = versionParts(one.current);
+  if (!floor || !mine) return false;
+  const newest = newestComfyUI();
+  if (newest) return compareParts(floor, compareParts(newest, mine) > 0 ? newest : mine) > 0;
+  return floor[0] > mine[0];
+}
+
 const listeners = new Set();
 let watching = false;
 
@@ -39,7 +79,8 @@ function hostConflicts() {
       type: String(item?.type || ""),
       current: String(item?.current_value ?? ""),
       required: String(item?.required_value ?? ""),
-    })).filter((item) => !REVIEWED.has(item.type));
+    })).filter((item) => !REVIEWED.has(item.type)
+      && !(item.type === "comfyui_version" && unreleasedComfyUI(item)));
     if (listed.length && !conflicts.length) continue;
     found.push({
       id: String(one.package_id || ""),

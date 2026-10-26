@@ -28,8 +28,8 @@ from . import log, paths
 
 logger = log.get_logger("optional")
 
-__all__ = ["DEVELOPMENT", "BASE_NAMES", "groups", "summary", "lines_for", "chosen", "unseen", "remember",
-           "mark_seen", "forget", "pack_key", "fold"]
+__all__ = ["DEVELOPMENT", "BASE_NAMES", "groups", "summary", "lines_for", "chosen", "unseen",
+           "pending", "remember", "mark_seen", "forget", "pack_key", "fold"]
 
 STORE = "optional_requirements.json"
 
@@ -486,6 +486,21 @@ def unseen(directory: Path, found: list[dict]) -> list[str]:
     record = _record(directory)
     known = {fold(name) for name in (record.get("seen") or []) + (record.get("chosen") or [])}
     return [group["name"] for group in found if group["key"] not in known]
+
+
+def pending(directory: Path, found: list[dict]) -> list[str]:
+    """The groups the user chose for a pack that the environment no longer satisfies.
+
+    Args:
+        directory: The installed pack directory.
+        found: The pack's groups with their states, as :func:`summary` lists them.
+
+    Returns:
+        Their names, as the pack writes them.
+    """
+    picked = set(chosen(directory))
+    return [group["name"] for group in found
+            if group["key"] in picked and group.get("state") != "installed"]
 
 
 def _update(directory: Path, chose=(), offered=()) -> None:

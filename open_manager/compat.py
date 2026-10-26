@@ -103,6 +103,19 @@ def host() -> dict:
     return dict(_host_cache)
 
 
+def _above_major(declared: str, mine: str) -> bool:
+    """Whether a range only admits a major version above the one installed."""
+    try:
+        from packaging.specifiers import SpecifierSet
+        from packaging.version import Version
+
+        floors = [Version(spec.version) for spec in SpecifierSet(declared)
+                  if spec.operator in (">=", ">", "==", "~=", "===") and "*" not in spec.version]
+        return bool(floors) and max(floors).major > Version(mine).major
+    except Exception:
+        return False
+
+
 def _version_note(field: str, label: str, declared: str, mine: str) -> dict | None:
     """One version range set against what is installed.
 
@@ -114,8 +127,8 @@ def _version_note(field: str, label: str, declared: str, mine: str) -> dict | No
 
     Returns:
         A note, or None where nothing was declared. ``state`` is ``ok``, ``differs`` or
-        ``unknown``; unknown covers an unreadable specifier and an unknown local version, and
-        is never presented as a problem.
+        ``unknown``; unknown covers an unreadable specifier, an unknown local version and a
+        ComfyUI range above the installed major version, and is never presented as a problem.
     """
     declared = (declared or "").strip()
     if not declared:
@@ -123,6 +136,8 @@ def _version_note(field: str, label: str, declared: str, mine: str) -> dict | No
     note = {"field": field, "label": label, "declared": declared, "yours": mine,
             "state": "unknown"}
     if not mine:
+        return note
+    if field == "comfyui" and _above_major(declared, mine):
         return note
     try:
         from packaging.specifiers import SpecifierSet

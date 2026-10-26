@@ -1,6 +1,6 @@
 import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
-import { el, toast, notify, chooseAction } from "./ui.mjs";
+import { el, toast, notify, chooseAction, closeOn } from "./ui.mjs";
 import { linkReport } from "./report-link.mjs";
 import { remindRestart, makeInstallControl, foldId, indexInstalled, updateTarget, packName, installedMenu, enqueueInstall, install, byTrustedAuthor, reviewOf, reviewChip } from "./installs.mjs";
 import { openPack, openRepoPack } from "./packs.mjs";
@@ -313,6 +313,38 @@ function whenText(when) {
   return `${Math.floor(days / 365)}y ago`;
 }
 
+function importFailureLine(line, name, error, trace) {
+  line.classList.add("om-conflict-open");
+  line.onclick = (event) => {
+    event.stopPropagation();
+    showImportFailure(name, error, trace);
+  };
+}
+
+function showImportFailure(name, error, trace) {
+  const backdrop = el("div", "om-backdrop");
+  const box = el("div", "om-note om-note-wide om-import-failure");
+  box.appendChild(el("div", "om-note-title", `${name}: import failed`));
+  const body = el("div", "om-chg-text om-pip-errors");
+  body.textContent = trace || error || "";
+  box.appendChild(body);
+  const foot = el("div", "om-note-foot");
+  const copy = el("button", "om-btn", "Copy");
+  copy.onclick = () => {
+    navigator.clipboard?.writeText(body.textContent)
+      .then(() => toast("Copied.", { kind: "ok" }))
+      .catch(() => notify("Not copied", "The clipboard is not available here."));
+  };
+  const close = el("button", "om-btn om-go", "Close");
+  close.onclick = () => backdrop.remove();
+  foot.appendChild(copy);
+  foot.appendChild(close);
+  box.appendChild(foot);
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  closeOn(backdrop);
+}
+
 function buildInstalledRow(pack, conflict = null, fresh = false) {
   const updatable = isInstalledUpdatable(pack);
   const row = el("div", "om-side-row");
@@ -369,10 +401,20 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
     meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));
   }
   text.appendChild(meta);
-  for (const item of conflict?.conflicts || []) {
+  const listed = conflict?.conflicts || [];
+  for (const item of listed) {
     const line = el("div", `om-conflict${misreadAccelerator(item) ? " om-conflict-misread" : ""}`,
       conflictText(item));
-    if (item.type === "import_failed" && item.required) line.title = item.required;
+    if (item.type === "import_failed") {
+      importFailureLine(line, pack.id, item.current,
+        item.required && item.required !== item.current ? item.required : "");
+    }
+    text.appendChild(line);
+  }
+  if (cost?.failed && cost.error && !listed.some((item) => item.type === "import_failed")) {
+    const line = el("div", "om-conflict", conflictText(
+      { type: "import_failed", current: cost.error, required: "" }));
+    importFailureLine(line, pack.id, cost.error, cost.traceback || "");
     text.appendChild(line);
   }
   if (pack.registry_id) text.onclick = () => openPack(pack.registry_id);

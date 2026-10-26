@@ -2,7 +2,8 @@ import { api } from "../../../scripts/api.js";
 import { API } from "./base.mjs";
 import { el, closeOn, toast, panel, countNote } from "./ui.mjs";
 import { loadingBlock } from "./markdown.mjs";
-import { installPolicyDefault, showInstallFailure, offerRestore, remindRestart } from "./installs.mjs";
+import { INSTALL_POLICIES, paintImpact, installPolicyDefault, showInstallFailure, offerRestore,
+         remindRestart } from "./installs.mjs";
 
 const GROUP_STATE = {
   installed: { word: "installed", cls: "om-opt-installed" },
@@ -16,6 +17,8 @@ const PACKAGE_STATE = {
   vcs: () => "from URL",
 };
 
+const RECHECK_MS = 350;
+
 let rowSeq = 0;
 
 async function readGroups(packId) {
@@ -25,14 +28,14 @@ async function readGroups(packId) {
   return data;
 }
 
-async function postGroups(packId, groups, policy) {
-  const answer = await api.fetchApi(`${API}/install-optional`, {
+async function postJson(route, body) {
+  const answer = await api.fetchApi(`${API}${route}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: packId, groups, policy }),
+    body: JSON.stringify(body),
   });
   const data = await answer.json();
-  if (!answer.ok && !data.errors) throw new Error(data.reason || `HTTP ${answer.status}`);
+  if (!answer.ok && !data.errors) throw new Error(data.reason || data.detail || `HTTP ${answer.status}`);
   return data;
 }
 
@@ -77,7 +80,7 @@ function groupText(group, headFor) {
   return text;
 }
 
-function chooseGroups(name, groups) {
+function reviewGroups(packId, name, groups, { ticked = [], policy = "", leave = "Cancel" } = {}) {
   return new Promise((resolve) => {
     const backdrop = el("div", "om-backdrop");
     const dialog = el("div", "om-dialog om-dl-pick om-opt-pick");
@@ -102,13 +105,32 @@ function chooseGroups(name, groups) {
       const box = el("input", "om-dl-check");
       box.type = "checkbox";
       box.id = id;
-      box.onchange = () => sync();
+      box.checked = ticked.includes(group.name);
+      box.onchange = () => changed();
       boxes.push([box, group]);
       row.appendChild(box);
       row.appendChild(groupText(group, id));
       list.appendChild(row);
     }
     body.appendChild(list);
+
+    const changes = el("h4", null, "What this would change here");
+    const impactSlot = el("div");
+    body.appendChild(changes);
+    body.appendChild(impactSlot);
+
+    const policyRow = el("div", "om-policy");
+    const policyPick = el("select", "om-side-select om-policy-pick");
+    for (const [value, label] of INSTALL_POLICIES) {
+      const option = el("option", null, label);
+      option.value = value;
+      policyPick.appendChild(option);
+    }
+    policyPick.value = INSTALL_POLICIES.some(([value]) => value === policy)
+      ? policy : installPolicyDefault();
+    policyRow.appendChild(el("span", "om-policy-label", "Requirements"));
+    policyRow.appendChild(policyPick);
+    body.appendChild(policyRow);
     dialog.appendChild(body);
 
     const foot = el("div", "om-dl-pickfoot");
@@ -118,8 +140,9 @@ function chooseGroups(name, groups) {
     every.appendChild(all);
     every.appendChild(document.createTextNode("All"));
     const summary = el("span", "om-dl-summary", "");
-    const skip = el("button", "om-btn", "Skip");
-    const go = el("button", "om-btn om-go", "Install selected");
+    const skip = el("button", "om-btn", leave);
+    const base = { label: "Install selected", cls: "om-btn om-go" };
+    const go = el("button", base.cls, base.label);
     foot.appendChild(every);
     foot.appendChild(summary);
     foot.appendChild(skip);
@@ -127,20 +150,44 @@ function chooseGroups(name, groups) {
     dialog.appendChild(foot);
 
     const picked = () => boxes.filter(([box]) => box.checked).map(([, group]) => group.name);
-    const sync = () => {
+    let timer = 0;
+    const check = () => {
+      clearTimeout(timer);
+      const chosen = picked();
+      if (!chosen.length) {
+        impactSlot._omTicket = (impactSlot._omTicket || 0) + 1;
+        impactSlot.replaceChildren();
+        changes.hidden = true;
+        go.textContent = base.label;
+        go.className = base.cls;
+        return;
+      }
+      changes.hidden = false;
+      paintImpact(impactSlot, go, base, async () => {
+        const report = await postJson("/optional-impact",
+          { id: packId, groups: chosen, policy: policyPick.value });
+        if (report.ok === false) throw new Error(report.reason || "no answer");
+        return report;
+      });
+    };
+    const changed = () => {
       const count = picked().length;
       all.checked = count === boxes.length;
       all.indeterminate = count > 0 && count < boxes.length;
       summary.textContent = `${count} of ${countNote(boxes.length, "group")} selected`;
       go.disabled = count === 0;
+      clearTimeout(timer);
+      timer = setTimeout(check, RECHECK_MS);
     };
     all.onchange = () => {
       for (const [box] of boxes) box.checked = all.checked;
-      sync();
+      changed();
     };
+    policyPick.addEventListener("change", check);
     skip.onclick = () => done(null);
-    go.onclick = () => done(picked());
-    sync();
+    go.onclick = () => done({ groups: picked(), policy: policyPick.value });
+    changed();
+    check();
 
     backdrop.appendChild(dialog);
     document.body.appendChild(backdrop);
@@ -153,7 +200,7 @@ async function installGroups(packId, name, groups, policy) {
   const progress = toast(`${name}: installing ${what}...`, { sticky: true });
   let result;
   try {
-    result = await postGroups(packId, groups, policy || installPolicyDefault());
+    result = await postJson("/install-optional", { id: packId, groups, policy });
   } catch (error) {
     result = { ok: false, output: error.message, errors: [error.message], requirements: [] };
   }
@@ -179,6 +226,12 @@ async function installGroups(packId, name, groups, policy) {
   return result;
 }
 
+async function reviewThenInstall(packId, name, groups, options) {
+  const decided = await reviewGroups(packId, name, groups, options);
+  if (!decided?.groups.length) return null;
+  return installGroups(packId, name, decided.groups, decided.policy);
+}
+
 async function offerOptional(packId, name, policy) {
   let data;
   try {
@@ -186,40 +239,40 @@ async function offerOptional(packId, name, policy) {
   } catch {
     return;
   }
-  if (!data.groups?.length || !data.unseen?.length) return;
-  const groups = await chooseGroups(name, data.groups);
-  if (!groups) {
-    await postGroups(packId, [], policy).catch(() => {});
+  if (!data.groups?.length || !(data.unseen?.length || data.pending?.length)) return;
+  const decided = await reviewGroups(packId, name, data.groups,
+    { ticked: data.pending || [], policy, leave: "Skip" });
+  if (!decided?.groups.length) {
+    await postJson("/install-optional", { id: packId, groups: [], policy }).catch(() => {});
     return;
   }
-  await installGroups(packId, name, groups, policy);
+  await installGroups(packId, name, decided.groups, decided.policy);
 }
 
 function optionalPane(packId, name) {
   const pane = el("div", "om-tabpane om-opt-pane");
-  const paint = (data) => {
+  let groups = [];
+  const paint = () => {
     const list = el("div", "om-dl-models");
-    const open = data.groups.filter((group) => group.state !== "installed");
+    const open = groups.filter((group) => group.state !== "installed");
     if (open.length > 1) {
       const bar = el("div", "om-actions");
       const every = el("button", "om-btn", "Install all");
       every.onclick = async () => {
-        every.disabled = true;
-        await installGroups(packId, name, open.map((group) => group.name));
+        await reviewThenInstall(packId, name, groups, { ticked: open.map((group) => group.name) });
         load();
       };
       bar.appendChild(every);
       list.appendChild(bar);
     }
-    for (const group of data.groups) {
+    for (const group of groups) {
       const state = GROUP_STATE[group.state] || GROUP_STATE.missing;
       const row = el("div", `om-dl-model om-opt-group ${state.cls}`.trim());
       const text = groupText(group, "");
       const act = el("button", "om-btn om-dl-btn",
         group.state === "installed" ? "Reinstall" : "Install");
       act.onclick = async () => {
-        act.disabled = true;
-        await installGroups(packId, name, [group.name]);
+        await reviewThenInstall(packId, name, groups, { ticked: [group.name] });
         load();
       };
       text.querySelector(".om-opt-head").appendChild(act);
@@ -232,7 +285,8 @@ function optionalPane(packId, name) {
     pane.replaceChildren(loadingBlock("Reading optional requirements"));
     try {
       const data = await readGroups(packId);
-      paint(data);
+      groups = data.groups || [];
+      paint();
       return data;
     } catch (error) {
       pane.replaceChildren(el("div", "om-side-status",
@@ -264,4 +318,4 @@ async function addOptionalPanel(slot, packId, name) {
   slot.replaceWith(box);
 }
 
-export { offerOptional, installGroups, optionalPane, addOptionalTab, addOptionalPanel };
+export { offerOptional, optionalPane, addOptionalTab, addOptionalPanel };

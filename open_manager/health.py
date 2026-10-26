@@ -36,6 +36,20 @@ def _process_started() -> float:
 
 _TIMING = re.compile(r"([\d.]+)\s+seconds(\s*\(IMPORT FAILED\))?:\s*(.+)")
 
+_MARKER = "Import times for custom nodes:"
+
+_STAMP = re.compile(r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s?")
+
+_FAILURES = ("Cannot import ", "Skip ", "comfy_entrypoint in ", "Error while calling comfy_entrypoint")
+
+_IMPORT_ERROR = re.compile(r"module for custom nodes:\s*(.+)$")
+
+TRACEBACK_LINES = 200
+
+TRACEBACK_CHARS = 20_000
+
+ERROR_CHARS = 600
+
 
 def _logs() -> list[Path]:
     """ComfyUI's log and the ones it rotated, newest first."""
@@ -58,11 +72,64 @@ def _tail(path: Path) -> str:
         return ""
 
 
+def _traceback_before(lines: list[str], at: int) -> str:
+    """The traceback ComfyUI logged just before line ``at``, empty where there is none."""
+    index = at - 1
+    while index >= 0 and not lines[index].strip():
+        index -= 1
+    end = index
+    while index >= 0 and end - index < TRACEBACK_LINES:
+        line = lines[index]
+        if _STAMP.match(line):
+            if _STAMP.sub("", line, count=1).startswith("Traceback (most recent call last):"):
+                block = [_STAMP.sub("", line, count=1), *lines[index + 1:end + 1]]
+                return "\n".join(block).strip()[-TRACEBACK_CHARS:]
+            return ""
+        index -= 1
+    return ""
+
+
+def _failure(lines: list[str], where: str, name: str) -> dict:
+    """Why one pack failed to import, as ComfyUI logged it.
+
+    Args:
+        lines: The run's log lines before its import timings.
+        where: The pack's directory, as the timings name it.
+        name: Its folder name.
+
+    Returns:
+        ``{error, traceback}``, both empty where the log does not say.
+    """
+    needles = {where, where.replace("\\", "/")}
+    for at in range(len(lines) - 1, -1, -1):
+        bare = _STAMP.sub("", lines[at], count=1)
+        if not bare.startswith(_FAILURES) or not any(needle in bare for needle in needles):
+            continue
+        said = bare
+        for needle in needles:
+            said = said.replace(needle, name)
+        trace = _traceback_before(lines, at) if bare.startswith("Cannot import ") else ""
+        error = ""
+        if trace:
+            error = next((line.strip() for line in reversed(trace.splitlines()) if line.strip()), "")
+        if not error:
+            found = _IMPORT_ERROR.search(said)
+            error = found.group(1).strip() if found else said.strip()
+        return {"error": error[:ERROR_CHARS], "traceback": trace}
+    return {"error": "", "traceback": ""}
+
+
 def _parse(text: str) -> list[dict]:
-    """The last block of import timings in a log, newest run only."""
-    if "Import times for custom nodes:" not in text:
+    """The last block of import timings in a log, newest run only.
+
+    A failed pack's row carries ``error`` and ``traceback`` from the lines ComfyUI logged
+    for it earlier in the same run.
+    """
+    if _MARKER not in text:
         return []
-    block = text.rsplit("Import times for custom nodes:", 1)[-1]
+    parts = text.split(_MARKER)
+    block = parts[-1]
+    run = parts[-2].splitlines()
     rows = []
     for line in block.splitlines():
         found = _TIMING.search(line)
@@ -71,12 +138,15 @@ def _parse(text: str) -> list[dict]:
                 break
             continue
         where = found.group(3).strip().rstrip("\\/")
-        rows.append({
+        row = {
             "seconds": float(found.group(1)),
             "name": os.path.basename(where),
             "path": where,
             "failed": bool(found.group(2)),
-        })
+        }
+        if row["failed"]:
+            row.update(_failure(run, where, row["name"]))
+        rows.append(row)
     return rows
 
 

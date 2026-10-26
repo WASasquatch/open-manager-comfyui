@@ -1540,7 +1540,11 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
 .om-cost { border: 1px solid var(--om-border); border-radius: 999px; padding: 0 6px;
   color: var(--om-muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
 .om-cost-high { color: #d29922; border-color: #d29922; }
-.om-cost-failed { background: #a5261d; }
+.om-cost-failed { background: #a5261d; border-color: #a5261d; color: #fff; }
+.om-conflict-open { cursor: pointer; }
+.om-conflict-open:hover { text-decoration: underline; }
+.om-import-failure { width: min(94vw, 900px); }
+.om-import-failure .om-pip-errors { max-height: 60vh; white-space: pre; overflow-wrap: normal; }
 .om-cost-line { color: var(--om-muted); }
 .om-cost-stale { color: #d29922; }
 .om-pause { display: inline-flex; align-items: center; justify-content: flex-start; flex: none;

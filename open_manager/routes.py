@@ -629,6 +629,56 @@ def _installable(status: str, allowed: bool = False) -> tuple[bool, str]:
     return True, ""
 
 
+async def _impact_report(lines: list[str], policy: str) -> dict:
+    """What installing some requirement lines would change here, without installing them.
+
+    Args:
+        lines: Requirement lines as the pack writes them.
+        policy: An install policy, or empty to judge the lines as written.
+
+    Returns:
+        ``{held, checked, failure, additive_only, additions, replacements, findings,
+        dependencies}``, as the install confirmation draws them.
+    """
+    asked = list(lines)
+    held: list[str] = []
+    if policy:
+        lines, held, _swapped, redirects = await asyncio.to_thread(
+            installer.plan_requirements, asked, installer.install_policy(policy), ""
+        )
+        held = held + redirects
+    report = await asyncio.to_thread(impact.analyse, lines, "")
+    return {
+        "held": held,
+        "checked": report.checked,
+        "failure": report.failure,
+        "additive_only": report.is_additive,
+        "additions": list(report.additions),
+        "replacements": [
+            {
+                "name": item.name,
+                "have": item.have,
+                "want": item.want,
+                "direction": item.direction,
+                "core": item.is_core,
+                "abi": item.abi_break,
+            }
+            for item in report.replacements
+        ],
+        "findings": [
+            {
+                "severity": found["severity"],
+                "title": found["title"],
+                "detail": found["detail"],
+                "evidence": list(found["evidence"]),
+                "reference": "",
+            }
+            for found in impact.findings_from(report)
+        ],
+        "dependencies": deps.check(asked),
+    }
+
+
 def _finding_json(finding: risk.Finding) -> dict:
     """One finding as the panel draws it."""
     return {
@@ -1618,17 +1668,7 @@ def register_routes() -> None:
         ok, output = await asyncio.to_thread(installer.install_requirements, directory, "",
             policy,
         )
-        found = await asyncio.to_thread(optional_groups.groups, directory)
-        keys = {group["key"] for group in found}
-        wanted = [key for key in optional_groups.chosen(directory) if key in keys]
-        extra = {"optional_unseen": optional_groups.unseen(directory, found), "optional_ran": []}
-        if wanted:
-            ran = await asyncio.to_thread(installer.install_optional, directory, wanted, "", policy)
-            extra["optional_ran"] = ran["groups"]
-            if not ran["ok"]:
-                ok = False
-                output = "\n".join(part for part in (output, ran["output"]) if part)
-        return web.json_response({"ok": ok, "output": output, **extra})
+        return web.json_response({"ok": ok, "output": output})
 
     @PromptServer.instance.routes.get(f"{PREFIX}/optional/" + "{node_id}")
     async def optional_requirements(request: web.Request) -> web.Response:
@@ -1644,6 +1684,7 @@ def register_routes() -> None:
             "groups": found,
             "chosen": optional_groups.chosen(directory),
             "unseen": optional_groups.unseen(directory, found),
+            "pending": optional_groups.pending(directory, found),
         })
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install-optional")
@@ -2693,49 +2734,25 @@ def register_routes() -> None:
         if entry is None:
             return web.json_response({"error": f"no version {version}"}, status=404)
 
-        import asyncio
+        report = await _impact_report(list(entry.dependencies), policy)
+        return web.json_response({"pack": node_id, "version": version, **report})
 
-        lines = list(entry.dependencies)
-        held: list[str] = []
-        if policy:
-            lines, held, _swapped, redirects = await asyncio.to_thread(
-                installer.plan_requirements, lines, installer.install_policy(policy), ""
-            )
-            held = held + redirects
-        report = await asyncio.to_thread(impact.analyse, lines, "")
-        return web.json_response(
-            {
-                "pack": node_id,
-                "version": version,
-                "held": held,
-                "checked": report.checked,
-                "failure": report.failure,
-                "additive_only": report.is_additive,
-                "additions": list(report.additions),
-                "replacements": [
-                    {
-                        "name": item.name,
-                        "have": item.have,
-                        "want": item.want,
-                        "direction": item.direction,
-                        "core": item.is_core,
-                        "abi": item.abi_break,
-                    }
-                    for item in report.replacements
-                ],
-                "findings": [
-                    {
-                        "severity": found["severity"],
-                        "title": found["title"],
-                        "detail": found["detail"],
-                        "evidence": list(found["evidence"]),
-                        "reference": "",
-                    }
-                    for found in impact.findings_from(report)
-                ],
-                "dependencies": deps.check(list(entry.dependencies)),
-            }
+    @PromptServer.instance.routes.post(f"{PREFIX}/optional-impact")
+    @_json_body
+    async def optional_impact(request: web.Request, body: dict) -> web.Response:
+        """Answer what installing some of a pack's optional groups would change here."""
+        pack_id = str((body or {}).get("id") or "").strip()
+        names = (body or {}).get("groups")
+        if not pack_id or not isinstance(names, list):
+            return web.json_response({"ok": False, "reason": "id and groups are required"}, status=400)
+        directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id)
+        if directory is None:
+            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
+        lines, used = await asyncio.to_thread(
+            optional_groups.lines_for, directory, [str(name) for name in names[:64]]
         )
+        report = await _impact_report(lines, str((body or {}).get("policy") or ""))
+        return web.json_response({"ok": True, "pack": pack_id, "groups": used, **report})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install")
     @_json_body

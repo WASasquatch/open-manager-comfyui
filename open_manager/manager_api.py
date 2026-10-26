@@ -431,22 +431,24 @@ async def _update_all(client_id: str) -> int:
     return queued
 
 
-def _import_failures() -> set[str]:
-    """Folded names of the packs whose import failed at the last start."""
+def _import_failures() -> dict:
+    """The packs whose import failed at the last start, by folded name, with ComfyUI's reason."""
     report = pack_health.startup_times()
-    return {_fold(_bare(name)) for name in report.get("failed", [])}
+    return {_fold(_bare(row.get("name", ""))): row
+            for row in report.get("packs", []) if row.get("failed")}
 
 
-def _failure_for(pack_id: str, failed: set[str]) -> dict | None:
+def _failure_for(pack_id: str, failed: dict) -> dict | None:
     """Import failure detail for one pack, ``None`` where it imported."""
     directory = _find(pack_id)
-    names = {_fold(pack_id)}
+    names = [_fold(pack_id)]
     if directory is not None:
-        names.add(_fold(_bare(directory.name)))
-    if names & failed:
-        return {"error": "The pack failed to import at the last start. See the ComfyUI log.",
-                "traceback": ""}
-    return None
+        names.append(_fold(_bare(directory.name)))
+    row = next((failed[name] for name in names if name in failed), None)
+    if row is None:
+        return None
+    return {"error": row.get("error") or "The pack failed to import at the last start.",
+            "traceback": row.get("traceback") or ""}
 
 
 def register() -> None:

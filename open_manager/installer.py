@@ -64,10 +64,8 @@ class InstallResult:
         installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
         optional_unseen: Optional groups the pack declares that the user has not been offered.
-        optional_ran: Optional groups installed again because the user chose them before.
-        optional_ok: Whether those installed.
-        optional_output: Captured installer output for them, trimmed.
-        optional_errors: The lines of that output that say what went wrong.
+        optional_pending: Optional groups the user chose that the environment no longer
+            satisfies.
     """
 
     ok: bool
@@ -82,10 +80,7 @@ class InstallResult:
     installer: str = ""
     restart_required: bool = False
     optional_unseen: tuple[str, ...] = ()
-    optional_ran: tuple[str, ...] = ()
-    optional_ok: bool = True
-    optional_output: str = ""
-    optional_errors: tuple[str, ...] = ()
+    optional_pending: tuple[str, ...] = ()
 
     def to_json(self) -> dict:
         """This result as a plain object."""
@@ -102,10 +97,7 @@ class InstallResult:
             "installer": self.installer,
             "restart_required": self.restart_required,
             "optional_unseen": list(self.optional_unseen),
-            "optional_ran": list(self.optional_ran),
-            "optional_ok": self.optional_ok,
-            "optional_output": self.optional_output,
-            "optional_errors": list(self.optional_errors),
+            "optional_pending": list(self.optional_pending),
         }
 
 
@@ -496,7 +488,7 @@ def _install_repo(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
-    return _optional_after(result, target, python, with_deps, policy)
+    return _optional_after(result, target)
 
 
 def install_optional(directory: Path, names, python: str = "", policy: str = "all") -> dict:
@@ -522,29 +514,19 @@ def install_optional(directory: Path, names, python: str = "", policy: str = "al
     return ran
 
 
-def _optional_after(result: InstallResult, target: Path, python: str, with_deps: bool,
-                    policy: str) -> InstallResult:
-    """Install the optional groups chosen before, and name the ones not yet offered."""
+def _optional_after(result: InstallResult, target: Path) -> InstallResult:
+    """Name the optional groups not yet offered, and the chosen ones now short."""
     from . import optional
 
     try:
-        found = optional.groups(target)
+        found = optional.summary(target)
     except Exception as error:
         logger.warning("[Open Manager] %s: optional requirements unreadable: %s",
                        target.name, error)
         return result
-    if not found:
-        return result
-    result.optional_unseen = tuple(optional.unseen(target, found))
-    keys = {group["key"] for group in found}
-    wanted = [key for key in optional.chosen(target) if key in keys]
-    if not with_deps or not wanted:
-        return result
-    ran = install_optional(target, wanted, python, policy)
-    result.optional_ran = tuple(ran["groups"])
-    result.optional_ok = ran["ok"]
-    result.optional_output = ran["output"]
-    result.optional_errors = tuple(ran["errors"])
+    if found:
+        result.optional_unseen = tuple(optional.unseen(target, found))
+        result.optional_pending = tuple(optional.pending(target, found))
     return result
 
 
@@ -1156,4 +1138,4 @@ def _install(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
-    return _optional_after(result, target, python, with_deps, policy)
+    return _optional_after(result, target)
