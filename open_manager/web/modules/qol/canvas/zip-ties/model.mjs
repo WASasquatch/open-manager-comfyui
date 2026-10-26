@@ -390,7 +390,7 @@ function tieAt(state, ties, point, pad) {
   return null;
 }
 
-function cut(state, graph, ends, mode, p, q) {
+function cut(state, graph, ends, mode, p, q, drawn) {
   const ties = tiesOf(graph);
   const severed = ties.filter((tie) => {
     const [r, s] = bar(tie, state.plans.get(tie));
@@ -403,8 +403,9 @@ function cut(state, graph, ends, mode, p, q) {
     const end = ends.get(link.id);
     if (!end) continue;
     let best = null;
-    for (const part of route(state, link.id, end.a, end.b, end.sd, end.ed)) {
-      const points = polyline(mode, part);
+    const lines = drawn?.(link.id)
+      ?? route(state, link.id, end.a, end.b, end.sd, end.ed).map((part) => polyline(mode, part));
+    for (const points of lines) {
       for (let at = 1; at < points.length; at += 1) {
         const t = crossing(p, q, points[at - 1], points[at]);
         if (t !== null && (!best || t < best)) best = t;

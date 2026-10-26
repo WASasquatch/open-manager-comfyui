@@ -308,9 +308,21 @@ marker as with Solid.
 | Beads | Beads on a thread |
 | Electric arc | A flickering bolt |
 
-*Link motion* runs the moving styles always, only while a workflow runs, or never. They redraw
-at up to 30 frames a second, less often when drawing takes longer, and not while the tab is
-hidden. Zoomed out, each style draws plainer.
+*Link path* sets where links run, in any style. Clicks, the midpoint marker and zip ties follow
+the drawn path.
+
+| Path | |
+|---|---|
+| Link Render Mode | ComfyUI's Spline, Linear or Straight. The default |
+| Circuit board | Traces with cut corners that run around nodes and each other, never under or over them. Links running close together gather side by side. Routes are laid again a moment after nodes stop moving |
+| Physics | Links hang under gravity and swing when a node moves |
+
+*Ghost links* fades each link along its own length a short way from the slots it joins, under a
+slowly drifting glow. A selected node's links show in full.
+
+*Link motion* runs the moving styles, Physics swings and the ghost glow always, only while a
+workflow runs, or never. They redraw at up to 30 frames a second, less often when drawing takes
+longer, and not while the tab is hidden. Zoomed out, each style draws plainer.
 
 ### Network
 

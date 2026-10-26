@@ -1,6 +1,6 @@
 import { app } from "../../../../../../scripts/app.js";
 import { KEY, BAR, snap, tiesOf, prune, layout, route, tieAt, cut } from "./model.mjs";
-import { linkGirth } from "../../../noodles.mjs";
+import { linkGirth, drawnLines } from "../../../noodles.mjs";
 
 const NO_MARKER = 0;
 
@@ -428,7 +428,7 @@ function listen() {
       if (Math.hypot(end[0] - slice.start[0], end[1] - slice.start[1]) < 4 / (canvas.ds?.scale || 1)) {
         return;
       }
-      const made = cut(state, graph, state.ends, canvas.links_render_mode, slice.start, end);
+      const made = cut(state, graph, state.ends, canvas.links_render_mode, slice.start, end, drawnLines);
       if (made?.remove) removeTies(canvas, graph, made.remove);
       else if (made?.add) {
         if (slice.straight) {

@@ -83,6 +83,7 @@ function build(flat) {
     at,
     length: n ? at[n - 1] : 0,
     line: null,
+    mid: null,
     memo: new Map(),
   };
 }
@@ -131,6 +132,23 @@ export function trackFor(owner, mode, a, b, sd, ed, sc, ec) {
   list.unshift({ key: Float64Array.from(asked), track });
   if (list.length > SLOTS) list.length = SLOTS;
   return track;
+}
+
+export function trackOf(flat) {
+  return build(flat);
+}
+
+export function midOf(track) {
+  if (track.mid) return track.mid;
+  const at = pointAt(track, track.length / 2);
+  track.mid = { pos: [at.x, at.y], angle: Math.atan2(at.dy, at.dx) };
+  return track.mid;
+}
+
+export function pointsOf(track) {
+  const points = [];
+  for (let i = 0; i < track.n; i += 1) points.push([track.xs[i], track.ys[i]]);
+  return points;
 }
 
 export function lineOf(track) {

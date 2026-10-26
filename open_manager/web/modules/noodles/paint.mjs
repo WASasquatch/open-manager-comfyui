@@ -49,7 +49,7 @@ function readColour(text) {
   }
 }
 
-function rgbOf(colour) {
+export function rgbOf(colour) {
   const key = String(colour ?? "");
   let known = parsed.get(key);
   if (known) return known;
@@ -157,6 +157,12 @@ function fillParts(ctx, parts, name, style) {
 
 function halo(ctx, track, look, width) {
   if (look.lit) stroke(ctx, lineOf(track), "rgba(255,255,255,0.4)", width);
+}
+
+function solid(ctx, track, look) {
+  const line = lineOf(track);
+  if (look.border && !look.low) stroke(ctx, line, "rgba(0,0,0,0.5)", look.width + 4);
+  stroke(ctx, line, look.colour, look.width);
 }
 
 function energy(ctx, track, look) {
@@ -526,9 +532,9 @@ function arc(ctx, track, look) {
   stroke(ctx, made.main, p.core, 0.9 * k);
 }
 
-const PAINTERS = { energy, dashes, chain, rust, pipes, cord, rope, beads, arc };
+const PAINTERS = { solid, energy, dashes, chain, rust, pipes, cord, rope, beads, arc };
 
-const GIRTH = { energy: 5.5, dashes: 5, chain: 8.5, rust: 8.5, pipes: 12.4, cord: 8.1, rope: 9.6,
+const GIRTH = { solid: 4, energy: 5.5, dashes: 5, chain: 8.5, rust: 8.5, pipes: 12.4, cord: 8.1, rope: 9.6,
                 beads: 7.4, arc: 5 };
 
 export function paints(style) {

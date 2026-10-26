@@ -14,3 +14,9 @@ export const LINK_STYLES = [
 export const LINK_STYLE_IDS = new Set(LINK_STYLES.map((one) => one.value));
 
 export const MOVING_STYLES = new Set(["energy", "dashes", "arc"]);
+
+export const LINK_PATHS = [
+  { value: "comfy", text: "Link Render Mode" },
+  { value: "circuit", text: "Circuit board" },
+  { value: "physics", text: "Physics" },
+];
