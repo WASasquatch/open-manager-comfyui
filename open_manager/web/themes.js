@@ -3,6 +3,7 @@ import { api } from "../../scripts/api.js";
 import {
   applyOmTheme, omActive, paintOmNode, sanitiseOm, sanitiseOmRule, stripOmNode, syncOmPalette,
 } from "./modules/om-nodes/theme.mjs";
+import { LINK_STYLE_IDS } from "./modules/noodles/names.mjs";
 
 const SLOTS_DARK = {
   CLIP: "#ffd500", CLIP_VISION: "#a8dadc", CLIP_VISION_OUTPUT: "#ad7452",
@@ -391,6 +392,10 @@ function categoryGradient(categories, node) {
 
 const LINK_MODES = new Set(["straight", "linear", "spline"]);
 
+export function themeLinkStyle() {
+  return activeExtras?.links?.style || null;
+}
+
 export function nodeTint(node) {
   if (node?.color) return node.color;
   const extras = activeExtras;
@@ -489,6 +494,7 @@ function sanitiseExtras(raw) {
     const links = {};
     if (LINK_MODES.has(raw.links.mode)) links.mode = raw.links.mode;
     if (typeof raw.links.border === "boolean") links.border = raw.links.border;
+    if (LINK_STYLE_IDS.has(raw.links.style)) links.style = raw.links.style;
     if (Object.keys(links).length) out.links = links;
   }
 

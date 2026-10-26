@@ -1,5 +1,6 @@
 import { app } from "../../../../../../scripts/app.js";
 import { KEY, BAR, snap, tiesOf, prune, layout, route, tieAt, cut } from "./model.mjs";
+import { linkGirth } from "../../../noodles.mjs";
 
 const NO_MARKER = 0;
 
@@ -43,7 +44,7 @@ const state = {
 };
 
 function gap(canvas) {
-  return (canvas.connections_width ?? 3) + 2.5;
+  return Math.max(canvas.connections_width ?? 3, linkGirth(canvas)) + 2.5;
 }
 
 function commit(canvas) {

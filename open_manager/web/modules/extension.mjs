@@ -37,6 +37,7 @@ import { snapshotCommands, watchSnapshots, applySnapshotSetting } from "./snapsh
 import {
   omNodeCommands, omNodeCreated, omNodeMenuItems, omNodeSettings, refreshOmGrips, startOmNodes,
 } from "./om-nodes.mjs";
+import { noodleSettings, startNoodles } from "./noodles.mjs";
 
 let lastMissingTypes = null;
 
@@ -1019,6 +1020,7 @@ app.registerExtension({
         + "other download.",
     },
     ...omNodeSettings,
+    ...noodleSettings,
   ],
   commands: [
     {
@@ -1224,6 +1226,7 @@ app.registerExtension({
     registerThemes().catch(() => {});
     watchThemeExtras();
     startOmNodes();
+    startNoodles();
     refreshPackThemes().then((updated) => {
       if (!updated.length) return;
       toast(`Updated ${updated.length === 1 ? updated[0] : `${updated.length} themes`} `

@@ -288,6 +288,30 @@ changed, or already fixed, stands down and says so in the browser console.
 | Node search draws only the rows in view | On | Results build as they scroll into view |
 | Node search waits for a pause in typing | On | Slow searches run once typing pauses |
 
+### Link styles
+
+*Link style*, under `Settings -> Open Manager -> Links`, draws the links between nodes on the
+classic canvas, Nodes 2.0 and OM Nodes. Links click, reroute, zip tie and carry their midpoint
+marker as with Solid.
+
+| Style | |
+|---|---|
+| From the theme | The active theme's `links.style`, or Solid. The default |
+| Solid | ComfyUI's own |
+| Energy conduit | A glowing core with pulses running from output to input |
+| Flowing dashes | Dashes running from output to input |
+| Chain | Interlocking links in the link's type colour |
+| Rusty chain | Speckled rust-brown links |
+| Pipes | Shaded pipes with a lip at each end |
+| Fabric cord | A braided cord, its weave pointing from output to input |
+| Rope | Twisted hemp |
+| Beads | Beads on a thread |
+| Electric arc | A flickering bolt |
+
+*Link motion* runs the moving styles always, only while a workflow runs, or never. They redraw
+at up to 30 frames a second, less often when drawing takes longer, and not while the tab is
+hidden. Zoomed out, each style draws plainer.
+
 ### Network
 
 Open Manager reads the Comfy Registry live. What it contacts:
@@ -474,7 +498,7 @@ the same way.
 
 A ComfyUI colour palette plus an optional `extras` block: gradient or flat headers per node
 category or class, a title icon, an image behind node bodies, see-through bodies, a graph
-backdrop, shadow colours and a selection glow. For OM Nodes, tokens, named parts and scoped CSS
+backdrop, shadow colours, a selection glow and a link style. For OM Nodes, tokens, named parts and scoped CSS
 restyle every part of a node. Packs ship them, users add them from the pack page.
 
 ```toml

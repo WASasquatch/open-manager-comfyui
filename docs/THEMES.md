@@ -50,12 +50,12 @@ those at their final value.
 ## extras
 
 Every field is optional. Unknown keys are dropped, numbers are range checked, and nothing is
-animated.
+animated except the moving link styles, which follow the user's *Link motion*.
 
 ```jsonc
 "extras": {
   "shape":      { "radius": 10, "titleHeight": 28, "slotHeight": 20 },
-  "links":      { "mode": "spline", "border": false },
+  "links":      { "mode": "spline", "border": false, "style": "chain" },
   "shadow":     "#04160c",
   "nodeOpacity": 0.95,
 
@@ -87,6 +87,7 @@ animated.
 | `shape.slotHeight` | number | 0 to 120 | ComfyUI's |
 | `links.mode` | string | `straight`, `linear`, `spline` | the user's Link Render Mode |
 | `links.border` | boolean | | ComfyUI's |
+| `links.style` | string | `solid`, `energy`, `dashes`, `chain`, `rust`, `pipes`, `cord`, `rope`, `beads`, `arc` | `solid`. Used while the user's *Link style* is *From the theme* |
 | `shadow` | colour | any CSS colour, or `none` | ComfyUI's |
 | `nodeOpacity` | number | 0 to 1 | 1, solid |
 | `categories` | object | colour string, or a rule | |
@@ -337,5 +338,5 @@ bare tag.
 | Nothing is saved | Header, title and text colour are applied for the draw and undone after, so they never enter a saved workflow |
 | Scoped | `extras` apply only while your theme is active, and geometry is restored when the user switches away |
 | Settings untouched | A theme never writes `Comfy.LinkRenderMode` or node opacity |
-| Bounded | Unknown keys dropped, numbers range checked, no animation |
-| No setting | Colours, gradients, `shape`, link drawing, `shadow` and `tileAlpha` apply whenever the theme is active |
+| Bounded | Unknown keys dropped, numbers range checked, no animation but the moving link styles |
+| No setting | Colours, gradients, `shape`, link drawing, `shadow` and `tileAlpha` apply whenever the theme is active. `links.style` applies while *Link style* is *From the theme* |
