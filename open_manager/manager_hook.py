@@ -99,7 +99,18 @@ def prestartup() -> None:
     _start_logging()
     _warn_if_shared()
     _repair_settings()
+    _run_held_installs()
     logging.info("[Open Manager] enabled in place of ComfyUI-Manager")
+
+
+def _run_held_installs() -> None:
+    """Run the requirement installs queued for this start, before custom nodes load."""
+    try:
+        from open_manager import pending
+
+        pending.run_queued()
+    except Exception as error:
+        logger.warning("held installs not run (%s: %s)", type(error).__name__, error)
 
 
 def _repair_settings() -> None:

@@ -14,7 +14,19 @@ const CENTER = 5;
 
 const DIRECTIONS = { 1: [0, -1], 2: [0, 1], 3: [-1, 0], 4: [1, 0] };
 
-const SAME = 0.5;
+const SAME = 1e-9;
+
+const PASSES = 10;
+
+const PAIR_SAMPLES = 16;
+
+const PAIR_SAMPLES_CROWDED = 10;
+
+const CROWD = 20;
+
+const MEMO_KEYS = 6;
+
+const winsMemo = new WeakMap();
 
 const STEP = Math.PI / 4;
 
@@ -109,7 +121,102 @@ function along(tie, end) {
 }
 
 function differ(left, right) {
-  return Math.abs(left - right) < SAME ? 0 : left - right;
+  const gap = left - right;
+  return Math.abs(gap) <= SAME * Math.max(1, Math.abs(left), Math.abs(right)) ? 0 : gap;
+}
+
+function approach(stop, tie, n) {
+  if (!stop) return 0;
+  const dx = stop.p[0] - tie.pos[0];
+  const dy = stop.p[1] - tie.pos[1];
+  const reach = Math.hypot(dx, dy) * SPLINE;
+  const lean = stop.dir ? (stop.dir[0] * n[0] + stop.dir[1] * n[1]) * reach : 0;
+  const side = dx * n[0] + dy * n[1] + lean;
+  return reach > 1e-6 ? side / (reach * reach) : side;
+}
+
+function inbound(stop, tie, t, n, off, samples) {
+  const b = [tie.pos[0] + n[0] * off, tie.pos[1] + n[1] * off];
+  const a = stop.p;
+  const reach = Math.hypot(b[0] - a[0], b[1] - a[1]) * SPLINE;
+  const c0 = stop.dir ? [a[0] + stop.dir[0] * reach, a[1] + stop.dir[1] * reach] : a;
+  const c1 = [b[0] - t[0] * reach, b[1] - t[1] * reach];
+  const points = [];
+  for (let step = 0; step <= samples; step += 1) {
+    const u = step / samples;
+    const v = 1 - u;
+    const w0 = v * v * v;
+    const w1 = 3 * v * v * u;
+    const w2 = 3 * v * u * u;
+    const w3 = u * u * u;
+    points.push([w0 * a[0] + w1 * c0[0] + w2 * c1[0] + w3 * b[0],
+                 w0 * a[1] + w1 * c0[1] + w2 * c1[1] + w3 * b[1]]);
+  }
+  return points;
+}
+
+function meets(p, q) {
+  let count = 0;
+  for (let i = 1; i < p.length; i += 1) {
+    for (let j = 1; j < q.length; j += 1) {
+      const t = crossing(p[i - 1], p[i], q[j - 1], q[j]);
+      if (t !== null && t > 0 && t < 1) count += 1;
+    }
+  }
+  return count;
+}
+
+function signature(rows, tie, t, gap) {
+  const parts = [tie.pos[0].toFixed(1), tie.pos[1].toFixed(1), t[0].toFixed(4), t[1].toFixed(4), gap];
+  for (const row of rows) {
+    const from = row.from;
+    parts.push(from
+      ? `${row.id}:${from.p[0].toFixed(1)},${from.p[1].toFixed(1)},${from.dir ? from.dir.join(",") : ""}`
+      : `${row.id}:`);
+  }
+  return parts.join("|");
+}
+
+function rankInbound(rows, tie, t, n, gap) {
+  const key = signature(rows, tie, t, gap);
+  let memo = winsMemo.get(tie);
+  if (!memo) {
+    memo = new Map();
+    winsMemo.set(tie, memo);
+  }
+  const held = memo.get(key);
+  if (held) {
+    for (const row of rows) row.wins = held.get(row.id) ?? 0;
+    return;
+  }
+  const samples = rows.length > CROWD ? PAIR_SAMPLES_CROWDED : PAIR_SAMPLES;
+  const lower = rows.map((row) => (row.from ? inbound(row.from, tie, t, n, -gap / 2, samples) : null));
+  const upper = rows.map((row) => (row.from ? inbound(row.from, tie, t, n, gap / 2, samples) : null));
+  const wins = rows.map(() => 0);
+  for (let i = 0; i < rows.length; i += 1) {
+    for (let j = i + 1; j < rows.length; j += 1) {
+      if (!lower[i] || !lower[j]) continue;
+      const below = meets(lower[i], upper[j]);
+      const above = meets(upper[i], lower[j]);
+      const pick = below === above ? differ(rows[i].into, rows[j].into) : below - above;
+      if (pick < 0) wins[i] += 1;
+      else if (pick > 0) wins[j] += 1;
+    }
+  }
+  rows.forEach((row, at) => { row.wins = wins[at]; });
+  memo.set(key, new Map(rows.map((row) => [row.id, row.wins])));
+  while (memo.size > MEMO_KEYS) memo.delete(memo.keys().next().value);
+}
+
+function sameOrder(before, after) {
+  if (before.size !== after.size) return false;
+  for (const [tie, plan] of after) {
+    const old = before.get(tie)?.order;
+    if (!old || old.length !== plan.order.length || old.some((id, at) => id !== plan.order[at])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function layout(graph, index, ends, gap) {
@@ -119,20 +226,24 @@ function layout(graph, index, ends, gap) {
     sequence.set(id, end ? [...held].sort((p, q) => along(p, end) - along(q, end)) : [...held]);
   }
   const ranked = ranks(graph, index);
-  const plans = new Map();
   const ties = tiesOf(graph);
+  let plans = new Map();
 
-  for (let pass = 0; pass < 2; pass += 1) {
-    const pointOf = (tie, id) => {
-      const plan = plans.get(tie);
-      return plan ? strand(tie, plan, id) : tie.pos;
-    };
+  const passes = Math.min(ties.length + 2, PASSES);
+  for (let pass = 0; pass < passes; pass += 1) {
     const neighbour = (id, tie, step) => {
       const list = sequence.get(id) || [];
       const other = list[list.indexOf(tie) + step];
-      if (other) return pointOf(other, id);
+      if (other) {
+        const plan = plans.get(other);
+        if (!plan) return { p: other.pos, dir: null };
+        const dir = step < 0 ? plan.t : [-plan.t[0], -plan.t[1]];
+        return { p: strand(other, plan, id), dir };
+      }
       const end = ends.get(id);
-      return end ? (step < 0 ? end.a : end.b) : null;
+      if (!end) return null;
+      const way = step < 0 ? (end.sd || 4) : (end.ed || 3);
+      return { p: step < 0 ? end.a : end.b, dir: DIRECTIONS[way] || null };
     };
     const next = new Map();
     for (const tie of ties) {
@@ -143,8 +254,8 @@ function layout(graph, index, ends, gap) {
       let ty = 0;
       for (const row of rows) {
         if (!row.from || !row.to) continue;
-        const dx = row.to[0] - row.from[0];
-        const dy = row.to[1] - row.from[1];
+        const dx = row.to.p[0] - row.from.p[0];
+        const dy = row.to.p[1] - row.from.p[1];
         const length = Math.hypot(dx, dy) || 1;
         tx += dx / length;
         ty += dy / length;
@@ -152,26 +263,22 @@ function layout(graph, index, ends, gap) {
       const angle = heading(tie, tx, ty);
       const t = [Math.cos(angle), Math.sin(angle)];
       const n = [-t[1], t[0]];
-      let near = 0;
-      let far = 0;
       for (const row of rows) {
-        row.into = row.from ? (row.from[0] - tie.pos[0]) * n[0] + (row.from[1] - tie.pos[1]) * n[1] : 0;
-        row.out = row.to ? (row.to[0] - tie.pos[0]) * n[0] + (row.to[1] - tie.pos[1]) * n[1] : 0;
-        if (row.from) near += Math.hypot(row.from[0] - tie.pos[0], row.from[1] - tie.pos[1]);
-        if (row.to) far += Math.hypot(row.to[0] - tie.pos[0], row.to[1] - tie.pos[1]);
+        row.into = approach(row.from, tie, n);
+        row.out = approach(row.to, tie, n);
         row.rank = ranked.get(row.id) ?? 0;
       }
-      const entry = near <= far;
-      rows.sort((p, q) => (entry
-        ? differ(p.into, q.into) || differ(p.out, q.out)
-        : differ(p.out, q.out) || differ(p.into, q.into)) || p.rank - q.rank);
+      rankInbound(rows, tie, t, n, gap);
+      rows.sort((p, q) => (q.wins - p.wins) || differ(p.into, q.into) || differ(p.out, q.out)
+        || p.rank - q.rank);
       const offset = new Map();
       rows.forEach((row, at) => offset.set(row.id, (at - (rows.length - 1) / 2) * gap));
       next.set(tie, { t, n, angle, order: rows.map((row) => row.id), offset,
                       half: ((rows.length - 1) * gap) / 2 + PAD });
     }
-    plans.clear();
-    for (const [tie, plan] of next) plans.set(tie, plan);
+    const settled = pass > 0 && sameOrder(plans, next);
+    plans = next;
+    if (settled) break;
   }
   return { sequence, plans };
 }

@@ -44,6 +44,7 @@ from . import (
     nodemap,
     optional as optional_groups,
     pause as run_pause,
+    pending as held_installs,
     registry,
     registry_report,
     risk,
@@ -1692,6 +1693,38 @@ def register_routes() -> None:
         )
         return web.json_response({"ok": ok, "output": output})
 
+    @PromptServer.instance.routes.post(f"{PREFIX}/install-later")
+    @_json_body
+    async def install_later(request: web.Request, body: dict) -> web.Response:
+        """Queue an install that met a file the running ComfyUI holds, for the next start."""
+        if not gates.INSTALL:
+            return web.json_response(gates.refuse('install'), status=403)
+        token = str((body or {}).get("id") or "").strip()
+        held = await asyncio.to_thread(held_installs.confirm, token) if token else None
+        if held is None:
+            return web.json_response({"ok": False, "reason": "nothing is waiting under that id"},
+                                     status=404)
+        return web.json_response({"ok": True, "pack": held["pack"], "label": held["label"]})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/install-later/results")
+    async def install_later_results(_request: web.Request) -> web.Response:
+        """How the installs run at the last start went, and what still waits."""
+        return web.json_response({
+            "ok": True,
+            "results": await asyncio.to_thread(held_installs.results),
+            "queued": await asyncio.to_thread(held_installs.queued),
+        })
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/install-later/seen")
+    @_json_body
+    async def install_later_seen(request: web.Request, body: dict) -> web.Response:
+        """Forget the outcomes the page has shown."""
+        ids = (body or {}).get("ids")
+        if not isinstance(ids, list):
+            return web.json_response({"ok": False, "reason": "ids are required"}, status=400)
+        await asyncio.to_thread(held_installs.clear_results, ids[:100])
+        return web.json_response({"ok": True})
+
     @PromptServer.instance.routes.get(f"{PREFIX}/optional/" + "{node_id}")
     async def optional_requirements(request: web.Request) -> web.Response:
         """The optional requirement groups an installed pack declares, and which were chosen."""
@@ -1746,6 +1779,8 @@ def register_routes() -> None:
             "requirements": ran["requirements"],
             "errors": ran["errors"],
             "held": ran.get("held", []),
+            "locked": ran.get("locked", []),
+            "later": ran.get("later", ""),
             "installer": ran.get("installer", ""),
             "environment": diff,
             "environment_id": record,

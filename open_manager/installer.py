@@ -19,7 +19,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import log, paths, piptool
+from . import log, paths, pending, piptool, stubs
 
 logger = log.get_logger("installer")
 
@@ -64,6 +64,8 @@ class InstallResult:
             back or substituted.
         pip_errors: The lines of pip's output that say what went wrong.
         pip_held: The requirements the install policy refused, each with its reason.
+        pip_locked: Files pip could not replace because the running ComfyUI holds them.
+        pip_later: The id of an offer to run those requirements at the next start.
         installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
         optional_unseen: Optional groups the pack declares that the user has not been offered.
@@ -81,6 +83,8 @@ class InstallResult:
     pip_requirements: tuple[str, ...] = ()
     pip_errors: tuple[str, ...] = ()
     pip_held: tuple[str, ...] = ()
+    pip_locked: tuple[str, ...] = ()
+    pip_later: str = ""
     installer: str = ""
     restart_required: bool = False
     optional_unseen: tuple[str, ...] = ()
@@ -99,6 +103,8 @@ class InstallResult:
             "pip_requirements": list(self.pip_requirements),
             "pip_errors": list(self.pip_errors),
             "pip_held": list(self.pip_held),
+            "pip_locked": list(self.pip_locked),
+            "pip_later": self.pip_later,
             "installer": self.installer,
             "restart_required": self.restart_required,
             "optional_unseen": list(self.optional_unseen),
@@ -582,6 +588,8 @@ def _install_repo(
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
         result.pip_held = tuple(_ran.get("held", ()))
+        result.pip_locked = tuple(_ran.get("locked", ()))
+        result.pip_later = _ran.get("later", "")
     return _optional_after(result, target)
 
 
@@ -690,14 +698,46 @@ def pip_trouble(output: str) -> tuple[str, ...]:
         output: Everything pip printed.
 
     Returns:
-        The lines worth reading first, in the order pip printed them, without repeats.
+        The lines worth reading first, in the order pip printed them, without repeats,
+        followed by the exception that ended a traceback pip printed.
     """
     seen: dict[str, None] = {}
-    for line in (output or "").splitlines():
+    lines = (output or "").splitlines()
+    for line in lines:
         text = line.strip()
         if text and any(mark in text for mark in _PIP_TROUBLE):
             seen.setdefault(text, None)
+    starts = [at for at, line in enumerate(lines)
+              if line.strip().startswith("Traceback (most recent call last):")]
+    if starts:
+        for line in lines[starts[-1] + 1:]:
+            if line.strip() and not line[:1].isspace():
+                seen.setdefault(line.strip(), None)
+                break
     return tuple(seen)
+
+
+STUB_RETRIES = 3
+
+
+def _stub_for(keep: list[str], output: str) -> tuple[str, str, str]:
+    """The wheel stub pip stopped on, and the index it names.
+
+    Args:
+        keep: The requirement lines handed to pip.
+        output: What pip printed.
+
+    Returns:
+        ``(requirement, index, refused)`` as :func:`stubs.index_for` reads the requirement
+        pip was collecting last.
+    """
+    collected = stubs.last_collected(output)
+    wanted = _requirement_name(collected)
+    line = next((one for one in keep if wanted and _requirement_name(one) == wanted), collected)
+    if not line:
+        return "", "", ""
+    index, named = stubs.index_for(line)
+    return line.strip(), index, named
 
 
 _REQ_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
@@ -1043,21 +1083,38 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
 
     logger.info("[Open Manager] %s: installing %d requirement%s with %s: %s", name, len(keep),
                 "" if len(keep) == 1 else "s", piptool.kind(python) or "pip", ", ".join(keep))
-    try:
-        finished = piptool.run(
-            python, "install", ["--no-input", "-r", str(filtered)], timeout=PIP_TIMEOUT,
-            echo=lambda line: logger.info("[Open Manager] %s: %s", name, line),
-        )
-    except (OSError, subprocess.SubprocessError) as error:
-        said = f"the installer could not be run ({type(error).__name__}: {error})"
-        logger.warning("[Open Manager] %s: %s", name, said)
-        return {"ok": False, "output": said, "requirements": keep, "errors": [said],
-                "installer": piptool.kind(python), "held": refused}
-    if finished is None:
-        said = piptool.describe(python)
-        logger.warning("[Open Manager] %s: %s", name, said)
-        return {"ok": False, "output": said, "requirements": keep, "errors": [said],
-                "installer": "none", "held": refused}
+    indexes: list[str] = []
+    for _attempt in range(STUB_RETRIES + 1):
+        extra = [arg for index in indexes for arg in ("--extra-index-url", index)]
+        try:
+            finished = piptool.run(
+                python, "install", ["--no-input", *extra, "-r", str(filtered)],
+                timeout=PIP_TIMEOUT,
+                echo=lambda line: logger.info("[Open Manager] %s: %s", name, line),
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            said = f"the installer could not be run ({type(error).__name__}: {error})"
+            logger.warning("[Open Manager] %s: %s", name, said)
+            return {"ok": False, "output": said, "requirements": keep, "errors": [said],
+                    "installer": piptool.kind(python), "held": refused}
+        if finished is None:
+            said = piptool.describe(python)
+            logger.warning("[Open Manager] %s: %s", name, said)
+            return {"ok": False, "output": said, "requirements": keep, "errors": [said],
+                    "installer": "none", "held": refused}
+        attempt_output = (finished.stdout or "") + (finished.stderr or "")
+        if finished.returncode == 0 or not stubs.failed_on_stub(attempt_output):
+            break
+        which, index, named = _stub_for(keep, attempt_output)
+        if named:
+            notes.append(f"{which} is a wheel stub naming {named}, which is not an index "
+                         "Open Manager installs from")
+        if not index or index in indexes:
+            break
+        indexes.append(index)
+        note = f"{which} installs from {index}, the index its PyPI release names"
+        notes.append(note)
+        logger.info("[Open Manager] %s: %s; trying again", name, note)
     if finished.returncode == 0:
         logger.info("[Open Manager] %s: %s installed", name, label)
     else:
@@ -1071,14 +1128,22 @@ def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
     tail = "\n".join(output.strip().splitlines()[-_PIP_TAIL:])
     if notes:
         tail = f"{chr(10).join(notes)}\n{tail}" if tail else chr(10).join(notes)
-    return {
+    answer = {
         "ok": finished.returncode == 0,
         "output": tail,
         "requirements": keep,
         "errors": list(pip_trouble(output)),
         "installer": piptool.kind(python),
         "held": refused,
+        "locked": [],
+        "later": "",
     }
+    if finished.returncode != 0:
+        locked = pending.locked_files(output)
+        if locked:
+            answer["locked"] = locked
+            answer["later"] = pending.offer(directory.name, keep, indexes, label, locked)
+    return answer
 
 
 def installed_version(node_id: str) -> str:
@@ -1329,4 +1394,6 @@ def _install(
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
         result.pip_held = tuple(_ran.get("held", ()))
+        result.pip_locked = tuple(_ran.get("locked", ()))
+        result.pip_later = _ran.get("later", "")
     return _optional_after(result, target)

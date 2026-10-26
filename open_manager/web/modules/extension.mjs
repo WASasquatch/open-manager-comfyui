@@ -4,7 +4,7 @@ import { mendNodeBodies, refreshExtras, registerThemes, repairLinkMode, watchThe
 import "./styles.mjs";
 import { API } from "./base.mjs";
 import { toast, notify, askText } from "./ui.mjs";
-import { loadInstalledIndex, loadTrustedAuthors } from "./installs.mjs";
+import { loadInstalledIndex, loadTrustedAuthors, reportHeldInstalls } from "./installs.mjs";
 import { applyWindowLook, floatPanels, floatHooks, taskbarOn, applyHeaderHeight } from "./windows.mjs";
 import { openPack } from "./packs.mjs";
 import { loadKeys, migrateKeys, migrateEntryMode, panelSetting } from "./settings.mjs";
@@ -1206,6 +1206,7 @@ app.registerExtension({
 
     loadInstalledIndex();
     loadTrustedAuthors();
+    reportHeldInstalls();
 
     applyWindowLook();
     applyTaskbar();

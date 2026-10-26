@@ -1,5 +1,5 @@
 import { app } from "../../../../../scripts/app.js";
-import { piniaStores } from "../shared.mjs";
+import { piniaStores, linkReveal } from "../shared.mjs";
 
 const NUB = 5;
 const NUB_VUE = 8;
@@ -79,6 +79,7 @@ function filterHidden(original) {
     const graph = canvas.graph;
     const keep = [];
     for (const id of ids) {
+      if (linkReveal.links.has(id)) continue;
       hidden.add(id);
       const link = graph.getLink?.(id);
       const where = link ? endsOf(graph, link) : null;
@@ -99,6 +100,7 @@ function inView(point, area) {
 }
 
 function paintNubs(canvas, ctx) {
+  if (linkReveal.drawing) return;
   nubs = [];
   if (!hidden.size || canvas.links_render_mode === window.LiteGraph?.HIDDEN_LINK) return;
   const graph = canvas.graph;

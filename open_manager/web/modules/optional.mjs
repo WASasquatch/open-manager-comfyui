@@ -222,6 +222,8 @@ async function installGroups(packId, name, groups, policy) {
     installer: result.installer || "",
     environment: result.environment,
     environment_id: result.environment_id,
+    pip_locked: result.locked || [],
+    pip_later: result.later || "",
   }).catch(() => "");
   if (choice === "restore" && result.environment_id) {
     await offerRestore(result.environment_id, `${name} ${what}`).catch(() => {});

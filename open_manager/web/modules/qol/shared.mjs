@@ -2,6 +2,8 @@ import { app } from "../../../../scripts/app.js";
 
 const mountHooks = new Map();
 
+const linkReveal = { links: new Set(), drawing: false };
+
 let mountMixin = null;
 
 function vueApp() {
@@ -72,4 +74,5 @@ function graphNodes() {
   return graphs.flatMap((graph) => graph.nodes || graph._nodes || []);
 }
 
-export { piniaStores, whenSwitchedOff, canWatchMounts, watchMounts, shownWidget, graphNodes };
+export { piniaStores, whenSwitchedOff, canWatchMounts, watchMounts, shownWidget, graphNodes,
+         linkReveal };

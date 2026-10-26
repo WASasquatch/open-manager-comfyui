@@ -13,8 +13,8 @@ export default {
   tooltip: "Dragging across links with Z held ties them into a ribbon, with Shift as well into a "
     + "straight one. Dragging across a tie, or double-clicking it, removes it. A tie moves by "
     + "dragging, turns by dragging with Alt held, in 45 degree steps with Shift, and takes a "
-    + "colour from its right-click menu. Links in a tie keep the order of their nodes, and "
-    + "reorder as nodes move.",
+    + "colour from its right-click menu. Links enter a tie in the order they arrive, keep it "
+    + "through every tie after, and cross only past the last one. They reorder as nodes move.",
   issues: [],
   defaultValue: true,
   verified: "1.55.18",

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from . import piptool
+from . import piptool, stubs
 
 __all__ = [
     "CORE_PACKAGES", "Impact", "Replacement", "analyse", "findings_from", "installed_versions",
@@ -66,6 +66,8 @@ class Impact:
         failure: Why pip could not answer, empty where it did.
         checked: Whether a resolve actually ran.
         unresolved: Requirement lines left out because resolving them would have run code.
+        indexes: ``requirement (index)`` for each requirement whose PyPI release is a wheel
+            stub, resolved from the index the stub names.
     """
 
     additions: tuple[str, ...] = ()
@@ -73,6 +75,7 @@ class Impact:
     failure: str = ""
     checked: bool = False
     unresolved: tuple[str, ...] = ()
+    indexes: tuple[str, ...] = ()
 
     @property
     def is_additive(self) -> bool:
@@ -216,11 +219,24 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
                       unresolved=tuple(unresolved))
 
     report, skipped = _resolve(interpreter, wanted)
+    sources: list[str] = []
+    if skipped:
+        extra: list[str] = []
+        for name in skipped:
+            line = next((one for one in wanted if _without([one], {name}) == []), name)
+            index, _named = stubs.index_for(line)
+            if index:
+                sources.append(f"{line.strip()} ({index})")
+                if index not in extra:
+                    extra.append(index)
+        if extra:
+            report, skipped = _resolve(interpreter, wanted, extra)
     if skipped:
         unresolved = list(unresolved) + [f"{name}{SOURCE_ONLY}" for name in skipped]
 
     if isinstance(report, str):
-        return Impact(failure=report, checked=True, unresolved=tuple(unresolved))
+        return Impact(failure=report, checked=True, unresolved=tuple(unresolved),
+                      indexes=tuple(sources))
 
     present = _installed(interpreter)
     additions: list[str] = []
@@ -251,6 +267,7 @@ def analyse(requirements: Sequence[str], python: str = "") -> Impact:
         replacements=tuple(sorted(replacements, key=lambda item: (not item.is_core, item.name))),
         checked=True,
         unresolved=tuple(unresolved),
+        indexes=tuple(sources),
     )
 
 
@@ -305,7 +322,7 @@ def _without(lines: list[str], names: set[str]) -> list[str]:
     return kept
 
 
-def _run_resolver(python: str, lines: list[str]) -> tuple[list | str, str]:
+def _run_resolver(python: str, lines: list[str], extra=()) -> tuple[list | str, str]:
     installer = piptool.kind(python)
     if installer == "none":
         return piptool.describe(python), ""
@@ -315,6 +332,8 @@ def _run_resolver(python: str, lines: list[str]) -> tuple[list | str, str]:
             handle.write("\n".join(lines) + "\n")
         report = os.path.join(elsewhere, "report.json")
         args = ["--dry-run", "--only-binary", ":all:", "--no-input"]
+        for index in extra:
+            args += ["--extra-index-url", index]
         if installer == "pip":
             args += ["--quiet", "--report", report]
         args += ["-r", path]
@@ -339,12 +358,13 @@ def _run_resolver(python: str, lines: list[str]) -> tuple[list | str, str]:
             return f"the resolver's report could not be read ({error})", ""
 
 
-def _resolve(python: str, lines: list[str]) -> tuple[list | str, list[str]]:
+def _resolve(python: str, lines: list[str], extra=()) -> tuple[list | str, list[str]]:
     """Ask the installer what it would install, without installing.
 
     Args:
         python: Interpreter to resolve against.
         lines: Requirement lines to resolve.
+        extra: Further package indexes to look in.
 
     Returns:
         ``(install_list_or_reason, skipped)``. ``skipped`` names requirements left out
@@ -353,7 +373,7 @@ def _resolve(python: str, lines: list[str]) -> tuple[list | str, list[str]]:
     remaining = list(lines)
     skipped: list[str] = []
     for _ in range(WHEEL_RETRIES):
-        answer, failure = _run_resolver(python, remaining)
+        answer, failure = _run_resolver(python, remaining, extra)
         if not failure:
             return answer, skipped
         name = _no_wheel_for(failure)
@@ -383,6 +403,16 @@ def findings_from(impact: Impact) -> list[dict]:
     found: list[dict] = []
     built = [line[: -len(SOURCE_ONLY)] for line in impact.unresolved if line.endswith(SOURCE_ONLY)]
     other = [line for line in impact.unresolved if not line.endswith(SOURCE_ONLY)]
+    if impact.indexes:
+        found.append(
+            {
+                "severity": "note",
+                "title": f"{len(impact.indexes)} requirement(s) install from another index",
+                "detail": "Their PyPI release is a wheel stub that names the index holding the "
+                          "real wheel, so they install from there.",
+                "evidence": tuple(impact.indexes[:8]),
+            }
+        )
     if built:
         found.append(
             {

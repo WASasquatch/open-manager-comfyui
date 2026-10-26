@@ -273,8 +273,9 @@ changed, or already fixed, stands down and says so in the browser console.
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
-| Zip ties | On | Dragging across links with Z held ties them into a ribbon. With Shift held as well the tie is straight: horizontal, vertical or at 45 degrees. Dragging across a tie with Z held, or double-clicking it, removes it. Ties move by dragging, and turn by dragging with Alt held, in 45 degree steps with Shift. A straight or turned tie keeps its angle until *Auto angle* in its right-click menu, where its colour is also set. Links in a tie keep the order of their nodes and reorder as nodes move. After [comfyui-zip-ties](https://github.com/safzanpirani/comfyui-zip-ties), whose saved ties it reads; stands down when that is installed |
+| Zip ties | On | Dragging across links with Z held ties them into a ribbon. With Shift held as well the tie is straight: horizontal, vertical or at 45 degrees. Dragging across a tie with Z held, or double-clicking it, removes it. Ties move by dragging, and turn by dragging with Alt held, in 45 degree steps with Shift. A straight or turned tie keeps its angle until *Auto angle* in its right-click menu, where its colour is also set. Links enter a tie in the order they arrive, keep it through every tie after, and cross only past the last one; they reorder as nodes move. After [comfyui-zip-ties](https://github.com/safzanpirani/comfyui-zip-ties), whose saved ties it reads; stands down when that is installed |
 | Hidden links as nubs | On | A hidden link shows a small nub in its type colour on each node's edge, in place of a type label. Hovering a nub shows the label; hovering the label shows the link |
+| Selected nodes show their hidden links | On | While nodes are selected, the hidden links between them and the nodes they connect to are drawn, whether every link is hidden or only some |
 | No frontend_only badge | On | Nodes with no Python side carry no source badge |
 | Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
 | API jobs open as workflows | On | Jobs queued with only an API prompt open as a laid-out workflow |
@@ -338,8 +339,14 @@ reads the `requirements.txt` the install hands to pip. The install policy guards
 ComfyUI, an installed package or another pack uses: the default leaves them as they are, and
 the upgrade and downgrade choices let them move one way. A package only the pack itself uses
 changes as it asks under every choice. Anything held back is named in the check and in the
-install's issues, with what uses it. To substitute a package, map it in
-`user/open_manager/pip_overrides.json`:
+install's issues, with what uses it.
+
+A requirement whose PyPI release is NVIDIA's wheel stub installs from the index the stub names,
+`pypi.nvidia.com` or `pypi.ngc.nvidia.com`; a stub naming any other index is not followed. An
+install that has to replace a file the running ComfyUI holds open, as a loaded `.dll` is on
+Windows, can be queued for the next start, where it runs before any pack loads.
+
+To substitute a package, map it in `user/open_manager/pip_overrides.json`:
 
 ```json
 { "opencv-python": "opencv-python-headless>=4.9" }

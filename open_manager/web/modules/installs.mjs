@@ -697,6 +697,13 @@ async function showInstallFailure(job, result) {
     box.appendChild(why);
   }
 
+  const locked = result.pip_locked || [];
+  if (locked.length) {
+    const names = [...new Set(locked.map((path) => String(path).split(/[\\/]/).pop()))];
+    box.appendChild(el("div", "om-dl-note",
+      `In use by the running ComfyUI: ${names.join(", ")}.`));
+  }
+
   const asked = result.pip_requirements || [];
   if (asked.length) {
     const what = panel("What it asked for", countNote(asked.length, "requirement"),
@@ -736,9 +743,31 @@ async function showInstallFailure(job, result) {
     undo.onclick = () => { choice = "restore"; backdrop.remove(); };
     foot.appendChild(undo);
   }
-  const keep = el("button", "om-btn om-go", "Leave it");
+  const keep = el("button", `om-btn${result.pip_later ? "" : " om-go"}`, "Leave it");
   keep.onclick = () => { choice = "keep"; backdrop.remove(); };
   foot.appendChild(keep);
+  if (result.pip_later) {
+    const later = el("button", "om-btn om-go", "Install at next start");
+    later.onclick = async () => {
+      later.disabled = true;
+      let answer;
+      try {
+        answer = await dlPost("/install-later", { id: result.pip_later });
+      } catch (error) {
+        answer = { ok: false, reason: error.message };
+      }
+      if (!answer?.ok) {
+        later.disabled = false;
+        notify("Not queued", answer?.reason || "");
+        return;
+      }
+      choice = "later";
+      backdrop.remove();
+      toast(`${job.name}: queued for the next start.`, { kind: "ok" });
+      remindRestart();
+    };
+    foot.appendChild(later);
+  }
   box.appendChild(foot);
   backdrop.appendChild(box);
   document.body.appendChild(backdrop);
@@ -751,6 +780,30 @@ async function showInstallFailure(job, result) {
     watch.observe(document.body, { childList: true });
   });
   return choice;
+}
+
+async function reportHeldInstalls() {
+  let data;
+  try {
+    data = await (await api.fetchApi(`${API}/install-later/results`)).json();
+  } catch {
+    return;
+  }
+  const results = data?.results || [];
+  if (!results.length) return;
+  const done = results.filter((one) => one.ok);
+  if (done.length) {
+    toast(`Installed at start: ${done.map((one) => `${one.pack} ${one.label}`).join(", ")}.`,
+      { kind: "ok", duration: 9000 });
+  }
+  dlPost("/install-later/seen", { ids: results.map((one) => one.id) }).catch(() => {});
+  for (const one of results.filter((item) => !item.ok)) {
+    await showInstallFailure({ name: `${one.pack} ${one.label} at start` }, {
+      pip_errors: one.errors || [],
+      pip_requirements: one.lines || [],
+      pip_output: one.output || "",
+    }).catch(() => {});
+  }
 }
 
 function environmentSummary(diff) {
@@ -1170,4 +1223,4 @@ function tagChip(tag) {
   return chip;
 }
 
-export { INSTALL_POLICIES, paintImpact, installPolicyDefault, showInstallFailure, offerRestore, compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };
+export { reportHeldInstalls, INSTALL_POLICIES, paintImpact, installPolicyDefault, showInstallFailure, offerRestore, compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };
