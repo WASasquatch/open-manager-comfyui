@@ -11,6 +11,7 @@ import { isRelease, updateInstalled, isHeld, toggleHold, isInstalledUpdatable, t
 import { sinceText, allowBanned, browseTopic } from "./registry.mjs";
 import { dlPost } from "./net.mjs";
 import { linkReport } from "./report-link.mjs";
+import { offerOptional } from "./optional.mjs";
 
 async function appendImpact(packId, version, slot, gate, policy, base) {
   const ticket = (slot._omTicket || 0) + 1;
@@ -504,6 +505,7 @@ async function runInstallQueue() {
   queueRunning = true;
   const restoreOffers = [];
   const failures = [];
+  const optionalOffers = [];
   const progress = toast("", { sticky: true });
   let done = 0;
   const issues = [];
@@ -548,6 +550,20 @@ async function runInstallQueue() {
         issues.push(`${job.name}: ${first || "requirements did not install cleanly"}`);
         failures.push({ job, result, summary });
       }
+      if (result.optional_ran?.length && result.optional_ok === false) {
+        const what = result.optional_ran.join(", ");
+        const first = (result.optional_errors || [])[0];
+        issues.push(`${job.name} ${what}: ${first || "optional requirements did not install"}`);
+        failures.push({
+          job: { ...job, name: `${job.name} ${what}` },
+          result: { ...result, pip_errors: result.optional_errors || [],
+                    pip_output: result.optional_output || "", pip_requirements: [] },
+        });
+      }
+      if (result.optional_unseen?.length) {
+        optionalOffers.push({ packId: job.packId, name: job.name,
+                              policy: job.policy || installPolicyDefault() });
+      }
     } else {
       job.control?.setInstall();
       rememberInstall(job.packId, null);
@@ -574,6 +590,9 @@ async function runInstallQueue() {
     progress.settle(`${done} pack(s) installed.`, "ok", 6000);
   }
   if (done > issues.length) remindRestart();
+  for (const offer of optionalOffers) {
+    await offerOptional(offer.packId, offer.name, offer.policy).catch(() => {});
+  }
 }
 
 async function openEnvironmentDialog() {
@@ -1042,6 +1061,10 @@ async function installFromRepo(pack, control) {
       }
     }
     remindRestart();
+    const folder = String(result.directory || "").split(/[\\/]/).pop();
+    if (folder && result.optional_unseen?.length) {
+      await offerOptional(folder, pack.title || pack.repo, installPolicyDefault()).catch(() => {});
+    }
   } else {
     control?.setInstall?.();
     progress.remove();
@@ -1147,4 +1170,4 @@ function tagChip(tag) {
   return chip;
 }
 
-export { compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };
+export { installPolicyDefault, showInstallFailure, offerRestore, compareVersions, versionSwitch, remindRestart, restartServer, makeInstallControl, installedIndex, foldId, indexInstalled, loadInstalledIndex, installedPack, updateTarget, packName, versionFacts, registryControl, installedMenu, rememberInstall, enqueueInstall, openEnvironmentDialog, install, loadTrustedAuthors, byTrustedAuthor, trustBadge, confirmAuthorTrust, installFromRepo, uninstall, repoOwnerName, makeStarButton, tagChip, reviewOf, reviewWord, reviewChip };

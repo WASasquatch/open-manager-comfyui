@@ -781,6 +781,23 @@ video.om-lb-img { background: #000; }
 .om-dl-refused { opacity: .5; cursor: not-allowed; }
 .om-dl-check { margin-top: 3px; flex: none; }
 .om-dl-modeltext { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.om-opt-group { cursor: default; }
+.om-opt-head { align-items: center; }
+.om-opt-pick .om-opt-head { cursor: pointer; }
+.om-opt-installed .om-dl-state { color: #3fb950; }
+.om-opt-partial .om-dl-state { color: #d29922; }
+.om-opt-packages { margin: 4px 0 0; }
+.om-opt-packages .om-panel-head { padding: 6px 10px; }
+.om-opt-packages .om-panel-title { font-size: 13px; font-weight: 500; }
+.om-opt-packages .om-deps { margin-top: 0; border: none; border-radius: 0; }
+.om-opt-note { margin-left: 10px; color: var(--om-muted); font-family: system-ui, sans-serif;
+  font-size: 12px; }
+.om-opt-have { color: #3fb950; }
+.om-opt-clash { color: #f85149; }
+.om-opt-all { display: flex; gap: 6px; align-items: center; flex: none; cursor: pointer;
+  color: var(--om-text-2); font-size: 13px; }
+.om-opt-all .om-dl-check { margin-top: 0; }
+.om-opt-pane .om-actions { margin: 0; }
 .om-dl-pickfoot { display: flex; gap: 12px; align-items: center; padding: 12px 20px;
   border-top: 1px solid var(--om-border); }
 .om-dl-wf { flex: none; max-width: 320px; }

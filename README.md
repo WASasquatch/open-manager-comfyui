@@ -130,6 +130,7 @@ Without one, a pack page shows its star count only.
 | Licences | Per pack, sortable |
 | Your own repos | By URL or `owner/repo`, kept in `user/` |
 | Any ref | Branch, tag or commit |
+| Optional requirements | Each group a pack offers, or all of them, after it installs or from its page; the chosen ones follow updates |
 | Workflow gaps | Missing nodes, and which pack won a duplicate name |
 | Workflow packs | Each pack the open workflow uses, with node ids to copy |
 | Themes | Gradients, icons, backdrops |
@@ -338,6 +339,9 @@ in the install output. To substitute a package, map it in
 { "opencv-python": "opencv-python-headless>=4.9" }
 ```
 
+Optional groups follow the same rules. The groups chosen for each pack are kept in
+`user/open_manager/optional_requirements.json` and forgotten when the pack is removed.
+
 ### Your GitHub list
 
 | | |
@@ -397,6 +401,44 @@ with it automatically, following
 [ComfyUI's workflow templates convention](https://docs.comfy.org/custom-nodes/workflow_templates):
 `workflows/hdr.json` picks up `workflows/hdr.webp`, `.png`, `.jpg`, `.jpeg` or `.gif`, and a
 numbered variant such as `hdr-1.png` counts too. Workflows without one show as a plain row.
+
+### Optional requirements
+
+Optional dependencies need no field. Open Manager reads them from the files Python projects
+already use and offers each group once your pack installs, one at a time or all together, and
+again from the *Optional* tab on your page. The groups a user picks install again whenever your
+pack updates, under the same rules as `requirements.txt`: the install policy, the packages held
+back to protect ComfyUI, and the user's substitutions. `requirements.txt` stays the base
+install.
+
+| Declared as | Group name |
+| --- | --- |
+| `requirements/<group>.txt` | The file name |
+| `requirements-<group>.txt` or `requirements_<group>.txt` beside `requirements.txt` | The part after `requirements` |
+| `[project.optional-dependencies]` in `pyproject.toml` | The extra |
+
+| | |
+| --- | --- |
+| Description | The first paragraph of the comment a file opens with, or the comment beside an extra's name |
+| Package notes | A comment after a package, as pip reads one |
+| `-r` lines in a group | Followed while they stay inside your pack |
+| A file and an extra of one name | The file is the group, and takes the extra's comment when it opens with none |
+| Not offered | Files `requirements.txt` includes, files another group includes, `dev`, `test`, `docs`, `lint` and the like, and `base`, `common`, `core` and the like |
+| Aggregates | A file of only `-r` lines, or a group made only of others, as `all` often is, is not offered: *All* covers it |
+
+```toml
+[project.optional-dependencies]
+llm = ["llama-index-core>=0.14", "httpx"]   # the LLM nodes
+pdf = ["xhtml2pdf"]                         # .pdf on Save DOC
+all = ["my-pack[llm,pdf]"]                  # covered by All, not offered
+```
+
+```text
+# requirements/llm.txt
+# The LLM nodes, on llama-index.
+llama-index-core>=0.14   # documents, indexes and chat
+httpx                    # the web tools agents call
+```
 
 ### Capabilities
 

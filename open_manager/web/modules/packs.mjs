@@ -13,6 +13,7 @@ import { installedText } from "./installed.mjs";
 import { packQuery } from "./registry.mjs";
 import { nodeDragFrom } from "./node-drag.mjs";
 import { linkReport } from "./report-link.mjs";
+import { addOptionalTab, addOptionalPanel } from "./optional.mjs";
 
 function packRoot(node) {
   return node?.closest(".om-dialog, .om-float") || null;
@@ -221,6 +222,11 @@ function buildLocalPackBody(container, info) {
     reqs.body.appendChild(text);
     body.appendChild(reqs);
   }
+
+  const optionalSlot = el("div");
+  body.appendChild(optionalSlot);
+  addOptionalPanel(optionalSlot, info.id,
+    project.display_name || project.name || info.id);
 
   if (info.readme?.text) {
     const readme = el("div", "om-readme");
@@ -711,6 +717,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
       pane: list,
     });
     tabs.start();
+  }
+  if (pack.installed_version || installedPack(pack.id)) {
+    addOptionalTab(tabs, pack.id, pack.name || pack.id);
   }
 
   if (app.extensionManager.setting.get("openManager.enrichMetadata")) {

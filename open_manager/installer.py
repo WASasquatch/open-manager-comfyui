@@ -63,6 +63,11 @@ class InstallResult:
         pip_errors: The lines of pip's output that say what went wrong.
         installer: Which installer ran, ``pip`` or ``uv``.
         restart_required: Whether ComfyUI must restart to load the pack.
+        optional_unseen: Optional groups the pack declares that the user has not been offered.
+        optional_ran: Optional groups installed again because the user chose them before.
+        optional_ok: Whether those installed.
+        optional_output: Captured installer output for them, trimmed.
+        optional_errors: The lines of that output that say what went wrong.
     """
 
     ok: bool
@@ -76,6 +81,11 @@ class InstallResult:
     pip_errors: tuple[str, ...] = ()
     installer: str = ""
     restart_required: bool = False
+    optional_unseen: tuple[str, ...] = ()
+    optional_ran: tuple[str, ...] = ()
+    optional_ok: bool = True
+    optional_output: str = ""
+    optional_errors: tuple[str, ...] = ()
 
     def to_json(self) -> dict:
         """This result as a plain object."""
@@ -91,6 +101,11 @@ class InstallResult:
             "pip_errors": list(self.pip_errors),
             "installer": self.installer,
             "restart_required": self.restart_required,
+            "optional_unseen": list(self.optional_unseen),
+            "optional_ran": list(self.optional_ran),
+            "optional_ok": self.optional_ok,
+            "optional_output": self.optional_output,
+            "optional_errors": list(self.optional_errors),
         }
 
 
@@ -481,6 +496,55 @@ def _install_repo(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
+    return _optional_after(result, target, python, with_deps, policy)
+
+
+def install_optional(directory: Path, names, python: str = "", policy: str = "all") -> dict:
+    """Install some of a pack's optional groups.
+
+    Args:
+        directory: The installed pack directory.
+        names: Group names, as :func:`optional.groups` lists them.
+        python: Interpreter to install into.
+        policy: One of :data:`INSTALL_POLICIES`.
+
+    Returns:
+        :func:`_pip_install`'s answer, with ``groups`` naming the groups installed.
+    """
+    from . import optional
+
+    lines, used = optional.lines_for(directory, names)
+    if not lines:
+        return {"ok": True, "output": "Nothing to install.", "requirements": [], "errors": [],
+                "installer": piptool.kind(python), "groups": used}
+    ran = _pip_install(directory, python, policy, lines, f"optional {', '.join(used)}")
+    ran["groups"] = used
+    return ran
+
+
+def _optional_after(result: InstallResult, target: Path, python: str, with_deps: bool,
+                    policy: str) -> InstallResult:
+    """Install the optional groups chosen before, and name the ones not yet offered."""
+    from . import optional
+
+    try:
+        found = optional.groups(target)
+    except Exception as error:
+        logger.warning("[Open Manager] %s: optional requirements unreadable: %s",
+                       target.name, error)
+        return result
+    if not found:
+        return result
+    result.optional_unseen = tuple(optional.unseen(target, found))
+    keys = {group["key"] for group in found}
+    wanted = [key for key in optional.chosen(target) if key in keys]
+    if not with_deps or not wanted:
+        return result
+    ran = install_optional(target, wanted, python, policy)
+    result.optional_ran = tuple(ran["groups"])
+    result.optional_ok = ran["ok"]
+    result.optional_output = ran["output"]
+    result.optional_errors = tuple(ran["errors"])
     return result
 
 
@@ -766,12 +830,16 @@ def install_requirements(directory: Path, python: str = "", policy: str = "all")
     return ran["ok"], ran["output"]
 
 
-def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
+def _pip_install(directory: Path, python: str, policy: str = "all", lines=None,
+                 label: str = "requirements") -> dict:
     """Install a pack's requirements, less anything held back.
 
     Args:
         directory: The installed pack directory.
         python: Interpreter to install into.
+        policy: One of :data:`INSTALL_POLICIES`.
+        lines: Requirement lines to install in place of the pack's ``requirements.txt``.
+        label: What the lines are, as the log names them.
 
     Returns:
         ``{ok, output, requirements, errors, installer}``. ``output`` names what was held
@@ -779,7 +847,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
         ``pip``, ``uv`` or ``none``.
     """
     keep, held, swapped, redirects = plan_requirements(
-        _requirements(directory), policy, python
+        _requirements(directory) if lines is None else list(lines), policy, python
     )
     notes = []
     if held:
@@ -796,7 +864,7 @@ def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
         logger.info("[Open Manager] %s: %s", name, note)
     if not keep:
         said = "\n".join(notes + ["Nothing left to install."]) if notes else "Nothing to install."
-        logger.info("[Open Manager] %s: no requirements to install", name)
+        logger.info("[Open Manager] %s: no %s to install", name, label)
         return {"ok": True, "output": said, "requirements": [], "errors": [],
                 "installer": piptool.kind(python)}
 
@@ -826,10 +894,10 @@ def _pip_install(directory: Path, python: str, policy: str = "all") -> dict:
         return {"ok": False, "output": said, "requirements": keep, "errors": [said],
                 "installer": "none"}
     if finished.returncode == 0:
-        logger.info("[Open Manager] %s: requirements installed", name)
+        logger.info("[Open Manager] %s: %s installed", name, label)
     else:
-        logger.warning("[Open Manager] %s: requirements did not install (exit code %d)",
-                       name, finished.returncode)
+        logger.warning("[Open Manager] %s: %s did not install (exit code %d)",
+                       name, label, finished.returncode)
     try:
         filtered.unlink()
     except OSError:
@@ -1088,4 +1156,4 @@ def _install(
         result.pip_requirements = tuple(_ran["requirements"])
         result.pip_errors = tuple(_ran["errors"])
         result.installer = _ran.get("installer", "")
-    return result
+    return _optional_after(result, target, python, with_deps, policy)

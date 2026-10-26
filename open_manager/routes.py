@@ -42,6 +42,7 @@ from . import (
     localnodes,
     monitor,
     nodemap,
+    optional as optional_groups,
     pause as run_pause,
     registry,
     registry_report,
@@ -1617,7 +1618,75 @@ def register_routes() -> None:
         ok, output = await asyncio.to_thread(installer.install_requirements, directory, "",
             policy,
         )
-        return web.json_response({"ok": ok, "output": output})
+        found = await asyncio.to_thread(optional_groups.groups, directory)
+        keys = {group["key"] for group in found}
+        wanted = [key for key in optional_groups.chosen(directory) if key in keys]
+        extra = {"optional_unseen": optional_groups.unseen(directory, found), "optional_ran": []}
+        if wanted:
+            ran = await asyncio.to_thread(installer.install_optional, directory, wanted, "", policy)
+            extra["optional_ran"] = ran["groups"]
+            if not ran["ok"]:
+                ok = False
+                output = "\n".join(part for part in (output, ran["output"]) if part)
+        return web.json_response({"ok": ok, "output": output, **extra})
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/optional/" + "{node_id}")
+    async def optional_requirements(request: web.Request) -> web.Response:
+        """The optional requirement groups an installed pack declares, and which were chosen."""
+        pack_id = request.match_info.get("node_id", "").strip()
+        directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id) if pack_id else None
+        if directory is None:
+            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
+        found = await asyncio.to_thread(optional_groups.summary, directory)
+        return web.json_response({
+            "ok": True,
+            "id": pack_id,
+            "groups": found,
+            "chosen": optional_groups.chosen(directory),
+            "unseen": optional_groups.unseen(directory, found),
+        })
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/install-optional")
+    @_json_body
+    async def install_optional(request: web.Request, body: dict) -> web.Response:
+        """Install some of a pack's optional requirement groups."""
+        if not gates.INSTALL:
+            return web.json_response(gates.refuse('install'), status=403)
+        pack_id = str((body or {}).get("id") or "").strip()
+        names = (body or {}).get("groups")
+        if not pack_id or not isinstance(names, list):
+            return web.json_response({"ok": False, "reason": "id and groups are required"}, status=400)
+        names = [str(name).strip() for name in names[:64] if str(name).strip()]
+        directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id)
+        if directory is None:
+            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
+        found = await asyncio.to_thread(optional_groups.groups, directory)
+        offered = [group["name"] for group in found]
+        if not names:
+            await asyncio.to_thread(optional_groups.mark_seen, directory, offered)
+            return web.json_response({"ok": True, "groups": [], "output": ""})
+        policy = installer.install_policy((body or {}).get("policy", "all"))
+        before = await asyncio.to_thread(environment.snapshot)
+        ran = await asyncio.to_thread(installer.install_optional, directory, names, "", policy)
+        after = await asyncio.to_thread(environment.snapshot)
+        diff = environment.compare(before, after)
+        label = f"optional {', '.join(ran['groups'])}" if ran["groups"] else "optional"
+        record = await asyncio.to_thread(environment.record, pack_id, label, diff)
+        if ran["ok"]:
+            await asyncio.to_thread(optional_groups.remember, directory, ran["groups"], offered)
+        else:
+            await asyncio.to_thread(optional_groups.mark_seen, directory, offered)
+        return web.json_response({
+            "ok": ran["ok"],
+            "groups": ran["groups"],
+            "output": ran["output"],
+            "requirements": ran["requirements"],
+            "errors": ran["errors"],
+            "installer": ran.get("installer", ""),
+            "environment": diff,
+            "environment_id": record,
+            "restart_required": bool(diff.get("total")),
+        })
 
     @PromptServer.instance.routes.get(f"{PREFIX}/status-reasons/" + "{node_id}")
     async def status_reasons(request: web.Request) -> web.Response:
@@ -2780,7 +2849,10 @@ def register_routes() -> None:
         node_id = str(body.get("id", "")).strip()
         if not node_id:
             return web.json_response({"ok": False, "reason": "id is required"}, status=400)
+        placed = await asyncio.to_thread(installer.resolve_install_dir, node_id)
         result = await asyncio.to_thread(installer.uninstall, node_id)
+        if result.ok and placed is not None:
+            await asyncio.to_thread(optional_groups.forget, placed.name)
         return web.json_response(result.to_json(), status=200 if result.ok else 409)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/reboot")
