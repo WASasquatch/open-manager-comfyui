@@ -19,7 +19,7 @@ export default {
   tooltip: "Files an asset scan adds appear in Media Assets.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     return "";
   },

@@ -276,7 +276,7 @@ export default {
     + "right-click menu.",
   issues: ["Comfy-Org/ComfyUI_frontend#9859", "Comfy-Org/ComfyUI_frontend#14597"],
   defaultValue: true,
-  verified: "1.53.6",
+  verified: "1.57.4",
   check() {
     if (!window.LiteGraph || !app.canvas) return "the canvas is not ready";
     if (typeof piniaStores()?.get !== "function") return "ComfyUI's stores are not reachable";

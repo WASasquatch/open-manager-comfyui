@@ -553,7 +553,7 @@ export const program = {
         border: 1px solid var(--om-border); }
       .gal-cell:hover .gal-art {
         border-color: color-mix(in srgb, var(--om-text) 30%, var(--om-border)); }
-      .gal-cell-on .gal-art { outline: 2px solid var(--p-button-text-primary-color, #388bfd);
+      .gal-cell-on .gal-art { outline: 2px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
         outline-offset: -2px; }
       .gal-folder .gal-art { background: color-mix(in srgb, var(--om-text) 6%, var(--om-input)); }
       .gal-shot { position: absolute; inset: 0; width: 100%; height: 100%;

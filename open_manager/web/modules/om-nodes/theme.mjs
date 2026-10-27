@@ -109,7 +109,7 @@ const INNER_PARTS = {
   badges: '[data-testid^="node-body-"] > .mt-auto',
   tabs: '.box-border.isolate > :is([data-testid="advanced-inputs-button"], '
     + '[data-testid="subgraph-enter-button"], '
-    + "button:is(.bg-destructive-background, .bg-destructive, .bg-warning))",
+    + "button:is(.bg-destructive-background, .bg-destructive, .bg-warning-background, .bg-warning))",
   outline: '[data-testid="node-state-outline-overlay"]',
   resize: "[data-corner]",
 };

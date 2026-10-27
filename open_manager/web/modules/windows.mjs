@@ -196,7 +196,7 @@ const BAR_INERT = "button, input, textarea, select, [contenteditable]";
 
 const BAR_PAINTS = {
   plain: "",
-  accent: "var(--p-button-text-primary-color, #388bfd)",
+  accent: "var(--p-button-text-primary-color, var(--p-primary-color, #388bfd))",
   green: "#3fb950",
   amber: "#d29922",
   red: "#f85149",

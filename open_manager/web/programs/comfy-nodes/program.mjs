@@ -476,8 +476,8 @@ export const program = {
       .nod-find { width: 100%; height: 38px; box-sizing: border-box; padding: 0 38px 0 36px;
         border: 1px solid var(--om-border); border-radius: 8px; outline: none;
         background: var(--om-input); color: var(--om-text); font: inherit; font-size: 15px; }
-      .nod-find:focus { border-color: var(--p-button-text-primary-color, #388bfd);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 22%,
+      .nod-find:focus { border-color: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 22%,
           transparent); }
       .nod-clear, .nod-shut { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px;
         background: transparent; color: var(--om-muted); font-size: 17px; line-height: 1;
@@ -519,8 +519,8 @@ export const program = {
         border: 1px solid transparent; cursor: grab; }
       .nod-row:hover { background: var(--om-hover); border-color: var(--om-border); }
       .nod-row-at, .nod-row-at:hover {
-        background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 15%, transparent);
-        border-color: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 45%,
+        background: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 15%, transparent);
+        border-color: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 45%,
           transparent); }
       .nod-head { display: flex; align-items: baseline; gap: 7px; white-space: nowrap;
         overflow: hidden; }

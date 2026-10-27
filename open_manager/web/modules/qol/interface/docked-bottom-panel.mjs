@@ -1,4 +1,6 @@
-const SPLIT = ':is(.splitter-overlay-bottom, [data-testid="graph-canvas-gutter"])';
+const GROUP = '[data-testid="graph-canvas-gutter"]';
+
+const SPLIT = `:is(.splitter-overlay-bottom, ${GROUP})`;
 
 const HANDLE = ":is(.p-splitter-gutter, [data-panel-resize-handle-id])";
 
@@ -22,6 +24,8 @@ function edge(side, before = "") {
 const DOCK_CSS = `
 ${SPLIT} > .bottom-panel { max-width: none; border-radius: 0; border-width: 1px 0 0; }
 ${SPLIT} > ${HANDLE} { border-radius: 0; }
+${GROUP} { overflow: visible !important; }
+${GROUP} > [data-panel-resize-handle-id] { width: auto; }
 ${SPLIT}[class~="mb-(--comfy-canvas-gutter)"] > .bottom-panel {
   margin-bottom: calc(-1 * ${GUTTER}); }
 ${edge("ml", `${CONNECTED} `)}, ${edge("ml", `${BAR_RIGHT} `)} { margin-left: calc(-1 * ${GUTTER}); }
@@ -35,7 +39,7 @@ export default {
     + "corners, in place of floating over the canvas.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     const split = document.querySelector(SPLIT);
     if (split && !GUTTERS.some((name) => split.classList.contains(name))) {

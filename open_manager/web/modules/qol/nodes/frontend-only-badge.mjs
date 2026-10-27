@@ -47,7 +47,7 @@ export default {
     + "hidden. On, those nodes carry no source badge.",
   issues: ["Comfy-Org/ComfyUI_frontend#7618"],
   defaultValue: true,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     if (!defStore()) return "ComfyUI's nodeDef store has changed";
     return "";

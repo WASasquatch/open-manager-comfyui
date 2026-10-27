@@ -17,7 +17,7 @@ export default {
     + "the room on screen.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.18",
+  verified: "1.57.4",
   check() {
     return document.head ? "" : "the page is not ready";
   },

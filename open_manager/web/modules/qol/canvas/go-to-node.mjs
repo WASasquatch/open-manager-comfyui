@@ -23,7 +23,7 @@ function commandStore() {
 function focusPrompt() {
   let tries = 0;
   const look = () => {
-    const box = [...document.querySelectorAll("[role=\"dialog\"], .p-dialog")]
+    const box = [...document.querySelectorAll("[role=\"dialog\"]")]
       .reverse().find((one) => one.textContent.includes(LABEL));
     const input = box?.querySelector("input");
     if (input) {
@@ -80,7 +80,7 @@ export default {
     + "or a path such as 12:5 for a node inside subgraph node 12, and opens and frames that node.",
   issues: ["Comfy-Org/ComfyUI_frontend#4089", "Comfy-Org/ComfyUI_frontend#12754"],
   defaultValue: true,
-  verified: "1.54.8",
+  verified: "1.57.4",
   check() {
     const store = commandStore();
     if (!store) return "ComfyUI's command store has changed";

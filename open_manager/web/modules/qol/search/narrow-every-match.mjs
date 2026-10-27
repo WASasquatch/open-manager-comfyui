@@ -28,7 +28,7 @@ export default {
     + "appears there. On, the selection narrows every match.",
   issues: ["Comfy-Org/ComfyUI_frontend#20696"],
   defaultValue: true,
-  verified: "1.53.6",
+  verified: "1.57.4",
   check() {
     if (!piniaStores()?.get("searchBox")) return "ComfyUI's search box is not reachable";
     const service = searchService();

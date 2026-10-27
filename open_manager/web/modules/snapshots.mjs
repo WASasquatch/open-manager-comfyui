@@ -43,7 +43,7 @@ function shield(node) {
 }
 
 function pickFor(tab) {
-  const held = tab.querySelector(":scope > .om-snap-pick");
+  const held = tab.querySelector(".om-snap-pick");
   if (held) return held;
   const pick = el("span", "om-snap-pick");
   pick.setAttribute("role", "button");
@@ -73,7 +73,7 @@ function pickFor(tab) {
 }
 
 function paintPick(tab, workflow) {
-  const label = tab.querySelector(":scope > .workflow-label");
+  const label = tab.querySelector(':scope > .workflow-label, :scope > [role="tab"] > .workflow-label');
   if (!label) return;
   const pick = pickFor(tab);
   if (label.nextElementSibling !== pick) label.after(pick);
@@ -100,7 +100,7 @@ function paintSnapTabs() {
     if (!tab) return;
     const workflow = on ? open[index] : null;
     if (!workflow) {
-      tab.querySelector(":scope > .om-snap-pick")?.remove();
+      tab.querySelector(".om-snap-pick")?.remove();
       return;
     }
     paintPick(tab, workflow);

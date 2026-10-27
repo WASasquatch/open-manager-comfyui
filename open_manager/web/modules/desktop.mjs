@@ -91,12 +91,14 @@ function deskFreeBox() {
 
 const DESK_DRAWER_MIN = 40;
 
+const DESK_SPLITS = ".p-splitter, [data-panel-group]";
+
 let deskGutter = 8;
 
 function deskRoomBox() {
   let outer = null;
-  for (let split = deskFreeBox()?.closest(".p-splitter"); split;
-    split = split.parentElement?.closest(".p-splitter")) {
+  for (let split = deskFreeBox()?.closest(DESK_SPLITS); split;
+    split = split.parentElement?.closest(DESK_SPLITS)) {
     outer = split;
   }
   return outer;
@@ -611,7 +613,7 @@ function deskChrome() {
   if (map) found.push(map);
   const panel = deskFreeBox();
   const room = panel?.getBoundingClientRect();
-  for (const group of panel?.querySelectorAll(".p-buttongroup") || []) {
+  for (const group of panel?.querySelectorAll('.p-buttongroup, [role="toolbar"]') || []) {
     const box = group.getBoundingClientRect();
     if (!box.height || !room) continue;
     if (box.bottom > room.bottom - 160) found.push(group);
@@ -633,7 +635,7 @@ function slideChrome(away) {
 
 function chromeHost() {
   const bar = document.querySelector(".actionbar-container");
-  return bar?.closest(".p-splitterpanel") || document.body;
+  return bar?.closest(".p-splitterpanel, [data-panel]") || document.body;
 }
 
 function watchDeskChrome() {
@@ -796,7 +798,7 @@ function leaveDeskOnWork() {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
     if (target.closest(`#${DESK_TAB_ID}`) || target.closest(".om-desk")) return;
-    if (target.closest(".p-togglebutton") || target.closest(".new-blank-workflow-button")) {
+    if (target.closest('.p-togglebutton, [data-testid="workflow-tab"], .new-blank-workflow-button')) {
       hideDesk();
     }
   }, true);

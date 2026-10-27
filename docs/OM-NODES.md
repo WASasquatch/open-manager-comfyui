@@ -15,6 +15,7 @@ OM Nodes was what turned it on. Switching Nodes 2.0 off switches OM Nodes off.
 |---|---|---|---|
 | Title bar | 30 | 28 | 30 |
 | Slot row | 20 | 20 | 20 |
+| List output | a grid of nine squares | a square | a grid of nine squares |
 | Widget row | 20, 4 apart | 24, 4 apart | 20, 4 apart |
 | Text and file widgets | 20 | 32 | 20 |
 | Widget label | inside the widget | its own column | inside the widget |

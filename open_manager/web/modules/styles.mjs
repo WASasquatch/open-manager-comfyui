@@ -61,9 +61,11 @@ style.textContent = `
 [data-om-tint] { box-shadow: inset 0 -2px 0 var(--om-tab-tint);
   background: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)) !important;
   --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)); }
-[data-om-tint].p-togglebutton-checked {
+[data-om-tint]:is(.p-togglebutton-checked, :has(> [role="tab"][aria-selected="true"])) {
   background: color-mix(in srgb, var(--om-tab-tint) 28%, var(--om-tab-under, #151915)) !important;
   --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 28%, var(--om-tab-under, #151915)); }
+.workflow-tabs > .workflow-tab[data-om-tint] { border-radius: var(--radius-lg, .5rem); }
+.workflow-tabs > .workflow-tab[data-om-tint] > [role="tab"] { background: transparent !important; }
 [data-om-titled] .workflow-label { display: none !important; }
 .om-tab-title { display: inline-block; max-width: 150px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
@@ -327,15 +329,14 @@ sidebarStyle.textContent = `
 
 .om-side { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 8px;
   font: 13px/1.5 system-ui, sans-serif; color: var(--om-text); box-sizing: border-box; }
-.om-nav { display: flex; gap: 4px; flex: none; container: om-nav / inline-size; }
+.om-nav { display: flex; flex-wrap: wrap; gap: 4px; flex: none; container: om-nav / inline-size; }
 .om-nav-btn { flex: 1; padding: 6px 4px; background: var(--om-surface); border: 1px solid var(--om-border);
   border-radius: 6px; color: var(--om-muted); cursor: pointer; font-size: 15px; line-height: 1; }
 .om-nav-btn:hover { background: var(--om-hover); }
 .om-nav-more { flex: none; width: 28px; padding: 6px 0; font-size: 14px; line-height: 1; }
 .om-nav-btn.active { background: var(--om-border); color: var(--om-text); border-color: var(--om-border); }
 @container om-nav (max-width: 380px) {
-  .om-nav-btn:not(.om-nav-more) { flex: 1 1 auto; font-size: 13px; padding: 6px 2px; white-space: nowrap; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; }
+  .om-nav-btn:not(.om-nav-more) { flex: 1 1 auto; font-size: 13px; padding: 6px 8px; white-space: nowrap; }
 }
 .om-content { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .om-cat-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
@@ -1018,7 +1019,7 @@ body.om-aero .om-float-tools::after {
 .om-files-row:hover { background: var(--om-hover); }
 .om-files-row-on,
 .om-files-row-on:hover {
-  background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 26%, transparent); }
+  background: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 26%, transparent); }
 .om-files-list:focus-visible { outline: none; }
 .om-files-folder { cursor: pointer; }
 .om-files-kind { flex: none; width: 52px; color: var(--om-muted); font-size: 11px; }
@@ -1098,11 +1099,15 @@ body.om-aero .om-float-tools::after {
 .om-desk-chrome.om-desk-under.om-desk-away { transform: translateY(150%); }
 .om-tab-drop { outline: 2px dashed var(--om-accent, #4493f8); outline-offset: -2px;
   border-radius: 6px; background: color-mix(in srgb, var(--om-accent, #4493f8) 12%, transparent); }
-body.om-desk-open .workflow-tabs .p-togglebutton-checked {
+body.om-desk-open .workflow-tabs :is(.p-togglebutton-checked,
+  .workflow-tab:has(> [role="tab"][aria-selected="true"])) {
   box-shadow: none !important; border-bottom-color: transparent !important;
   color: var(--om-muted, #8b949e) !important; }
+body.om-desk-open .workflow-tabs .workflow-tab > [role="tab"][aria-selected="true"] {
+  color: var(--om-muted, #8b949e) !important; }
 body.om-desk-open .workflow-tabs .p-togglebutton-checked::before { opacity: .4; }
-body.om-desk-open .workflow-tabs [data-om-tint].p-togglebutton-checked {
+body.om-desk-open .workflow-tabs [data-om-tint]:is(.p-togglebutton-checked,
+  :has(> [role="tab"][aria-selected="true"])) {
   background: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)) !important;
   --comfy-menu-bg: color-mix(in srgb, var(--om-tab-tint) 14%, var(--om-tab-under, #151915)); }
 body.om-desk-open .subgraph-breadcrumb,
@@ -1147,7 +1152,7 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-deskset-paper { width: 86px; height: 50px; padding: 0; border-radius: 6px;
   border: 1px solid var(--om-border); background: var(--om-input) center / cover no-repeat;
   cursor: pointer; }
-.om-deskset-paper-on { outline: 2px solid var(--p-button-text-primary-color, #388bfd);
+.om-deskset-paper-on { outline: 2px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: 1px; }
 .om-deskset-note { color: var(--om-muted); font-size: 12px; line-height: 1.5; }
 .om-deskset-palette { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1224,7 +1229,8 @@ body.om-desk-open div:has(> .actionbar-container) {
 .om-snap-pick:focus-visible { outline: 2px solid #388bfd; outline-offset: 0; }
 .om-snap-pick > svg { flex: none; }
 .om-snap-count:empty { display: none; }
-.p-togglebutton:not(.p-togglebutton-checked):not(:hover)
+:is(.p-togglebutton:not(.p-togglebutton-checked),
+  .workflow-tabs > .workflow-tab:not(:has(> [role="tab"][aria-selected="true"]))):not(:hover)
   .om-snap-pick-idle:not([aria-expanded="true"]):not(:focus-visible) { visibility: hidden; }
 body.om-bridge .om-snap-menu { z-index: ${HOST_MENU_Z - 30}; }
 body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointer-events: none !important; }
@@ -1342,7 +1348,7 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
 .om-pad-view img { max-width: 100%; height: auto; }
 .om-float-title-name { cursor: text; border-radius: 4px; padding: 0 3px; margin: 0 -3px; }
 .om-float-title-name:hover { background: var(--om-hover); }
-.om-rename { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+.om-rename { outline: 1px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: 1px; border-radius: 4px; background: var(--om-input);
   cursor: text; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-line-clamp: none; }
 .om-pad-tools-quiet .om-pad-tool:not(.om-pad-file),
@@ -1367,7 +1373,7 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
 .om-fold-row { display: flex; align-items: center; gap: 9px; padding: 6px 8px;
   border-radius: 6px; cursor: pointer; color: var(--om-text); }
 .om-fold-row:hover { background: var(--om-hover); }
-.om-fold-row-on { background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 24%, transparent); }
+.om-fold-row-on { background: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 24%, transparent); }
 .om-fold-art { width: 18px; height: 18px; flex: none; background-color: currentColor; }
 .om-fold-img { width: 18px; height: 18px; flex: none; object-fit: contain; }
 .om-fold-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
@@ -1376,7 +1382,7 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
 .om-fold-empty { padding: 14px; color: var(--om-muted); font-size: 13px; }
 .om-fold-list:focus-visible { outline: none; }
 .om-fold-lift { opacity: .45; }
-.om-fold-over { outline: 1px dashed var(--p-button-text-primary-color, #388bfd);
+.om-fold-over { outline: 1px dashed var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: -2px; }
 .om-save { gap: 10px; }
 .om-save-trail { display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
@@ -1419,9 +1425,9 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
   border: 1px solid transparent; background: transparent; color: var(--om-text);
   font: inherit; cursor: pointer; text-align: center; }
 .om-desk-cell:hover { background: color-mix(in srgb, var(--om-text) 12%, transparent); }
-.om-desk-cell-on { background: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 26%, transparent);
-  border-color: color-mix(in srgb, var(--p-button-text-primary-color, #388bfd) 60%, transparent); }
-.om-desk-cell:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+.om-desk-cell-on { background: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 26%, transparent);
+  border-color: color-mix(in srgb, var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)) 60%, transparent); }
+.om-desk-cell:focus-visible { outline: 1px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: 1px; }
 .om-desk-art { width: var(--om-desk-icon); height: var(--om-desk-icon); flex: none;
   background-color: currentColor;
@@ -1434,7 +1440,7 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
   overflow: hidden; text-shadow: 0 1px 3px rgba(0,0,0,.85); }
 .om-desk-live { position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%);
   width: 5px; height: 5px; border-radius: 50%;
-  background: var(--p-button-text-primary-color, #388bfd); visibility: hidden; }
+  background: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); visibility: hidden; }
 .om-desk-cell-live .om-desk-live { visibility: visible; }
 .om-desk-cell-lost .om-desk-art, .om-desk-cell-lost .om-desk-img { opacity: .38; }
 .om-desk-cell-lost .om-desk-name { opacity: .55; font-style: italic; }
@@ -1446,10 +1452,10 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
               color var(--default-transition-duration, .1s) linear; }
 .om-desk-tab:hover { color: var(--om-text);
   background: var(--p-togglebutton-hover-background, var(--content-hover-bg, var(--om-hover))); }
-.om-desk-tab:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+.om-desk-tab:focus-visible { outline: 1px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: -2px; }
 .om-desk-tab-on { color: var(--om-text);
-  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, #388bfd); }
+  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); }
 .om-desk-mark { width: 17px; height: 17px; background-color: currentColor; }
 .om-task-item { display: flex; align-items: center; gap: 8px; flex: none;
   min-width: 90px; max-width: 240px; height: 100%; padding: 0 12px;
@@ -1469,12 +1475,12 @@ body.om-snap-open .workflow-popover-fade { visibility: hidden !important; pointe
 .om-task-x:hover { background: var(--om-hover); color: var(--om-text); }
 .om-task-item:hover { opacity: 1; color: var(--om-text);
   background: var(--p-togglebutton-hover-background, var(--content-hover-bg, var(--om-hover))); }
-.om-task-item:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd);
+.om-task-item:focus-visible { outline: 1px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
   outline-offset: 1px; }
 .om-task-on { background: color-mix(in srgb, var(--om-text) 6%, transparent); }
 .om-task-front { opacity: 1; color: var(--om-text);
   background: var(--om-surface);
-  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, #388bfd); }
+  box-shadow: inset 0 -2px 0 0 var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); }
 .om-task-start { border-right: 1px solid var(--interface-stroke, var(--om-border)); }
 .om-task-start-bare { min-width: var(--om-start-wide, 38px);
   width: var(--om-start-wide, 38px); padding: 0; justify-content: center; }

@@ -879,7 +879,7 @@ export const program = {
     });
 
     api.style(`
-      .tm, .tm-follow { --tm-accent: var(--p-button-text-primary-color, #388bfd); }
+      .tm, .tm-follow { --tm-accent: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); }
       .tm { display: flex; flex-direction: column; flex: 1; min-height: 0; }
       .om-float-tools .om-btn.tm-follow-on { color: var(--tm-accent); border-color: var(--tm-accent);
         background: color-mix(in srgb, var(--tm-accent) 14%, var(--om-input)); }

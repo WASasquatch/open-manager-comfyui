@@ -892,6 +892,8 @@ function paintNodeBody(spec, image, alpha, inherited) {
     const h = size?.[1] || 0;
     if (!(w > 0) || !(h > 0) || alpha <= 0) return;
     const radius = window.LiteGraph?.ROUND_RADIUS ?? 8;
+    const pattern = spec.fit === "cover" ? null : artPattern(ctx, spec.image, image);
+    if (spec.fit !== "cover" && !pattern) return;
     ctx.save();
     ctx.beginPath();
     if (radius > 0 && typeof ctx.roundRect === "function") {
@@ -899,22 +901,19 @@ function paintNodeBody(spec, image, alpha, inherited) {
     } else {
       ctx.rect(0, 0, w, h);
     }
-    ctx.clip();
     ctx.globalAlpha *= alpha;
     if (spec.blend) ctx.globalCompositeOperation = spec.blend;
-    if (spec.fit === "cover") {
+    if (pattern) {
+      ctx.fillStyle = pattern;
+      ctx.fill();
+    } else {
+      ctx.clip();
       const iw = image.naturalWidth || image.width;
       const ih = image.naturalHeight || image.height;
       const ratio = Math.max(w / iw, h / ih);
       const dw = iw * ratio;
       const dh = ih * ratio;
       ctx.drawImage(image, (w - dw) / 2, (h - dh) / 2, dw, dh);
-    } else {
-      const pattern = artPattern(ctx, spec.image, image);
-      if (pattern) {
-        ctx.fillStyle = pattern;
-        ctx.fillRect(0, 0, w, h);
-      }
     }
     ctx.restore();
   };
@@ -1338,7 +1337,7 @@ const VUE_TABS = "button[data-testid='subgraph-enter-button'], "
 const VUE_FOOT_TUCK = "1.25rem";
 
 function vueFootOf(root) {
-  const tab = root.querySelector(`${VUE_TABS}, button[class*="bg-destructive"]`);
+  const tab = root.querySelector(`${VUE_TABS}, button[class*="bg-destructive"], button[class*="bg-warning"]`);
   const foot = tab?.parentElement;
   return foot && foot.parentElement === root ? foot : null;
 }

@@ -86,7 +86,7 @@ export default {
     + "On, the saved values are used and the old copies are removed.",
   issues: ["WASasquatch/open-manager-comfyui#31"],
   defaultValue: true,
-  verified: "1.53.6",
+  verified: "1.57.4",
   check() {
     const proto = window.LiteGraph?.LGraphNode?.prototype;
     if (typeof proto?.configure !== "function") return "the canvas is not ready";

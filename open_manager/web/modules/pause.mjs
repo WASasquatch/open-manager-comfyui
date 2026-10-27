@@ -282,17 +282,22 @@ function closeRunMenu() {
 
 function injectRunMenu(menu) {
   if (menu.querySelector(".om-run-item")) return;
-  const items = [...menu.querySelectorAll('[role="menuitem"]')];
-  const model = items.find((one) => !one.className.includes("bg-primary-background")) || items[0];
+  const items = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')];
+  const model = items.find((one) => !one.className.includes("bg-primary-background")
+    && one.getAttribute("aria-checked") !== "true") || items[0];
   if (!model) return;
   const row = (label, act) => {
     const item = model.cloneNode(true);
-    for (const name of ["id", "data-reka-collection-item", "data-highlighted", "data-state"]) {
+    for (const name of ["id", "data-reka-collection-item", "data-highlighted", "data-state",
+      "aria-checked"]) {
       item.removeAttribute(name);
     }
+    item.setAttribute("role", "menuitem");
     item.classList.add("om-run-item");
     item.textContent = label;
     item.tabIndex = -1;
+    item.addEventListener("pointerenter", () => item.setAttribute("data-highlighted", ""));
+    item.addEventListener("pointerleave", () => item.removeAttribute("data-highlighted"));
     item.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();

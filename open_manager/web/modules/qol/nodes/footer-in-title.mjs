@@ -8,7 +8,9 @@ const FOOT = `${NODE} > .box-border.isolate`;
 
 const TAB = `${FOOT} > button`;
 
-const ERROR_TAB = `${FOOT} > button:is(.bg-destructive-background, .bg-destructive, .bg-warning)`;
+const ERROR_TAB = `${FOOT} > button:is(.bg-destructive-background, .bg-destructive)`;
+
+const WARNING_TAB = `${FOOT} > button:is(.bg-warning-background, .bg-warning)`;
 
 const ATTR = "data-om-footer-in-title";
 
@@ -47,6 +49,9 @@ ${TAB}:hover {
 }
 ${ERROR_TAB} {
   color: var(--destructive-background, #e5484d) !important;
+}
+${WARNING_TAB} {
+  color: var(--warning, var(--warning-background, #fdab3e)) !important;
 }
 ${TAB} span {
   display: none !important;
@@ -133,11 +138,11 @@ function nodesIn(records, into) {
 export default {
   key: "qolFooterInTitle",
   name: "Node error and Enter buttons in the title bar",
-  tooltip: "On Nodes 2.0, the Error, Enter subgraph and advanced inputs buttons sit in the node's "
+  tooltip: "On Nodes 2.0, the Error, Issues, Enter subgraph and advanced inputs buttons sit in the node's "
     + "title bar in place of tabs hanging below the node.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.18",
+  verified: "1.57.4",
   check() {
     return typeof MutationObserver === "function" ? "" : "this browser cannot watch the nodes";
   },

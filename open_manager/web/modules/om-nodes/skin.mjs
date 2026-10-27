@@ -18,7 +18,7 @@ const BODY = '[data-testid^="node-body-"]';
 const WRAP = '[data-testid="node-inner-wrapper"]';
 const RING = '[data-testid="node-state-outline-overlay"]';
 const FOOT = ".box-border.isolate";
-const ERROR_TAB = "button:is(.bg-destructive-background, .bg-destructive, .bg-warning)";
+const ERROR_TAB = "button:is(.bg-destructive-background, .bg-destructive, .bg-warning-background, .bg-warning)";
 const TABS = `:is([data-testid="advanced-inputs-button"], [data-testid="subgraph-enter-button"], ${ERROR_TAB})`;
 const NAMED = ':is([data-testid="advanced-inputs-button"], [data-testid="subgraph-enter-button"])';
 const STEP = ':is([data-testid="decrement"], [data-testid="increment"])';
@@ -27,6 +27,9 @@ const SELECTED = ":is(.outline-node-component-outline, .outline-foreground)";
 const PROGRESS = ":is(.bg-primary-500, .bg-primary)";
 const BADGE = ":is(.bg-node-component-surface, .bg-node)";
 const SLOT_ERROR = ":is(.text-error, .text-destructive)";
+const LIST_DOT = '[data-testid="slot-dot"][class*="rounded-[1px]"]';
+const LIST_CELLS = ["right", "bottom"].map((way) => `linear-gradient(to ${way}, #000 0 25%, `
+  + "transparent 25% 37.5%, #000 37.5% 62.5%, transparent 62.5% 75%, #000 75% 100%)").join(", ");
 const BUTTONS = SPAN.slice(0, 2).map((path) => `${ROW} ${path}.flex-col.gap-1 > button`).join(",\n");
 const LEGACIES = SPAN.slice(0, 2).map((path) => `${ROW} ${path}${LEGACY}`).join(",\n");
 const TEXTAREAS = SPAN.slice(0, 2).map((path) => `${ROW} ${path}`);
@@ -295,8 +298,8 @@ ${NODE} > ${FOOT} > ${TABS}:hover {
 ${NODE} > ${FOOT} > button:is(.bg-destructive-background, .bg-destructive) {
   color: var(--omn-error);
 }
-${NODE} > ${FOOT} > button.bg-warning {
-  color: var(--warning);
+${NODE} > ${FOOT} > button:is(.bg-warning-background, .bg-warning) {
+  color: var(--warning, var(--warning-background));
 }
 ${NODE} > ${FOOT} > ${TABS} span {
   display: none;
@@ -343,6 +346,14 @@ ${NODE} .lg-slot span${SLOT_ERROR} {
 ${NODE} [data-testid="slot-dot"] {
   width: var(--omn-dot-size);
   height: var(--omn-dot-size);
+}
+${NODE} ${LIST_DOT} {
+  border: 0;
+  border-radius: 0;
+  -webkit-mask-image: ${LIST_CELLS};
+  -webkit-mask-composite: source-in;
+  mask-image: ${LIST_CELLS};
+  mask-composite: intersect;
 }
 ${GRID} {
   grid-template-columns: 0 0 minmax(0, 1fr);

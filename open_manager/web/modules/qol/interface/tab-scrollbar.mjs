@@ -36,7 +36,7 @@ export default {
     + "wheel scrolls to them.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.1",
+  verified: "1.57.4",
   check() {
     const strip = document.querySelector(STRIP);
     if (strip && getComputedStyle(strip).scrollbarWidth === "none") {
@@ -75,6 +75,9 @@ export default {
       else delete strip.dataset.omMore;
     };
     const onScroll = (event) => mark(event.currentTarget);
+    const onShift = (event) => {
+      if (event.propertyName === "flex-shrink") soon();
+    };
     let watched = null;
     let due = 0;
     let hunting = false;
@@ -90,13 +93,20 @@ export default {
       hunt(!strip);
       if (strip !== watched) {
         sized.disconnect();
+        listed.disconnect();
         watched?.removeEventListener("scroll", onScroll);
+        watched?.removeEventListener("transitionend", onShift);
         if (watched) delete watched.dataset.omMore;
         watched = strip;
         if (strip) {
           sized.observe(strip);
-          if (strip.firstElementChild) sized.observe(strip.firstElementChild);
+          const list = strip.querySelector(".workflow-tabs") || strip.firstElementChild;
+          if (list) {
+            sized.observe(list);
+            listed.observe(list, { childList: true });
+          }
           strip.addEventListener("scroll", onScroll, { passive: true });
+          strip.addEventListener("transitionend", onShift);
         }
       }
       if (!strip) return;
@@ -108,14 +118,17 @@ export default {
     };
     const sized = new ResizeObserver(soon);
     const seek = new MutationObserver(soon);
+    const listed = new MutationObserver(soon);
     window.addEventListener("resize", soon);
     soon();
     track(() => {
       sized.disconnect();
       seek.disconnect();
+      listed.disconnect();
       window.removeEventListener("resize", soon);
       if (due) cancelAnimationFrame(due);
       watched?.removeEventListener("scroll", onScroll);
+      watched?.removeEventListener("transitionend", onShift);
       if (watched) delete watched.dataset.omMore;
     });
   },

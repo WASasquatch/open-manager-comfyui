@@ -530,7 +530,7 @@ export default {
     + "info show ComfyUI's own editors there.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.1",
+  verified: "1.57.4",
   check() {
     const graph = window.LiteGraph;
     if (typeof graph?.LGraphNode?.prototype?.drawWidgets !== "function") return "the canvas is not ready";

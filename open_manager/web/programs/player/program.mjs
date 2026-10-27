@@ -329,7 +329,7 @@ export const program = {
         padding: 0; border: 0; border-radius: 5px; background: transparent; color: inherit;
         cursor: pointer; opacity: .85; }
       .pl-ctl:hover { opacity: 1; background: rgba(255, 255, 255, .1); }
-      .pl-ctl:focus-visible { outline: 1px solid var(--p-button-text-primary-color, #388bfd); }
+      .pl-ctl:focus-visible { outline: 1px solid var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); }
       .pl-ctl::before { content: ""; width: 18px; height: 18px; background: currentColor;
         -webkit-mask: var(--pl-icon) center / contain no-repeat;
         mask: var(--pl-icon) center / contain no-repeat; }
@@ -339,9 +339,9 @@ export const program = {
       .pl-silent .pl-mute { --pl-icon: ${icon("muted")}; }
       .pl-full { --pl-icon: ${icon("full")}; }
       .pl-seek { flex: 1; min-width: 60px; margin: 0;
-        accent-color: var(--p-button-text-primary-color, #388bfd); cursor: pointer; }
+        accent-color: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); cursor: pointer; }
       .pl-volume { flex: none; width: 80px; margin: 0;
-        accent-color: var(--p-button-text-primary-color, #388bfd); cursor: pointer; }
+        accent-color: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); cursor: pointer; }
       .pl-time { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; opacity: .85; }
       .pl-stage:fullscreen { background: #000; }
       .pl-where { flex: none; padding: 6px 10px; color: var(--om-muted); font-size: 11px;

@@ -64,7 +64,7 @@ export default {
   tooltip: "Deleting an output also deletes its file. Needs OPEN_MANAGER_FILE_WRITES=1.",
   issues: [],
   defaultValue: false,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     if (typeof api?.getServerFeature !== "function") return "ComfyUI's feature flags are not reachable";
     return "";

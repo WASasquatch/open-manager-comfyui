@@ -75,7 +75,7 @@ export default {
   tooltip: "A job no longer in history opens the workflow saved in its file.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof reader() !== "function") return "ComfyUI's file reader is not reachable";

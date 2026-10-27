@@ -6,7 +6,7 @@ export default {
   tooltip: "On: template media files download to input, and those already in temp move there with "
     + "their nodes. Off: they download to temp, which ComfyUI empties when it restarts.",
   defaultValue: false,
-  verified: "1.57.3",
+  verified: "1.57.4",
   check: () => "",
   on(track) {
     setKeeping(true);

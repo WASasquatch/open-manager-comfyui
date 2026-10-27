@@ -501,7 +501,7 @@ export const program = {
         cursor: pointer; display: flex; flex-direction: column;
         background: color-mix(in srgb, var(--om-text) 3%, transparent); }
       .tpl-cell:hover, .tpl-cell:focus-visible {
-        border-color: var(--p-button-text-primary-color, #388bfd); outline: none; }
+        border-color: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); outline: none; }
       .tpl-shot { aspect-ratio: 16 / 10; background: rgba(0, 0, 0, .28); display: flex;
         align-items: center; justify-content: center; overflow: hidden; flex: none;
         border-radius: 6px 6px 0 0; }

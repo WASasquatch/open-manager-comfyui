@@ -1,9 +1,15 @@
+import { piniaStores } from "../qol/shared.mjs";
+
 const BUTTON = '[data-testid="comfy-menu-button"]';
 const NODES2 = '[data-testid="nodes-2-toggle-item"]';
 const OURS = "om-nodes-toggle-item";
 const ROW_ID = "om-nodes-menu-row";
 const STYLE_ID = "om-nodes-menu";
 const SEARCH_FRAMES = 30;
+const CHECKBOX = '[role="menuitemcheckbox"]';
+const LABEL = "OM Nodes";
+const ITEM_KEY = "om-nodes-toggle";
+const NEW_MENU_SINCE = [1, 57, 0];
 
 const STYLE = `
 ul[data-om-nodes-focus] > li.p-focus:not([data-om-nodes-row]) > .p-tieredmenu-item-content {
@@ -123,10 +129,54 @@ function build(item) {
   return row;
 }
 
+function labelled(label) {
+  return [...document.querySelectorAll(CHECKBOX)].find((one) => one.getAttribute("aria-label") === label)
+    || null;
+}
+
+function register() {
+  const items = piniaStores()?.get("menuItem")?.menuItems;
+  if (!Array.isArray(items)) return false;
+  if (!items.some((item) => item?.key === ITEM_KEY)) {
+    items.push({
+      key: ITEM_KEY,
+      label: LABEL,
+      presentation: "switch",
+      class: "select-none",
+      checked: () => hooks.isOn(),
+      command: () => {
+        void hooks.setOn(!hooks.isOn());
+      },
+    });
+  }
+  return true;
+}
+
+function placeItem() {
+  const anchor = labelled("Nodes 2.0");
+  if (!anchor) return false;
+  const row = labelled(LABEL);
+  if (!row) {
+    register();
+    return false;
+  }
+  if (anchor.nextElementSibling !== row) anchor.after(row);
+  return true;
+}
+
+function newMenuExpected() {
+  const parts = String(window.__COMFYUI_FRONTEND_VERSION__ || "").split(".").map(Number);
+  for (let i = 0; i < NEW_MENU_SINCE.length; i += 1) {
+    const have = parts[i] || 0;
+    if (have !== NEW_MENU_SINCE[i]) return have > NEW_MENU_SINCE[i];
+  }
+  return true;
+}
+
 function place() {
   const anchor = document.querySelector(NODES2);
   const item = anchor?.closest("li");
-  if (!item) return false;
+  if (!item) return placeItem();
   const next = item.nextElementSibling;
   if (next?.hasAttribute("data-om-nodes-row")) {
     paint(next, hooks.isOn());
@@ -171,4 +221,5 @@ export function watchMenu(isOn, setOn) {
     document.head.appendChild(style);
   }
   document.addEventListener("click", onClick, true);
+  if (newMenuExpected()) register();
 }

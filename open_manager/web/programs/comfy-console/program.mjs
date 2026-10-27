@@ -787,7 +787,7 @@ export const program = {
     api.style(`
       .con { --con-back: #15171a; --con-ink: #d0d7de; display: flex; flex-direction: column;
         flex: 1; min-height: 0; }
-      .con-toggle { --con-accent: var(--p-button-text-primary-color, #388bfd); }
+      .con-toggle { --con-accent: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); }
       .om-float-tools .om-btn.con-on { color: var(--con-accent); border-color: var(--con-accent);
         background: color-mix(in srgb, var(--con-accent) 14%, var(--om-input)); }
       .con-find { width: 220px; min-width: 120px; flex: 0 1 220px; padding: 4px 9px;

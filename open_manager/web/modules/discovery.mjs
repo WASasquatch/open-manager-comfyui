@@ -258,6 +258,7 @@ async function sizeDrawer(root) {
   let panel = null;
   let splitter = null;
   for (let attempt = 0; attempt < 40; attempt++) {
+    if (root.closest("[data-panel]")) return;
     panel = root.closest(".p-splitterpanel");
     splitter = panel?.closest(".p-splitter");
     if (panel && splitter && splitter.getBoundingClientRect().width > 0) break;

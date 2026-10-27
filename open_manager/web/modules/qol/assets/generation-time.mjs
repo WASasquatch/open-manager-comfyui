@@ -60,7 +60,7 @@ export default {
   tooltip: "Runs write their generation time, node and subfolder onto their assets.",
   issues: ["Comfy-Org/ComfyUI_frontend#20862"],
   defaultValue: true,
-  verified: "1.55.17",
+  verified: "1.57.4",
   check() {
     if (typeof api?.fetchApi !== "function") return "ComfyUI's api is not reachable";
     return "";

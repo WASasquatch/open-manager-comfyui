@@ -212,7 +212,7 @@ export const program = {
         cursor: pointer; display: flex; flex-direction: column;
         background: color-mix(in srgb, var(--om-text) 3%, transparent); }
       .out-cell:hover, .out-cell:focus-visible {
-        border-color: var(--p-button-text-primary-color, #388bfd); outline: none; }
+        border-color: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd)); outline: none; }
       .out-art { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
         border-radius: 6px 6px 0 0; background: rgba(0, 0, 0, .3); }
       .out-glyph { width: 100%; aspect-ratio: 1 / 1; display: flex; align-items: center;

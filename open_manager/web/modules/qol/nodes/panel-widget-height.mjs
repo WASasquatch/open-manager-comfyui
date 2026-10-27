@@ -95,7 +95,7 @@ export default {
     + "grows and shrinks with its node, and scrolls.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.18",
+  verified: "1.57.4",
   check() {
     if (!window.LiteGraph) return "the canvas is not ready";
     if (!canWatchMounts()) return "ComfyUI's Vue app changed";

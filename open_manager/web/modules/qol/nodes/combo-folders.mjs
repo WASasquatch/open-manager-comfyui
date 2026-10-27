@@ -1,4 +1,12 @@
+import { app } from "../../../../../scripts/app.js";
+
 const OVERLAY = '[data-testid="widget-select-default-overlay"]';
+
+const TRIGGER = '[data-testid="widget-select-default-trigger"][aria-expanded="true"]';
+
+const VIRTUAL = "[data-reka-virtualizer]";
+
+const ANY_OPTION = '[role="option"]';
 
 const VIEWPORT = '[data-testid="widget-select-default-viewport"]';
 
@@ -26,7 +34,7 @@ const WAIT_FRAMES = 10;
 
 const KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Enter"]);
 
-const RULES = `[${MODE}] > [role="option"], [${MODE}] > [role="status"] { display: none !important; }
+const RULES = `[${MODE}] > :not(.om-combo-tree):not([aria-hidden="true"]) { display: none !important; }
 .om-combo-tree { display: contents; }
 .om-combo-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-combo-side { flex: none; display: flex; align-items: center; gap: 6px; opacity: 0.6; }
@@ -44,12 +52,89 @@ function labelOf(option) {
   return option.getAttribute("textvalue") ?? option.textContent.trim();
 }
 
-function optionsOf(viewport) {
+function renderedOptions(viewport) {
   return [...viewport.querySelectorAll(OPTIONS)].map((el) => ({
     el,
     label: labelOf(el),
     checked: el.getAttribute("data-state") === "checked",
   }));
+}
+
+function valuesOf(widget) {
+  try {
+    const raw = widget?.options?.values;
+    const list = typeof raw === "function" ? raw() : raw;
+    return Array.isArray(list) ? list.filter((value) => value !== null && value !== undefined) : [];
+  } catch {
+    return [];
+  }
+}
+
+function widgetFor(viewport) {
+  const trigger = document.querySelector(TRIGGER);
+  const name = trigger?.getAttribute("aria-label");
+  if (!name) return null;
+  const size = Number(viewport.querySelector(ANY_OPTION)?.getAttribute("aria-setsize")) || 0;
+  const graph = app.canvas?.graph ?? app.graph;
+  const id = trigger.closest(".lg-node[data-node-id]")?.getAttribute("data-node-id");
+  const holder = id == null ? null : graph?.getNodeById?.(Number(id)) ?? graph?.getNodeById?.(id);
+  const nodes = holder ? [holder] : [...Object.values(app.canvas?.selected_nodes || {}), ...(graph?._nodes || [])];
+  for (const node of nodes) {
+    for (const widget of node?.widgets || []) {
+      if (widget.name !== name && widget.label !== name) continue;
+      const values = valuesOf(widget);
+      if (values.length && (!size || values.length === size)) return { widget, values };
+    }
+  }
+  return null;
+}
+
+function widgetOptions(found) {
+  const labeler = found.widget.options?.getOptionLabel;
+  const current = found.widget.value == null ? undefined : String(found.widget.value);
+  return found.values.map((raw) => {
+    const value = String(raw);
+    let label = value;
+    if (typeof labeler === "function") {
+      try { label = labeler(value) || value; } catch {}
+    }
+    return { el: null, label, checked: value === current };
+  });
+}
+
+function optionsOf(session) {
+  if (!session.virtual) return renderedOptions(session.viewport);
+  const found = widgetFor(session.viewport);
+  return found ? widgetOptions(found) : [];
+}
+
+function checkMark(options) {
+  const held = options.find((one) => one.checked)?.el?.querySelector(':scope > [aria-hidden="true"]');
+  if (held) return held.cloneNode(true);
+  const box = document.createElement("span");
+  box.className = "flex shrink-0 items-center justify-center";
+  const icon = document.createElement("i");
+  icon.className = "icon-[lucide--check] size-3.5 text-base-foreground";
+  icon.setAttribute("aria-hidden", "true");
+  box.append(icon);
+  return box;
+}
+
+function typeInto(input, text) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setter) setter.call(input, text);
+  else input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function chooseShown(session, label, frames = 0) {
+  if (open !== session) return;
+  const shown = [...session.viewport.querySelectorAll(ANY_OPTION)].find((el) => labelOf(el) === label);
+  if (shown) {
+    shown.click();
+    return;
+  }
+  if (frames < WAIT_FRAMES) requestAnimationFrame(() => chooseShown(session, label, frames + 1));
 }
 
 function foldered(options) {
@@ -119,11 +204,16 @@ function closeFrom(session, depth) {
   if (session.focus >= from) session.focus = from - 1;
 }
 
-function pick(session, label) {
-  const target = optionsOf(session.viewport).find((one) => one.label === label);
-  if (!target) return;
+function pick(session, option) {
   closeFrom(session, 1);
-  target.el.click();
+  if (option.el) {
+    option.el.click();
+    return;
+  }
+  if (!session.input) return;
+  clear(session);
+  typeInto(session.input, option.label);
+  requestAnimationFrame(() => chooseShown(session, option.label));
 }
 
 function place(fly, anchor) {
@@ -204,7 +294,7 @@ function row(session, entry, depth) {
     event.stopPropagation();
     hush(session);
     if (entry.folder) openFolder(session, entry.folder, el, depth + 1);
-    else pick(session, entry.option.label);
+    else pick(session, entry.option);
   });
   el.omEntry = entry;
   return el;
@@ -224,11 +314,10 @@ function refresh(session) {
   if (open !== session) return;
   clear(session);
   if (session.input?.value.trim()) return;
-  const options = optionsOf(session.viewport);
+  const options = optionsOf(session);
   if (!options.length || !foldered(options)) return;
-  session.rowClass = options[0].el.className;
-  session.check = options.find((one) => one.checked)?.el.querySelector(':scope > [aria-hidden="true"]')
-    ?.cloneNode(true) || null;
+  session.rowClass = session.viewport.querySelector(ANY_OPTION)?.className || "";
+  session.check = checkMark(options);
   const root = build(options);
   const tree = document.createElement("div");
   tree.className = "om-combo-tree";
@@ -258,7 +347,7 @@ function enter(session) {
   if (!current) return false;
   const entry = current.omEntry;
   if (!entry.folder) {
-    pick(session, entry.option.label);
+    pick(session, entry.option);
     return true;
   }
   const child = openFolder(session, entry.folder, current, depth + 1);
@@ -296,7 +385,7 @@ function attach(overlay) {
   detach(open);
   const session = {
     overlay, viewport, input: overlay.querySelector(SEARCH), menus: [], timers: new Set(),
-    focus: 0, tree: null, rowClass: "", check: null,
+    focus: 0, tree: null, rowClass: "", check: null, virtual: !!viewport.querySelector(VIRTUAL),
   };
   session.onInput = () => requestAnimationFrame(() => refresh(session));
   session.onKey = (event) => key(session, event);
@@ -309,7 +398,7 @@ function attach(overlay) {
 function settle(overlay, frames = 0) {
   if (!overlay.isConnected) return;
   const viewport = overlay.querySelector(VIEWPORT);
-  if (viewport?.querySelector(OPTIONS) || frames >= WAIT_FRAMES) {
+  if (viewport?.querySelector(ANY_OPTION) || frames >= WAIT_FRAMES) {
     attach(overlay);
     return;
   }
@@ -337,7 +426,7 @@ export default {
     + "opens as a submenu, and typing still searches every file.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.18",
+  verified: "1.57.4",
   check() {
     return document.body && typeof MutationObserver === "function" ? "" : "the page is not ready";
   },
