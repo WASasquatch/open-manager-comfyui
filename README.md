@@ -272,6 +272,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Combo lists open folders as submenus | On | On Nodes 2.0, a list of files kept in folders, such as LoRAs, shows each folder as a submenu. Typing in its search box searches every file |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
+| Links share one colour table per frame | On | Drawing a link no longer copies the colour of every link type from every pack, which costs most on large graphs with many packs installed |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |
 | Middle-click does not paste | On | On Linux, a middle click no longer pastes the last copied nodes |
 | Zip ties | On | Dragging across links with Z held ties them into a ribbon. With Shift held as well the tie is straight: horizontal, vertical or at 45 degrees. Dragging across a tie with Z held, or double-clicking it, removes it. Ties move by dragging, and turn by dragging with Alt held, in 45 degree steps with Shift. A straight or turned tie keeps its angle until *Auto angle* in its right-click menu, where its colour is also set. Links enter a tie in the order they arrive, keep it through every tie after, and cross only past the last one; they reorder as nodes move. After [comfyui-zip-ties](https://github.com/safzanpirani/comfyui-zip-ties), whose saved ties it reads; stands down when that is installed |
@@ -281,12 +282,15 @@ changed, or already fixed, stands down and says so in the browser console.
 | Running and waiting jobs open as workflows | On | Open as workflow in new tab works on a job still running or waiting in the queue, and on that job once it finishes |
 | API jobs open as workflows | On | Jobs queued with only an API prompt open as a laid-out workflow |
 | Hide the workflow name box at the top level | Off | Up to frontend 1.36, the box naming the open workflow shows only inside a subgraph |
+| Extension toolbox buttons show their names | On | A selection toolbox button an extension adds shows the name its extension gave it on hover |
 | Workflow tabs without a scrollbar | On | The tab strip drops its scrollbar. Faded edges show where more tabs are, and the mouse wheel scrolls to them |
 | Workflow tabs look like tabs | On | Flat tabs side by side with a line between each, the open one marked along its top, in place of rounded buttons |
 | Bottom panel docked to the edges | On | The Logs and Shortcuts panel meets the sidebar and the window's edges, with square corners, in place of floating over the canvas |
+| Bottom panel header has no frame | On | The header of the bottom panel, where Logs opens, draws only the line under it, without ComfyUI's 3px grey border on its other three sides |
 | Node search narrows every match | On | In the node search box, a category or the Comfy, Partner or Extensions filter lists every match it holds, not only those among the top 64 |
 | Node search draws only the rows in view | On | Results build as they scroll into view |
 | Node search waits for a pause in typing | On | Slow searches run once typing pauses |
+| Use Everywhere finds nodes quickly | On | With Use Everywhere 8 on Nodes 2.0 or OM Nodes, its search of the page for every node on every frame is answered from the nodes already found, which takes back most of the frame rate it costs on large workflows. Stands down when Use Everywhere stops searching. Open Manager also says once, per Use Everywhere version, that it slows Nodes 2.0 |
 
 ### Link styles
 

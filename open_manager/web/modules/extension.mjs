@@ -32,7 +32,9 @@ import { watchCoreManager } from "./core-manager.mjs";
 import { startQolPatches, qolNodeMenuItems, qolCanvasMenuItems } from "./qol/loader.mjs";
 import { pushStallConfig, watchStalls } from "./stall.mjs";
 import { watchManagerBridge } from "./manager-bridge.mjs";
-import { presetCommand, presetToolboxCommands, watchPresetLabels } from "./node-presets.mjs";
+import { presetCommand, presetToolboxCommands } from "./node-presets.mjs";
+import { labelOwnCommands } from "./command-labels.mjs";
+import { warnUseEverywhere } from "./use-everywhere.mjs";
 import { snapshotCommands, watchSnapshots, applySnapshotSetting } from "./snapshots.mjs";
 import {
   omNodeCommands, omNodeCreated, omNodeMenuItems, omNodeSettings, refreshOmGrips, startOmNodes,
@@ -1221,7 +1223,8 @@ app.registerExtension({
     const qolStarted = startQolPatches();
     watchStalls();
     watchManagerBridge();
-    watchPresetLabels();
+    labelOwnCommands([presetCommand, alignCommand]);
+    warnUseEverywhere();
     watchSnapshots();
     registerThemes().catch(() => {});
     watchThemeExtras();

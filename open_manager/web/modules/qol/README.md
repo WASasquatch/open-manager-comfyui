@@ -13,6 +13,7 @@ switch under Settings > Open Manager > Quality of Life Patches.
 | `canvas/` | Canvas input, navigation and how links draw |
 | `interface/` | Menus, dialogs and the rest of ComfyUI's chrome |
 | `nodes/` | Node bodies, widgets, badges and node lists |
+| `packs/` | Other node packs' front ends, where one slows or breaks ComfyUI's |
 | `search/` | The node search box |
 | `subgraphs/` | Subgraph nodes |
 | `templates/` | Workflow templates and what opening one fetches |

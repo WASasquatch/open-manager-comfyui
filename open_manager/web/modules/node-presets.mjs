@@ -620,24 +620,6 @@ async function openPresets(selection = presetSelection()) {
   return panel;
 }
 
-function presetLabels() {
-  let vue = null;
-  try { vue = document.getElementById("vue-app")?.__vue_app__; } catch {}
-  const i18n = vue?._context?.provides?.[vue?.__VUE_I18N_SYMBOL__]?.global;
-  if (typeof i18n?.mergeLocaleMessage !== "function") return false;
-  const key = PRESET_COMMAND.replace(/\./g, "_");
-  const locale = typeof i18n.locale === "string" ? i18n.locale : i18n.locale?.value;
-  for (const one of new Set(["en", locale].filter(Boolean))) {
-    try { i18n.mergeLocaleMessage(one, { commands: { [key]: { label: PRESET_LABEL } } }); } catch {}
-  }
-  return true;
-}
-
-function watchPresetLabels(tries = 0) {
-  if (presetLabels() || tries >= 40) return;
-  setTimeout(() => watchPresetLabels(tries + 1), 500);
-}
-
 const presetCommand = {
   id: PRESET_COMMAND,
   label: PRESET_LABEL,
@@ -650,4 +632,4 @@ function presetToolboxCommands(item) {
   return presetSelection() ? [PRESET_COMMAND] : [];
 }
 
-export { presetCommand, presetToolboxCommands, watchPresetLabels, openPresets };
+export { presetCommand, presetToolboxCommands, openPresets };

@@ -19,6 +19,7 @@ OM Nodes was what turned it on. Switching Nodes 2.0 off switches OM Nodes off.
 | Widget row | 20, 4 apart | 24, 4 apart | 20, 4 apart |
 | Text and file widgets | 20 | 32 | 20 |
 | Widget label | inside the widget | its own column | inside the widget |
+| A value too long for its widget | the label gives way, then the value is cut | the value is cut | the label gives way, then the value is cut |
 | Dragging a number | anywhere on the widget | on its value | anywhere on the widget, label included |
 | Narrowest node | the node's own minimum | 225 | the node's own minimum |
 | Advanced inputs, Enter subgraph | none | a 44 px tab under the node | an icon in the title bar |

@@ -420,6 +420,8 @@ ${each(ROOTS, `:has(> ${LABEL})`)} {
 ${each(LABELS, "")} {
   flex: 0 100 auto;
   min-width: 0;
+  overflow: clip;
+  overflow-clip-margin: content-box;
   height: var(--omn-widget-height);
   padding: 0 6px 0 var(--omn-widget-pad);
   color: var(--omn-widget-label);

@@ -507,9 +507,8 @@ function paintMonitor(reading) {
   syncMonitorDevices(reading);
   const cells = monitorStrip._cells;
   const fillTo = (parts, share) => {
-    const held = `${Math.max(0, Math.min(100, share))}%`;
-    if (parts.axis === "v") { parts.fill.style.height = held; parts.fill.style.width = ""; }
-    else { parts.fill.style.width = held; parts.fill.style.height = ""; }
+    const held = Math.max(0, Math.min(100, share)) / 100;
+    parts.fill.style.transform = parts.axis === "v" ? `scaleY(${held})` : `scaleX(${held})`;
   };
   const setMeter = (parts, share, text, said) => {
     parts.value.textContent = text;

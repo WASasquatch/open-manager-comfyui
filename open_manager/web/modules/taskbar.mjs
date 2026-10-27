@@ -27,7 +27,11 @@ const TASK_POP_IN = 180;
 
 const TASK_POP_OUT = 260;
 
+const EDGE_REACH = 4;
+
 let taskBar = null;
+
+let taskRoomBox = null;
 
 let taskStart = null;
 
@@ -73,10 +77,24 @@ function taskEntries() {
   return entries;
 }
 
-function taskbarHost() {
-  const bottom = document.getElementById("comfyui-body-bottom");
-  if (bottom) return { host: bottom, before: bottom.firstChild, flow: true };
-  return { host: document.body, before: null, flow: false };
+function bottomHost() {
+  return document.getElementById("comfyui-body-bottom");
+}
+
+function holdTaskRoom(height) {
+  const host = bottomHost();
+  if (!height || !host) {
+    taskRoomBox?.remove();
+    return;
+  }
+  taskRoomBox ??= el("div", "om-task-room");
+  taskRoomBox.style.height = `${Math.round(height)}px`;
+  if (taskRoomBox.parentElement !== host) host.appendChild(taskRoomBox);
+}
+
+function edgeShared() {
+  const host = bottomHost();
+  return !!host && host.getBoundingClientRect().height > 0;
 }
 
 function taskTint(text) {
@@ -631,6 +649,7 @@ function dropTaskbar() {
   closeTaskPop(false);
   closeStart(false);
   taskBar?.remove();
+  taskRoomBox?.remove();
   taskBar = null;
   taskStart = null;
   taskStrip = null;
@@ -639,8 +658,7 @@ function dropTaskbar() {
 
 function mountTaskbar() {
   if (taskBar?.isConnected) return;
-  const where = taskbarHost();
-  taskBar = el("div", "om-task");
+  taskBar = el("div", "om-task om-task-pinned");
   taskBar.setAttribute("role", "toolbar");
   taskBar.setAttribute("aria-label", "Open Manager windows");
   taskBar.setAttribute("aria-orientation", "horizontal");
@@ -666,7 +684,7 @@ function mountTaskbar() {
     event.preventDefault();
     taskStrip.scrollLeft += event.deltaY;
   }, { passive: false });
-  where.host.insertBefore(taskBar, where.before);
+  document.body.appendChild(taskBar);
   guardWindowDrags();
   watchTaskbarEdge();
   taskbarShow(!taskbarHides());
@@ -750,9 +768,9 @@ function taskbarShow(on) {
 
 function placeTaskbar() {
   if (!taskBar) return;
-  const hides = taskbarHides();
-  taskBar.classList.toggle("om-task-pinned", hides || !taskbarHost().flow);
-  setTaskRoom(hides ? 0 : taskBar.getBoundingClientRect().height);
+  const room = taskbarHides() ? 0 : taskBar.getBoundingClientRect().height;
+  holdTaskRoom(room);
+  setTaskRoom(room);
 }
 
 function watchTaskbarEdge() {
@@ -762,7 +780,11 @@ function watchTaskbarEdge() {
   const near = (event) => {
     if (!taskBar || !taskbarHides()) return;
     const bar = taskBar.getBoundingClientRect();
-    const reach = Math.max(28, bar.height);
+    let reach = Math.max(28, bar.height);
+    if (event.clientY >= window.innerHeight - reach && event.clientY < window.innerHeight - EDGE_REACH
+        && taskBar.classList.contains("om-task-hidden") && edgeShared()) {
+      reach = EDGE_REACH;
+    }
     over = event.clientY >= window.innerHeight - reach;
     taskbarShow(over || !!startPanel);
   };

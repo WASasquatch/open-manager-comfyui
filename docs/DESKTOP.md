@@ -34,7 +34,7 @@ Turning Desktop mode on turns the taskbar on.
 | Keyboard | Arrows move, Home and End jump, Enter opens, F2 renames, Delete trashes |
 | Right-click | New note, new folder, new workflow shortcut, Trash, arrange icons, settings, leave |
 | Wallpaper | An image from your wallpapers directory, drawn cover, contain, centre or tile |
-| Taskbar | Open windows along the bottom, with a Start button at the left |
+| Taskbar | Open windows along the bottom, with a Start button at the left. It keeps the bottom edge and stays above every window; anything ComfyUI docks at the bottom, such as the pysssss image feed, sits above it |
 
 ## What is on it
 
@@ -161,7 +161,7 @@ label sizes are under **Settings → Open Manager → Desktop**.
 |---|---|
 | Pack manager, pack pages, downloads, library, memory as windows | on |
 | Taskbar, and a minimise button | off |
-| Hide the taskbar until the pointer nears it | off |
+| Hide the taskbar until the pointer nears it, or reaches the very edge when something is docked under the graph | off |
 | Group windows of the same kind | off |
 | Write Start on the Start button | off |
 | An icon in each window title | on |
