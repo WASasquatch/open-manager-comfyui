@@ -336,6 +336,12 @@ ${NODE} .lg-slot--input:not(.lg-slot--dot-only) {
 ${NODE} .lg-slot--output:not(.lg-slot--dot-only) {
   padding-left: 4px;
 }
+${NODE}[data-collapsed] .lg-slot--input {
+  justify-self: start;
+}
+${NODE}[data-collapsed] .lg-slot--output {
+  justify-self: end;
+}
 ${NODE} .lg-slot span.truncate {
   color: var(--omn-slot-ink);
   font-size: var(--omn-text-size);
