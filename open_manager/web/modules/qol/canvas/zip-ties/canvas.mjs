@@ -1,8 +1,28 @@
 import { app } from "../../../../../../scripts/app.js";
-import { KEY, BAR, snap, tiesOf, prune, layout, route, tieAt, cut } from "./model.mjs";
+import {
+  KEY, BAR, snap, tiesOf, linkOf, prune, layout, route, tieAt, cut, outletOf, outletAt, reachOf,
+} from "./model.mjs";
 import { linkGirth, drawnLines } from "../../../noodles.mjs";
 
 const NO_MARKER = 0;
+
+const HIDDEN_LINK = -1;
+
+const MARGIN = 20;
+
+const OUTLET_DOT = 3;
+
+const LANE_DOT = 0.42;
+
+const OUTLET_LIT = 1.35;
+
+const UP = 1;
+
+const DOWN = 2;
+
+const LEFT = 3;
+
+const RIGHT = 4;
 
 const DOUBLE_MS = 350;
 
@@ -41,6 +61,9 @@ const state = {
   sequence: new Map(),
   plans: new Map(),
   overlay: null,
+  standIn: null,
+  outlet: null,
+  tap: null,
 };
 
 function gap(canvas) {
@@ -67,7 +90,26 @@ function moved(before, after) {
 
 const LIFT = "rgba(255, 255, 255, 0.45)";
 
-function paintTies(ctx, ties) {
+function laneColour(canvas, link) {
+  if (typeof link?.color === "string" && link.color) return link.color;
+  const types = window.LGraphCanvas?.link_type_colors || {};
+  return types[link?.type] || canvas.default_link_color || "#9a9";
+}
+
+function paintOutlets(ctx, canvas, tie, plan) {
+  const radius = Math.max(1.5, Math.min(OUTLET_DOT, (plan.gap || OUTLET_DOT * 2) * LANE_DOT));
+  for (const id of plan.order) {
+    const [x, y] = outletOf(tie, plan, id);
+    const lit = state.outlet?.tie === tie && state.outlet.id === id;
+    ctx.beginPath();
+    ctx.arc(x, y, lit ? radius * OUTLET_LIT : radius, 0, Math.PI * 2);
+    ctx.fillStyle = laneColour(canvas, linkOf(canvas.graph, id));
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function paintTies(ctx, ties, canvas) {
   if (!ties.length) return;
   ctx.save();
   ctx.lineWidth = 1;
@@ -90,8 +132,38 @@ function paintTies(ctx, ties) {
     }
     ctx.stroke();
     ctx.restore();
+    if (active && !state.drag && tapsOn(canvas)) paintOutlets(ctx, canvas, tie, plan);
   }
   ctx.restore();
+}
+
+function boxOf(points) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of points) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+
+function overlaps(box, area) {
+  return box[0] <= area[0] + area[2] && box[0] + box[2] >= area[0]
+    && box[1] <= area[1] + area[3] && box[1] + box[3] >= area[1];
+}
+
+function standInFor(canvas, id, a, b) {
+  const view = canvas.visible_area;
+  if (!view || !state.index.has(id)) return null;
+  const area = [view[0] - MARGIN, view[1] - MARGIN, view[2] + MARGIN * 2, view[3] + MARGIN * 2];
+  if (overlaps(boxOf([a, b]), area)) return null;
+  const reach = reachOf(state, id);
+  if (!reach || !overlaps(boxOf([a, b, ...reach]), area)) return null;
+  return [area[0] + area[2] / 2, area[1] + area[3] / 2];
 }
 
 function wrapDrawing(proto) {
@@ -134,21 +206,28 @@ function wrapDrawing(proto) {
         for (const [id, end] of frame) state.ends.set(id, end);
         for (const id of [...state.ends.keys()]) if (!state.index.has(id)) state.ends.delete(id);
       }
-      try { paintTies(ctx, ties); } catch {}
+      try { paintTies(ctx, ties, this); } catch {}
       if (shifted) requestAnimationFrame(() => this.setDirty?.(true, true));
     }
     return result;
   };
 
-  proto.renderLink = function (ctx, a, b, link, skipBorder, flow, colour, sd, ed, options) {
+  proto.renderLink = function (ctx, a, b, link, skipBorder, flow, colour, sd, ed, options, ...more) {
+    const standIn = state.standIn;
+    if (standIn && link === standIn.link && !state.nested) {
+      a = standIn.a;
+      b = standIn.b;
+    }
+    const plain = () => renderLink.call(this, ctx, a, b, link, skipBorder, flow, colour, sd, ed,
+      options, ...more);
     if (!state.live || state.nested || !state.frame || !link || link.parentId != null
         || this !== app.canvas
         || (options && (options.reroute || options.startControl || options.endControl))) {
-      return renderLink.apply(this, arguments);
+      return plain();
     }
     const tied = state.index.has(link.id);
     if (tied || wantsAll()) state.frame.set(link.id, { a: [a[0], a[1]], b: [b[0], b[1]], sd, ed });
-    if (!tied || !state.sequence.get(link.id)?.length) return renderLink.apply(this, arguments);
+    if (!tied || !state.sequence.get(link.id)?.length) return plain();
 
     const held = state.index.get(link.id);
     const active = held.some((tie) => tie === state.hovered || state.drag?.tie === tie);
@@ -174,11 +253,136 @@ function wrapDrawing(proto) {
     return undefined;
   };
 
+  const segments = proto._renderAllLinkSegments;
+  if (typeof segments === "function") {
+    proto._renderAllLinkSegments = function (ctx, link, startPos, endPos, ...rest) {
+      const stand = state.live && !state.nested && state.frame && this === app.canvas && link
+        && link.parentId == null && startPos && endPos
+        ? standInFor(this, link.id, startPos, endPos)
+        : null;
+      if (!stand) return segments.call(this, ctx, link, startPos, endPos, ...rest);
+      state.standIn = { link, a: startPos, b: endPos };
+      try {
+        return segments.call(this, ctx, link, stand, stand, ...rest);
+      } finally {
+        state.standIn = null;
+      }
+    };
+  }
+
   const ourDraw = proto.drawConnections;
   const ourLink = proto.renderLink;
+  const ourSegments = proto._renderAllLinkSegments;
   return () => {
     if (proto.drawConnections === ourDraw) proto.drawConnections = drawConnections;
     if (proto.renderLink === ourLink) proto.renderLink = renderLink;
+    if (segments && proto._renderAllLinkSegments === ourSegments) {
+      proto._renderAllLinkSegments = segments;
+    }
+  };
+}
+
+function tapsOn(canvas) {
+  return !!canvas && typeof canvas.linkConnector?.dragNewFromOutput === "function"
+    && !canvas.read_only && canvas.links_render_mode !== HIDDEN_LINK;
+}
+
+function directionOf(t) {
+  if (Math.abs(t[0]) >= Math.abs(t[1])) return t[0] >= 0 ? RIGHT : LEFT;
+  return t[1] >= 0 ? DOWN : UP;
+}
+
+function pointAt(canvas, outlet) {
+  const before = state.outlet;
+  if (before?.tie === outlet?.tie && before?.id === outlet?.id) return;
+  state.outlet = outlet;
+  canvas.setDirty?.(true, true);
+}
+
+function tap(canvas, event) {
+  if (!state.live || canvas !== app.canvas || event.button !== 0 || state.zHeld || state.drag
+      || state.slice || event.ctrlKey || event.metaKey || event.altKey || canvas.pointer?.isDouble
+      || !tapsOn(canvas)) {
+    return false;
+  }
+  const graph = canvas.graph;
+  const point = [event.canvasX, event.canvasY];
+  if (!graph || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) return false;
+  const hit = outletAt(state, tiesOf(graph), point, HIT_PX / (canvas.ds?.scale || 1));
+  if (!hit) return false;
+  const link = linkOf(graph, hit.id);
+  const node = link ? graph.getNodeById?.(link.origin_id) : null;
+  const output = node?.outputs?.[link.origin_slot];
+  const connector = canvas.linkConnector;
+  if (!output || connector.isConnecting) return false;
+  const list = state.sequence.get(hit.id) || [];
+  const upto = list.indexOf(hit.tie);
+  const plan = state.plans.get(hit.tie);
+  connector.dragNewFromOutput(graph, node, output);
+  try {
+    const made = connector.renderLinks?.at?.(-1) ?? null;
+    if (made && plan) {
+      made.fromPos = hit.at;
+      made.fromDirection = directionOf(plan.t);
+    }
+    if (typeof canvas._linkConnectorDrop === "function") canvas._linkConnectorDrop();
+    else {
+      canvas.pointer.onDragEnd = (up) => connector.dropLinks(graph, up);
+      canvas.pointer.finally = () => connector.reset(true);
+    }
+    state.tap = { graph, render: made, origin: link.origin_id, slot: link.origin_slot,
+                  ties: upto >= 0 ? list.slice(0, upto + 1) : [hit.tie] };
+  } catch (error) {
+    connector.reset?.(true);
+    throw error;
+  }
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  canvas.setDirty?.(true, true);
+  return true;
+}
+
+function onCreated(event) {
+  const held = state.tap;
+  const link = event?.detail;
+  const canvas = app.canvas;
+  if (!held || !link || link.id == null || !canvas) return;
+  if (!held.render || !canvas.linkConnector?.renderLinks?.includes(held.render)) {
+    state.tap = null;
+    return;
+  }
+  if (canvas.graph !== held.graph || link.origin_id !== held.origin || link.origin_slot !== held.slot) {
+    return;
+  }
+  const ties = tiesOf(held.graph);
+  for (const tie of held.ties) {
+    if (ties.includes(tie) && !tie.links.includes(link.id)) tie.links.push(link.id);
+  }
+  canvas.setDirty?.(true, true);
+}
+
+function hookCanvas(canvas) {
+  const own = Object.hasOwn(canvas, "onMouse");
+  const before = canvas.onMouse;
+  const mine = function (event) {
+    try {
+      if (tap(this, event)) return true;
+    } catch (error) {
+      console.warn("[Open Manager] Zip ties: no link started from the tie", error);
+    }
+    return typeof before === "function" ? before.call(this, event) : undefined;
+  };
+  canvas.onMouse = mine;
+  const events = canvas.linkConnector?.events;
+  events?.addEventListener?.("link-created", onCreated);
+  return () => {
+    if (canvas.onMouse === mine) {
+      if (own) canvas.onMouse = before;
+      else delete canvas.onMouse;
+    }
+    events?.removeEventListener?.("link-created", onCreated);
+    state.tap = null;
+    state.outlet = null;
   };
 }
 
@@ -352,7 +556,9 @@ function listen() {
       canvas.setDirty?.(true, true);
       return;
     }
-    const tie = tieAt(state, tiesOf(graph), point, HIT_PX / (canvas.ds?.scale || 1));
+    const pad = HIT_PX / (canvas.ds?.scale || 1);
+    if (event.button === 0 && tapsOn(canvas) && outletAt(state, tiesOf(graph), point, pad)) return;
+    const tie = tieAt(state, tiesOf(graph), point, pad);
     if (!tie) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -401,13 +607,18 @@ function listen() {
     if (!canvas) return;
     const ties = tiesOf(canvas.graph);
     if (!ties.length) {
+      if (state.outlet) pointAt(canvas, null);
       if (state.hovered) hovered(canvas, null);
       return;
     }
-    const tie = tieAt(state, ties, graphPoint(canvas, event), HIT_PX / (canvas.ds?.scale || 1));
+    const point = graphPoint(canvas, event);
+    const pad = HIT_PX / (canvas.ds?.scale || 1);
+    const outlet = tapsOn(canvas) ? outletAt(state, ties, point, pad) : null;
+    const tie = outlet?.tie ?? tieAt(state, ties, point, pad);
+    pointAt(canvas, outlet);
     hovered(canvas, tie);
     if (tie) {
-      const cursor = event.altKey ? TURN : "grab";
+      const cursor = outlet ? "crosshair" : event.altKey ? TURN : "grab";
       requestAnimationFrame(() => { canvas.canvas.style.cursor = cursor; });
     }
   });
@@ -469,10 +680,12 @@ function start() {
   const proto = Object.getPrototypeOf(canvas);
   const unwrap = wrapDrawing(proto);
   const unlisten = listen();
+  const unhook = hookCanvas(canvas);
   state.live = true;
   canvas.setDirty?.(true, true);
   return () => {
     state.live = false;
+    unhook();
     state.hovered = null;
     state.graph = null;
     state.ends = new Map();

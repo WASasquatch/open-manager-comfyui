@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 from io import BytesIO
 from pathlib import Path
 
@@ -635,7 +636,11 @@ THUMB_KEEP = 4_000
 
 THUMB_SWEEP = 256
 
+THUMB_SWEEP_DELAY = 30.0
+
 _thumb_writes = 0
+
+_sweeping = threading.Lock()
 
 
 THUMB_KINDS = ("still", "video")
@@ -788,6 +793,28 @@ def sweep_thumbs() -> dict:
     return {"ok": True, "gone": gone, "kept": len(held), "roots": sorted(live), "reason": ""}
 
 
+def _sweep_later() -> None:
+    """Sweep the thumbnails on a thread of its own after a pause, one sweep at a time."""
+    if not _sweeping.acquire(blocking=False):
+        return
+
+    def run() -> None:
+        try:
+            sweep_thumbs()
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            _sweeping.release()
+
+    waiting = threading.Timer(THUMB_SWEEP_DELAY, run)
+    waiting.daemon = True
+    waiting.name = "om-thumb-sweep"
+    try:
+        waiting.start()
+    except RuntimeError:
+        _sweeping.release()
+
+
 def thumb(root: str, relative: str, edge: int = THUMB_EDGE) -> tuple[bytes, str, str]:
     """One picture, shrunk once and kept.
 
@@ -853,7 +880,7 @@ def thumb(root: str, relative: str, edge: int = THUMB_EDGE) -> tuple[bytes, str,
                     break
         _thumb_writes += 1
         if _thumb_writes == 1 or _thumb_writes % THUMB_SWEEP == 0:
-            sweep_thumbs()
+            _sweep_later()
     except OSError:
         try:
             part.unlink(missing_ok=True)

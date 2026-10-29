@@ -8,6 +8,8 @@ const BAR = 3;
 
 const PAD = 4;
 
+const OUTLET = 4.5;
+
 const SPLINE_MODE = 2;
 
 const LINEAR_MODE = 1;
@@ -281,7 +283,7 @@ function layout(graph, index, ends, gap) {
         || p.rank - q.rank);
       const offset = new Map();
       rows.forEach((row, at) => offset.set(row.id, (at - (rows.length - 1) / 2) * gap));
-      next.set(tie, { t, n, angle, order: rows.map((row) => row.id), offset,
+      next.set(tie, { t, n, angle, order: rows.map((row) => row.id), offset, gap,
                       half: ((rows.length - 1) * gap) / 2 + PAD });
     }
     const settled = pass > 0 && sameOrder(plans, next);
@@ -390,6 +392,45 @@ function tieAt(state, ties, point, pad) {
   return null;
 }
 
+function outletOf(tie, plan, id) {
+  const [x, y] = strand(tie, plan, id);
+  const reach = BAR + OUTLET;
+  return [x + plan.t[0] * reach, y + plan.t[1] * reach];
+}
+
+function outletAt(state, ties, point, pad) {
+  for (let at = ties.length - 1; at >= 0; at -= 1) {
+    const tie = ties[at];
+    const plan = state.plans.get(tie);
+    if (!plan?.order.length) continue;
+    const dx = point[0] - tie.pos[0];
+    const dy = point[1] - tie.pos[1];
+    const lengthwise = dx * plan.t[0] + dy * plan.t[1];
+    const across = dx * plan.n[0] + dy * plan.n[1];
+    if (lengthwise < BAR || lengthwise > BAR + OUTLET * 2 + pad) continue;
+    if (Math.abs(across) > plan.half + pad) continue;
+    let id = plan.order[0];
+    for (const one of plan.order) {
+      if (Math.abs((plan.offset.get(one) ?? 0) - across)
+          < Math.abs((plan.offset.get(id) ?? 0) - across)) id = one;
+    }
+    return { tie, id, at: outletOf(tie, plan, id) };
+  }
+  return null;
+}
+
+function reachOf(state, id) {
+  const list = state.sequence.get(id);
+  if (!list?.length) return null;
+  const points = [];
+  for (const tie of list) {
+    const plan = state.plans.get(tie);
+    const half = plan?.half ?? PAD;
+    points.push([tie.pos[0] - half, tie.pos[1] - half], [tie.pos[0] + half, tie.pos[1] + half]);
+  }
+  return points;
+}
+
 function cut(state, graph, ends, mode, p, q, drawn) {
   const ties = tiesOf(graph);
   const severed = ties.filter((tie) => {
@@ -427,4 +468,7 @@ function cut(state, graph, ends, mode, p, q, drawn) {
   };
 }
 
-export { KEY, BAR, snap, tiesOf, linkOf, prune, layout, route, tieAt, cut, nextId };
+export {
+  KEY, BAR, snap, tiesOf, linkOf, prune, layout, route, tieAt, cut, nextId, outletOf, outletAt,
+  reachOf,
+};

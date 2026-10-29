@@ -260,12 +260,13 @@ async def scan(pack: str, directory: Path, key: str) -> None:
     """
     if _state["scanning"]:
         return
-    files = candidates(directory)
     _state.update(
-        scanning=True, done=0, total=len(files), pack=pack, error="", results=[],
+        scanning=True, done=0, total=0, pack=pack, error="", results=[],
         started=time.time(),
     )
     try:
+        files = await asyncio.to_thread(candidates, directory)
+        _state["total"] = len(files)
         if not files:
             return
         spent = 0
@@ -283,7 +284,7 @@ async def scan(pack: str, directory: Path, key: str) -> None:
                 return
             for path in files:
                 name = posixpath.join(*path.relative_to(directory).parts)
-                sha256 = digest(path)
+                sha256 = await asyncio.to_thread(digest, path)
                 if not sha256:
                     _state["results"].append(
                         {"file": name, "state": "unreadable", "sha256": ""}

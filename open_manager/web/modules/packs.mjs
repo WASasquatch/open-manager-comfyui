@@ -1139,7 +1139,7 @@ function openScanDialog(packId, { onDone } = {}) {
   const draw = (state) => {
     const spent = `${state.budget_used}/${state.budget} used today`;
     status.textContent = state.scanning
-      ? `${state.done} of ${state.total} checked · ${spent}`
+      ? (state.total ? `${state.done} of ${state.total} checked · ${spent}` : "Starting...")
       : (state.error
           ? `Stopped: ${state.error} · ${spent}`
           : `${state.done} file(s) checked · ${spent}`);
