@@ -653,7 +653,7 @@ async def _impact_report(lines: list[str], policy: str, skip=None) -> dict:
         )
         held = held + redirects
     report = await asyncio.to_thread(impact.analyse, lines, "")
-    dependencies = deps.check(asked)
+    dependencies = await asyncio.to_thread(deps.check, asked)
     by_raw = {item.get("raw", ""): item for item in dependencies}
     unmet = []
     for line in held:
@@ -700,6 +700,88 @@ async def _impact_report(lines: list[str], policy: str, skip=None) -> dict:
         ],
         "dependencies": dependencies,
     }
+
+
+IMPACT_WAIT = 20
+
+IMPACT_KEEP = 120
+
+_impact_jobs: dict[tuple, asyncio.Task] = {}
+
+
+def _drop_impact(key: tuple, job: asyncio.Future) -> None:
+    """Forget a finished impact check, unless a newer one holds its key."""
+    if _impact_jobs.get(key) is job:
+        del _impact_jobs[key]
+
+
+async def _impact_guarded(start) -> tuple[int, dict]:
+    """Run an impact check, turning a failure into an answer the panel can show."""
+    try:
+        return await start()
+    except Exception as error:  # noqa: BLE001
+        logger.warning("impact check failed (%s: %s)", type(error).__name__, error)
+        return 500, {"error": "impact", "detail": f"{type(error).__name__}: {error}"}
+
+
+async def _impact_answer(key: tuple, start, pending: dict) -> web.Response:
+    """Answer an impact check that runs as a job of its own, waiting a while for it.
+
+    Args:
+        key: What the check is of. Asking again with the same key joins the same job.
+        start: Called with no arguments to begin the check; resolves to
+            ``(status, payload)``.
+        pending: Fields for the answer given while the check still runs.
+
+    Returns:
+        The check's answer once it has finished, otherwise ``202`` with ``pending: true``.
+    """
+    job = _impact_jobs.get(key)
+    if job is None:
+        job = asyncio.ensure_future(_impact_guarded(start))
+        _impact_jobs[key] = job
+        loop = asyncio.get_running_loop()
+        job.add_done_callback(lambda done: loop.call_later(IMPACT_KEEP, _drop_impact, key, done))
+    await asyncio.wait({job}, timeout=IMPACT_WAIT)
+    if not job.done():
+        return web.json_response({**pending, "pending": True}, status=202)
+    _drop_impact(key, job)
+    status, payload = job.result()
+    return web.json_response(payload, status=status)
+
+
+async def _version_impact(node_id: str, version: str, policy: str) -> tuple[int, dict]:
+    """What installing one registry version would change here, as ``(status, payload)``."""
+    async with aiohttp.ClientSession() as session:
+        try:
+            versions = await registry.fetch_versions(node_id, session)
+        except registry.RegistryError as error:
+            return 502, {"error": "registry", "status": error.status, "detail": error.detail}
+
+    entry = next((item for item in versions if item.version == version), None)
+    if entry is None:
+        return 404, {"error": f"no version {version}"}
+
+    lines = list(entry.dependencies)
+    if entry.download_url:
+        try:
+            lines = await asyncio.to_thread(installer.archive_requirements, entry.download_url)
+        except RuntimeError:
+            pass
+    placed = await asyncio.to_thread(installer.resolve_install_dir, node_id)
+    report = await _impact_report(lines, policy, placed)
+    return 200, {"pack": node_id, "version": version, **report}
+
+
+async def _optional_impact(pack_id: str, names: list[str], policy: str) -> tuple[int, dict]:
+    """What installing some of a pack's optional groups would change here, as
+    ``(status, payload)``."""
+    directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id)
+    if directory is None:
+        return 404, {"ok": False, "reason": f"{pack_id} is not installed"}
+    lines, used = await asyncio.to_thread(optional_groups.lines_for, directory, names)
+    report = await _impact_report(lines, policy, directory)
+    return 200, {"ok": True, "pack": pack_id, "groups": used, **report}
 
 
 def _finding_json(finding: risk.Finding) -> dict:
@@ -2778,29 +2860,11 @@ def register_routes() -> None:
         node_id = request.match_info.get("node_id", "")
         version = request.match_info.get("version", "")
         policy = request.query.get("policy", "")
-
-        async with aiohttp.ClientSession() as session:
-            try:
-                versions = await registry.fetch_versions(node_id, session)
-            except registry.RegistryError as error:
-                return web.json_response(
-                    {"error": "registry", "status": error.status, "detail": error.detail},
-                    status=502,
-                )
-
-        entry = next((item for item in versions if item.version == version), None)
-        if entry is None:
-            return web.json_response({"error": f"no version {version}"}, status=404)
-
-        lines = list(entry.dependencies)
-        if entry.download_url:
-            try:
-                lines = await asyncio.to_thread(installer.archive_requirements, entry.download_url)
-            except RuntimeError:
-                pass
-        placed = await asyncio.to_thread(installer.resolve_install_dir, node_id)
-        report = await _impact_report(lines, policy, placed)
-        return web.json_response({"pack": node_id, "version": version, **report})
+        return await _impact_answer(
+            ("version", node_id, version, policy),
+            lambda: _version_impact(node_id, version, policy),
+            {},
+        )
 
     @PromptServer.instance.routes.post(f"{PREFIX}/optional-impact")
     @_json_body
@@ -2810,14 +2874,13 @@ def register_routes() -> None:
         names = (body or {}).get("groups")
         if not pack_id or not isinstance(names, list):
             return web.json_response({"ok": False, "reason": "id and groups are required"}, status=400)
-        directory = await asyncio.to_thread(installer.resolve_install_dir, pack_id)
-        if directory is None:
-            return web.json_response({"ok": False, "reason": f"{pack_id} is not installed"}, status=404)
-        lines, used = await asyncio.to_thread(
-            optional_groups.lines_for, directory, [str(name) for name in names[:64]]
+        chosen = [str(name) for name in names[:64]]
+        policy = str((body or {}).get("policy") or "")
+        return await _impact_answer(
+            ("optional", pack_id, tuple(chosen), policy),
+            lambda: _optional_impact(pack_id, chosen, policy),
+            {"ok": True},
         )
-        report = await _impact_report(lines, str((body or {}).get("policy") or ""), directory)
-        return web.json_response({"ok": True, "pack": pack_id, "groups": used, **report})
 
     @PromptServer.instance.routes.post(f"{PREFIX}/install")
     @_json_body

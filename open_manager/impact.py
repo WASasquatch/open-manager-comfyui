@@ -339,6 +339,8 @@ def _run_resolver(python: str, lines: list[str], extra=()) -> tuple[list | str, 
         args += ["-r", path]
         try:
             finished = piptool.run(python, "install", args, timeout=TIMEOUT, cwd=elsewhere)
+        except subprocess.TimeoutExpired:
+            return f"the installer did not finish resolving these requirements in {TIMEOUT} seconds", ""
         except (OSError, subprocess.SubprocessError) as error:
             return f"the installer could not be run ({type(error).__name__}: {error})", ""
         if finished is None:

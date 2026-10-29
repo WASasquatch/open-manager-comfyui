@@ -270,6 +270,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Node error and Enter buttons in the title bar | On | On Nodes 2.0, the Error, Issues, Enter subgraph and advanced inputs buttons sit in the node's title bar in place of tabs hanging below the node. A node left with room for the tab shrinks to its content once |
 | Combo lists use the room on screen | On | On Nodes 2.0, a combo's list grows into the space on screen in place of about seven options |
 | Combo lists open folders as submenus | On | On Nodes 2.0, a list of files kept in folders, such as LoRAs, shows each folder as a submenu. Typing in its search box searches every file |
+| Right-clicking a video opens the browser's menu | On | On Nodes 2.0 and OM Nodes, right-clicking a video on a node opens the browser's menu for it, with Save video as and Open video in new tab, in place of the node's menu |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Links share one colour table per frame | On | Drawing a link no longer copies the colour of every link type from every pack, which costs most on large graphs with many packs installed |

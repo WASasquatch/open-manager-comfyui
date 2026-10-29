@@ -33,7 +33,9 @@ async function paintImpact(slot, gate, base, fetchReport) {
   slot.replaceChildren(el("div", "om-why", "Checking dependencies..."));
   let report;
   try {
-    report = await fetchReport();
+    do {
+      report = await fetchReport();
+    } while (report?.pending && slot._omTicket === ticket && slot.isConnected);
   } catch (error) {
     if (slot._omTicket !== ticket) return;
     slot.replaceChildren(el("div", "om-why", `Dependency impact unavailable: ${error.message}`));

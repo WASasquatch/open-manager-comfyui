@@ -30,6 +30,8 @@ LIVE_SETTING = "openManager.pauseLive"
 
 WAIT_SECONDS = 600.0
 
+LIVE_KEEP_FREE = 20 * 1024 ** 3
+
 _lock = threading.Lock()
 _executor_ref: "weakref.ReferenceType | None" = None
 _provider = None
@@ -127,6 +129,16 @@ def _encode(value: object, tensors: dict):
     if type(value) is dict and all(isinstance(key, str) for key in value):
         return {"t": "d", "v": {key: _encode(one, tensors) for key, one in value.items()}}
     raise TypeError(type(value).__name__)
+
+
+def _tensor_bytes(value: object) -> int:
+    if _plain_tensor(value):
+        return value.numel() * value.element_size()
+    if isinstance(value, (list, tuple)):
+        return sum(_tensor_bytes(one) for one in value)
+    if type(value) is dict:
+        return sum(_tensor_bytes(one) for one in value.values())
+    return 0
 
 
 def _decode(node: dict, tensors: dict):
@@ -354,13 +366,24 @@ def _live_begin(prompt_id: str, item, workflow_id: str) -> dict | None:
     prompt = item[2] if isinstance(item[2], dict) else {}
     return {"prompt_id": prompt_id, "workflow_id": workflow_id, "folder": _live_dir(workflow_id),
             "prompt": prompt, "consumers": _consumers(prompt), "entries": {}, "covered": set(),
-            "widgets": [], "created_at": time.time(), "open": False}
+            "widgets": [], "created_at": time.time(), "open": False,
+            "paused": (_dir(workflow_id) / "manifest.json").is_file()}
+
+
+def _take_file(source: Path, target: Path) -> None:
+    target.unlink(missing_ok=True)
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copyfile(source, target)
 
 
 def _live_open(live: dict) -> None:
-    """Carry what this run was served from the last live snapshot, and clear the rest."""
+    """Carry what this run was served from the last live snapshot and the pause, clear the rest."""
     live["open"] = True
     folder = live["folder"]
+    paused = _dir(live["workflow_id"])
+    folder.mkdir(parents=True, exist_ok=True)
     with _lock:
         armed = _armed if _armed.get("prompt_id") == live["prompt_id"] else {}
         served = dict(armed.get("served") or {})
@@ -368,15 +391,28 @@ def _live_open(live: dict) -> None:
     for digest, node_id in served.items():
         live["covered"].add(node_id)
         record = records.get(digest)
-        if record is not None and record.get("dir") == str(folder):
-            live["entries"][digest] = {**{key: value for key, value in record.items()
-                                          if key != "dir"}, "node_id": node_id}
-    folder.mkdir(parents=True, exist_ok=True)
+        if record is None:
+            continue
+        if record.get("dir") == str(paused):
+            try:
+                _take_file(paused / f"{digest}.json", folder / f"{digest}.json")
+                if record.get("tensors"):
+                    _take_file(paused / f"{digest}.safetensors", folder / f"{digest}.safetensors")
+            except OSError:
+                continue
+            with _lock:
+                if _armed.get("prompt_id") == live["prompt_id"] and digest in _armed["nodes"]:
+                    _armed["nodes"][digest] = {**_armed["nodes"][digest], "dir": str(folder)}
+        elif record.get("dir") != str(folder):
+            continue
+        live["entries"][digest] = {**{key: value for key, value in record.items()
+                                      if key != "dir"}, "node_id": node_id}
     _live_manifest(live)
     keep = set(live["entries"]) | {"manifest"}
     for child in folder.iterdir():
         if child.name.split(".", 1)[0] not in keep:
             child.unlink(missing_ok=True)
+    shutil.rmtree(paused, ignore_errors=True)
 
 
 def _live_manifest(live: dict) -> None:
@@ -411,11 +447,29 @@ def _live_prune(live: dict) -> list[str]:
     return gone
 
 
+def _live_room(live: dict, size: int) -> bool:
+    """Whether writing ``size`` bytes leaves the drive :data:`LIVE_KEEP_FREE` free."""
+    try:
+        free = shutil.disk_usage(paths.store(LIVE_SUBDIR)).free
+    except OSError:
+        return False
+    if free - size >= LIVE_KEEP_FREE:
+        return True
+    if not live.get("full"):
+        live["full"] = True
+        logger.warning("pause: live snapshot of %s skips outputs that would leave under %d GB free",
+                       live["workflow_id"], LIVE_KEEP_FREE // 1024 ** 3)
+    return False
+
+
 def _live_store(live: dict, node_id: str, class_type: str, digest: str, value) -> None:
     import torch
     from safetensors.torch import save_file
 
     if _temp_ui(value.ui):
+        return
+    size = _tensor_bytes(value.outputs)
+    if size and not _live_room(live, size):
         return
     tensors: dict = {}
     try:
@@ -469,7 +523,7 @@ def _make_provider():
                     boundary = pending and pending == _running.get("prompt_id") \
                         and _pending.get("mode") == "boundary"
                     live = _running.get("live")
-                if live is not None:
+                if live is not None and str(context.node_id) in live["prompt"]:
                     _live_submit(live, _live_store, str(context.node_id), context.class_type,
                                  context.cache_key_hash, value)
                 if boundary:
@@ -572,7 +626,7 @@ def _prompt_end(prompt_id: str) -> None:
     executor = _executor()
     succeeded = bool(getattr(executor, "success", False))
     if live is not None and pending is None:
-        _live_settle(live, keep=not succeeded and not _interrupted(executor))
+        _live_settle(live, keep=not succeeded and (live["paused"] or not _interrupted(executor)))
     if pending is not None:
         item = _running_item(prompt_id)
         if succeeded:
@@ -588,6 +642,8 @@ def _prompt_end(prompt_id: str) -> None:
                 answer = {"ok": False, "reason": f"it could not be written ({error})"}
         if live is not None:
             _live_settle(live, keep=not answer.get("ok") and not succeeded)
+        elif answer.get("ok"):
+            shutil.rmtree(_live_dir(answer["workflow_id"]), ignore_errors=True)
         with _lock:
             if _pending.get("prompt_id") == prompt_id:
                 _pending["answer"] = answer

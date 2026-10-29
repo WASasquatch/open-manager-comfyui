@@ -146,6 +146,19 @@ function graphSig(graph) {
   return hashText(JSON.stringify(shape));
 }
 
+function nodeSigs(graph) {
+  const found = new Map();
+  if (!graph || typeof graph !== "object") return found;
+  for (const scope of scopesOf(graph)) {
+    const sources = linkSources(scope.links);
+    for (const node of Array.isArray(scope.nodes) ? scope.nodes : []) {
+      found.set(`${scope.id}|${node?.id}`, JSON.stringify([String(node?.type || ""),
+        Number(node?.mode) || 0, steadyValues(node), wiringOf(node, sources)]));
+    }
+  }
+  return found;
+}
+
 function sameGraph(one, two) {
   const host = window.comfyAPI?.changeTracker?.ChangeTracker?.graphEqual;
   if (typeof host === "function") {
@@ -382,7 +395,7 @@ function bookOf(workflow) {
     book = {
       workflow, path: String(workflow.path || ""), temp, dir: "", items: [], graphs: new Map(),
       loaded: temp, loading: null, failed: false, current: "", queue: Promise.resolve(),
-      autoAt: Date.now(),
+      autoAt: Date.now(), edited: false,
     };
     books.set(workflow, book);
   }
@@ -608,6 +621,7 @@ async function takeSnapshot(workflow, { name = "", origin = "manual", graph = nu
   book.items.unshift(item);
   book.current = item.id;
   book.autoAt = Date.now();
+  book.edited = false;
   const drop = pruneBook(book);
   tell(book);
   await bookWrite(book, { graphs: [item.id], drop });
@@ -755,4 +769,4 @@ function agoText(at) {
   return new Date(Number(at)).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export { SNAP_NAME_CAP, SNAP_ORIGIN_NAMES, bookOf, openBook, takeSnapshot, applySnapshot, openSnapshotTab, renameSnapshot, deleteSnapshot, clearBook, snapshotGraph, compareGraphs, graphSig, cleanGraph, liveSig, tagFor, noteRunTag, runSnapshot, watchBooks, renamedWorkflow, deletedWorkflow, agoText, syncBook };
+export { SNAP_NAME_CAP, SNAP_ORIGIN_NAMES, bookOf, openBook, takeSnapshot, applySnapshot, openSnapshotTab, renameSnapshot, deleteSnapshot, clearBook, snapshotGraph, compareGraphs, graphSig, nodeSigs, cleanGraph, liveSig, tagFor, noteRunTag, runSnapshot, watchBooks, renamedWorkflow, deletedWorkflow, agoText, syncBook };

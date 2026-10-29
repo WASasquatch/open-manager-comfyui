@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -284,8 +285,90 @@ def _take_archive(url: str) -> Path | None:
     return None
 
 
+PEEK_BLOCK = 64 << 10
+
+PEEK_LIMIT = 8 << 20
+
+PEEK_TIMEOUT = 30
+
+_CONTENT_RANGE = re.compile(r"bytes\s+(\d+)-(\d+)/(\d+)")
+
+
+class _RemoteArchive:
+    """A remote zip read in byte ranges, so a few files come out without the whole download.
+
+    Raises:
+        OSError: Where the host does not answer ranges, or the reads pass :data:`PEEK_LIMIT`.
+    """
+
+    def __init__(self, url: str) -> None:
+        if urllib.parse.urlparse(url or "").scheme.lower() != "https":
+            raise OSError(f"refusing to read from a non-https URL: {url[:120]!r}")
+        self._url = url
+        self._spent = 0
+        self._at = 0
+        self._start, self._size, self._body = self._fetch(f"bytes=-{PEEK_BLOCK}")
+
+    def _fetch(self, span: str, length: int = PEEK_BLOCK) -> tuple[int, int, bytes]:
+        if self._spent + length > PEEK_LIMIT:
+            raise OSError("reading the archive's requirements needs too much of it")
+        request = urllib.request.Request(url=self._url, headers={
+            "User-Agent": "open-manager", "Range": span, "Accept-Encoding": "identity",
+        })
+        with urllib.request.urlopen(request, timeout=PEEK_TIMEOUT) as answer:
+            found = _CONTENT_RANGE.match(answer.headers.get("Content-Range", ""))
+            if answer.status != 206 or not found:
+                raise OSError(f"the host answered {answer.status} to a range read")
+            first, last, total = (int(part) for part in found.groups())
+            body = answer.read(min(last - first + 1, length))
+        self._spent += len(body)
+        return first, total, body
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._at
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        base = (0, self._at, self._size)[whence]
+        self._at = max(0, base + offset)
+        return self._at
+
+    def read(self, count: int = -1) -> bytes:
+        end = self._size if count is None or count < 0 else min(self._size, self._at + count)
+        if end <= self._at:
+            return b""
+        if not (self._start <= self._at and end <= self._start + len(self._body)):
+            stop = min(self._size, max(end, self._at + PEEK_BLOCK)) - 1
+            self._start, _total, self._body = self._fetch(
+                f"bytes={self._at}-{stop}", stop + 1 - self._at)
+            if self._start != self._at:
+                raise OSError("the host answered a different range")
+        piece = self._body[self._at - self._start:end - self._start]
+        self._at += len(piece)
+        return piece
+
+
+def _requirements_in(source) -> list[str]:
+    """The non-comment lines of the ``requirements.txt`` at a zip's root.
+
+    Args:
+        source: A zip's path or a seekable file holding it.
+    """
+    with zipfile.ZipFile(source) as zipped:
+        name = next((one for one in zipped.namelist()
+                     if one.replace("\\", "/").lstrip("./") == "requirements.txt"), "")
+        body = zipped.read(name).decode("utf-8", errors="replace") if name else ""
+    return [line.strip() for line in body.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
 def archive_requirements(url: str) -> list[str]:
     """The requirement lines installing a registry archive would hand to pip.
+
+    Reads only the parts of the archive it needs where the host answers byte ranges, and
+    downloads the whole archive where it does not.
 
     Args:
         url: Artifact URL.
@@ -297,16 +380,19 @@ def archive_requirements(url: str) -> list[str]:
     Raises:
         RuntimeError: Where the archive could not be downloaded or read.
     """
+    with _archive_lock:
+        held = _kept_archives.get(url)
+    if not (held and held[0].is_file()):
+        try:
+            return _requirements_in(_RemoteArchive(url))
+        except (OSError, EOFError, ValueError, KeyError, zipfile.BadZipFile,
+                http.client.HTTPException) as error:
+            logger.info("reading requirements in place failed, downloading the archive (%s)", error)
     path = fetch_archive(url)
     try:
-        with zipfile.ZipFile(path) as zipped:
-            name = next((one for one in zipped.namelist()
-                         if one.replace("\\", "/").lstrip("./") == "requirements.txt"), "")
-            body = zipped.read(name).decode("utf-8", errors="replace") if name else ""
+        return _requirements_in(path)
     except (OSError, KeyError, zipfile.BadZipFile) as error:
         raise RuntimeError(f"the archive could not be read ({error})") from error
-    return [line.strip() for line in body.splitlines()
-            if line.strip() and not line.strip().startswith("#")]
 
 
 def _download(url: str, target: Path) -> None:

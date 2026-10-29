@@ -622,26 +622,8 @@ app.registerExtension({
       type: "slider",
       attrs: { min: 0, max: 60, step: 1 },
       defaultValue: 0,
-      tooltip: "A snapshot of the open workflow every so many minutes, taken only when the graph "
-        + "has changed since the last one. 0 is off.",
-    },
-    {
-      id: "openManager.snapshotOnSave",
-      name: "Take a snapshot when a workflow is saved",
-      category: ["Open Manager", "Snapshots", "snapshotOnSave"],
-      type: "boolean",
-      defaultValue: false,
-      tooltip: "Save and Save As. Autosave does not take one.",
-    },
-    {
-      id: "openManager.snapshotOnRun",
-      name: "Take a snapshot at each run",
-      category: ["Open Manager", "Snapshots", "snapshotOnRun"],
-      type: "boolean",
-      defaultValue: false,
-      tooltip: "None is taken when the graph matches a snapshot already kept. A seed set to "
-        + "change after each run does not count as a change. The Timer names the snapshot "
-        + "each run was queued from either way.",
+      tooltip: "A snapshot of the open workflow every so many minutes, taken only when you have "
+        + "edited it since the last one. Values a run changes do not count. 0 is off.",
     },
     {
       id: "openManager.snapshotKeep",
@@ -924,9 +906,12 @@ app.registerExtension({
       category: ["Open Manager", "Snapshots", "pauseLive"],
       type: "boolean",
       defaultValue: false,
-      tooltip: "Each node's outputs, without models, are written to disk as the run reaches it. "
-        + "After a crash or an error, the next Run of that workflow continues from the last "
-        + "node written. A run that finishes or is cancelled leaves nothing on disk.",
+      tooltip: "Each node's outputs, without models, are written to disk as the run reaches it, "
+        + "while the drive keeps 20 GB free. After a crash or an error, the next Run of that "
+        + "workflow continues from the last node written; a loop starts its passes over. A "
+        + "workflow keeps one save: a run's first write replaces its Pause, and a Pause replaces "
+        + "this. A run that finishes leaves nothing on disk, nor does one cancelled unless it "
+        + "resumed a Pause.",
     },
     {
       id: "openManager.runBar",

@@ -2,16 +2,16 @@ import { api } from "../../../scripts/api.js";
 import { el, toast, notify, askText, confirmAction, openRowMenu, liveTip } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
 import { activeWorkflow, openWorkflows, workflowStore, watchTabStrip } from "./workflows.mjs";
-import { SNAP_NAME_CAP, SNAP_ORIGIN_NAMES, bookOf, openBook, syncBook, takeSnapshot, applySnapshot, openSnapshotTab, renameSnapshot, deleteSnapshot, clearBook, liveSig, tagFor, noteRunTag, watchBooks, renamedWorkflow, deletedWorkflow, agoText } from "./snapshot-store.mjs";
+import { SNAP_NAME_CAP, SNAP_ORIGIN_NAMES, bookOf, openBook, syncBook, takeSnapshot, applySnapshot, openSnapshotTab, renameSnapshot, deleteSnapshot, clearBook, liveSig, nodeSigs, tagFor, noteRunTag, watchBooks, renamedWorkflow, deletedWorkflow, agoText } from "./snapshot-store.mjs";
 import { openSnapshotWindow } from "./lazy.mjs";
 
 const SNAP_TAKE_COMMAND = "openmanager.snapshotTake";
 
 const SNAP_WINDOW_COMMAND = "openmanager.snapshots";
 
-const SAVE_COMMANDS = new Set(["Comfy.SaveWorkflow", "Comfy.SaveWorkflowAs"]);
-
 const AUTO_BEAT = 30000;
+
+const CHANGE_SETTLE = 750;
 
 const PICK_ART = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">'
   + '<path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" '
@@ -23,13 +23,16 @@ let tabWatching = false;
 
 let started = false;
 
+const seenNodes = new WeakMap();
+
+const ranNodes = new Set();
+
+let changeDue = 0;
+
+let changed = null;
+
 function snapshotsOn() {
   return panelSetting("openManager.snapshots", true) !== false;
-}
-
-function piniaStores() {
-  return document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties?.$pinia?._s
-    || null;
 }
 
 function tabStrip() {
@@ -322,43 +325,66 @@ function mountSnapshotTabs() {
   paintSnapTabs();
 }
 
+function autoMinutes() {
+  return snapshotsOn() ? Number(panelSetting("openManager.snapshotEvery", 0)) || 0 : 0;
+}
+
 function autoBeat() {
-  if (!snapshotsOn()) return;
-  const minutes = Number(panelSetting("openManager.snapshotEvery", 0)) || 0;
+  const minutes = autoMinutes();
   const workflow = activeWorkflow();
   if (minutes <= 0 || !workflow) return;
   const held = bookOf(workflow);
-  const sig = liveSig(workflow);
-  if (!held.autoSig) {
-    held.autoSig = sig;
-    held.autoAt = Date.now();
-    return;
-  }
-  if (Date.now() - held.autoAt < minutes * 60000) return;
+  if (!held.edited || Date.now() - held.autoAt < minutes * 60000) return;
+  held.edited = false;
   held.autoAt = Date.now();
-  if (!sig || sig === held.autoSig) return;
-  held.autoSig = sig;
   takeSnapshot(workflow, { origin: "auto" }).catch(() => {});
 }
 
-async function savedNow() {
-  if (!snapshotsOn() || panelSetting("openManager.snapshotOnSave", false) !== true) return;
-  const workflow = activeWorkflow();
-  if (!workflow || workflow.isTemporary || workflow.isModified) return;
-  try {
-    await syncBook(bookOf(workflow));
-    await takeSnapshot(workflow, { origin: "save" });
-  } catch {
+function handEdited(before, now, ran) {
+  for (const [key, sig] of now) {
+    if (before.get(key) === sig) continue;
+    if (before.has(key) && ran.has(key.slice(key.indexOf("|") + 1))) continue;
+    return true;
   }
+  for (const key of before.keys()) {
+    if (!now.has(key)) return true;
+  }
+  return false;
 }
 
-function watchSaves() {
-  const store = piniaStores()?.get("command");
-  if (typeof store?.$onAction !== "function") return;
-  store.$onAction(({ name, args, after }) => {
-    if (name !== "execute" || !SAVE_COMMANDS.has(args?.[0])) return;
-    after(() => { void savedNow(); });
-  });
+function noteChange() {
+  clearTimeout(changeDue);
+  changeDue = 0;
+  const held = changed;
+  changed = null;
+  const ran = new Set(ranNodes);
+  ranNodes.clear();
+  if (!held) return;
+  const now = nodeSigs(held.state);
+  const before = seenNodes.get(held.workflow);
+  seenNodes.set(held.workflow, now);
+  if (before && handEdited(before, now, ran)) bookOf(held.workflow).edited = true;
+}
+
+function onGraphChanged(event) {
+  const workflow = activeWorkflow();
+  const state = event?.detail;
+  if (autoMinutes() <= 0 || !workflow || !state || typeof state !== "object") return;
+  if (changed && changed.workflow !== workflow) noteChange();
+  if (!seenNodes.has(workflow)) {
+    const tracker = workflow.changeTracker;
+    const base = tracker?.undoQueue?.at?.(-1) || tracker?.initialState;
+    if (base && base !== state) seenNodes.set(workflow, nodeSigs(base));
+  }
+  changed = { workflow, state };
+  if (!changeDue) changeDue = setTimeout(noteChange, CHANGE_SETTLE);
+}
+
+function onExecuted(event) {
+  if (autoMinutes() <= 0) return;
+  for (const id of [event?.detail?.node, event?.detail?.display_node]) {
+    if (id !== undefined && id !== null) ranNodes.add(String(id).split(":").pop());
+  }
 }
 
 function watchFileMoves() {
@@ -378,10 +404,6 @@ function watchFileMoves() {
 function runTag(graph) {
   const workflow = activeWorkflow();
   if (!snapshotsOn() || !workflow || !graph || typeof graph !== "object") return null;
-  if (panelSetting("openManager.snapshotOnRun", false) === true) {
-    return takeSnapshot(workflow, { origin: "run", graph })
-      .then((item) => (item ? { id: item.id, name: item.name, edited: false } : null));
-  }
   return tagFor(workflow, graph);
 }
 
@@ -408,8 +430,9 @@ function watchSnapshots() {
   if (started) return;
   started = true;
   wrapQueue();
-  watchSaves();
   watchFileMoves();
+  api.addEventListener("graphChanged", onGraphChanged);
+  api.addEventListener("executed", onExecuted);
   setInterval(autoBeat, AUTO_BEAT);
 }
 
