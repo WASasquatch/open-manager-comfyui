@@ -270,6 +270,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Node error and Enter buttons in the title bar | On | On Nodes 2.0, the Error, Issues, Enter subgraph and advanced inputs buttons sit in the node's title bar in place of tabs hanging below the node. A node left with room for the tab shrinks to its content once |
 | Combo lists use the room on screen | On | On Nodes 2.0, a combo's list grows into the space on screen in place of about seven options |
 | Combo lists open folders as submenus | On | On Nodes 2.0, a list of files kept in folders, such as LoRAs, shows each folder as a submenu. Typing in its search box searches every file |
+| Image, video and audio pickers | Grid with folders | On Nodes 2.0, the picker on Load Image, Load Video, Load Audio and other upload combos. *Grid* is ComfyUI's. *Grid with folders* opens the folders in input and output, with small previews of pictures, and a Generated file in a subfolder loads from it. Typing in its search box searches as ComfyUI does. *Plain list* is a combo list, folders as submenus, with the upload button below it |
 | Right-clicking a video opens the browser's menu | On | On Nodes 2.0 and OM Nodes, right-clicking a video on a node opens the browser's menu for it, with Save video as and Open video in new tab, in place of the node's menu |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |

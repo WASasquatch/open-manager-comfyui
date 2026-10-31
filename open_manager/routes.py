@@ -1234,6 +1234,16 @@ def register_routes() -> None:
         )
         return web.json_response(answer, status=200 if answer["ok"] else 400)
 
+    @PromptServer.instance.routes.get(f"{PREFIX}/assets/loadable")
+    async def asset_loadable(request: web.Request) -> web.Response:
+        """One folder of input or output as a loader's file picker shows it."""
+        query = request.query
+        answer = await asyncio.to_thread(
+            asset_files.loadable, query.get("root", "input"), query.get("path", ""),
+            query.get("types", "image"), query.get("sort", "name"),
+        )
+        return web.json_response(answer, status=200 if answer["ok"] else 400)
+
     _THUMB_HEADERS = {
         "Cache-Control": "private, max-age=604800",
         "X-Content-Type-Options": "nosniff",

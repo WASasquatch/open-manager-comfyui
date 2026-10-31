@@ -14,7 +14,7 @@ from . import gates, paths
 __all__ = ["ALL_CAP", "FLOW_KEYS", "KINDS", "PAGE", "PAGE_CAP", "ROOTS", "SCAN_CAP",
            "THUMB_EDGE", "WRITE_CAP", "WRITE_KINDS",
            "TEXT_CAP", "TEXT_EDITS", "VIEW_TYPES",
-           "listing", "locate", "peek", "read_text", "remove", "root_of", "search",
+           "listing", "loadable", "locate", "peek", "read_text", "remove", "root_of", "search",
            "strip_workflow", "sweep_thumbs", "thumb", "thumb_folder", "video_meta",
            "workflow_of", "write", "write_text"]
 
@@ -216,6 +216,141 @@ def listing(root: str = "output", path: str = "", page: int = 0, size: int = PAG
         "folders": folders, "items": items[start:start + held],
         "total": len(items), "page": at, "size": held, "capped": capped, "reason": "",
     }
+
+
+LOADABLE_ROOTS = ("input", "output")
+
+CONTENT_TYPES = ("image", "video", "audio")
+
+TALLY_CAP = 40_000
+
+_CONTENT_OF_KIND = {"still": "image", "raw": "image", "video": "video", "audio": "audio"}
+
+
+def _loadable_names(names: list[str], types: set[str]) -> set[str]:
+    """Which of these file names a loader taking these content types lists, as ComfyUI decides."""
+    host = _host()
+    sift = getattr(host, "filter_files_content_types", None) if host else None
+    if callable(sift):
+        try:
+            return set(sift(names, sorted(types)))
+        except Exception:  # noqa: BLE001
+            pass
+    return {name for name in names if _CONTENT_OF_KIND.get(_kind(name)) in types}
+
+
+def _tally(spot: str, types: set[str], budget: int) -> tuple[int | None, bool, int]:
+    """How many loadable files sit directly in one folder, and whether it holds folders.
+
+    Returns:
+        ``(count, nested, scanned)``. ``count`` is ``None`` when the budget ran out first.
+    """
+    names = []
+    nested = False
+    scanned = 0
+    try:
+        with os.scandir(spot) as reading:
+            for item in reading:
+                scanned += 1
+                if scanned > budget:
+                    return None, True, scanned
+                if item.name.startswith("."):
+                    continue
+                try:
+                    if item.is_dir(follow_symlinks=False):
+                        nested = True
+                        continue
+                except OSError:
+                    continue
+                names.append(item.name)
+    except OSError:
+        return 0, False, scanned
+    return len(_loadable_names(names, types)), nested, scanned
+
+
+def loadable(root: str = "input", path: str = "", types: str = "image",
+             sort: str = "name") -> dict:
+    """One folder of input or output as a loader's file picker shows it.
+
+    Args:
+        root: ``input`` or ``output``.
+        path: A subfolder inside it, empty for the top.
+        types: Comma-separated content types the loader takes: ``image``, ``video``, ``audio``.
+        sort: ``name``, or ``new`` for the most recently changed first.
+
+    Returns:
+        ``{ok, root, path, folders, items, capped, reason}``. Each folder is
+        ``{name, at, count}``, ``count`` being the loadable files directly inside it, or
+        ``None`` when that was not counted. A folder holding neither those files nor other
+        folders is left out.
+    """
+    asked = str(root or "").strip().lower()
+    where = str(path or "").replace("\\", "/").strip("/")
+    refused = {"ok": False, "root": asked, "path": where, "folders": [], "items": [],
+               "capped": False}
+    if asked not in LOADABLE_ROOTS:
+        return {**refused, "reason": "not a directory loaders read"}
+    wanted = {one.strip().lower() for one in str(types or "").split(",")} & set(CONTENT_TYPES)
+    if not wanted:
+        return {**refused, "reason": "no content type a loader takes"}
+    home, problem = root_of(asked)
+    if problem or home is None:
+        return {**refused, "reason": problem}
+    here, problem = _inside(home, where)
+    if problem or here is None:
+        return {**refused, "reason": problem}
+    if not here.is_dir():
+        return {**refused, "reason": "is not a folder"}
+
+    files = []
+    nested = []
+    seen = 0
+    capped = False
+    try:
+        with os.scandir(here) as reading:
+            for item in reading:
+                seen += 1
+                if seen > SCAN_CAP:
+                    capped = True
+                    break
+                if item.name.startswith("."):
+                    continue
+                try:
+                    if item.is_dir(follow_symlinks=False):
+                        if len(nested) < FOLDER_CAP:
+                            nested.append(item)
+                        continue
+                except OSError:
+                    continue
+                files.append(item)
+    except OSError as error:
+        return {**refused, "reason": str(error)[:120]}
+
+    keep = _loadable_names([item.name for item in files], wanted)
+    items = [made for made in (_entry(item, where) for item in files if item.name in keep) if made]
+
+    folders = []
+    budget = TALLY_CAP
+    for item in nested:
+        count, deeper, scanned = (_tally(item.path, wanted, budget) if budget > 0
+                                  else (None, True, 0))
+        budget -= scanned
+        if count == 0 and not deeper:
+            continue
+        try:
+            at = int(item.stat(follow_symlinks=False).st_mtime)
+        except OSError:
+            at = 0
+        folders.append({"name": item.name, "at": at, "count": count})
+
+    if str(sort or "").strip().lower() == "new":
+        items.sort(key=lambda one: (-one["at"], one["name"].lower()))
+        folders.sort(key=lambda one: (-one["at"], one["name"].lower()))
+    else:
+        items.sort(key=lambda one: one["name"].lower())
+        folders.sort(key=lambda one: one["name"].lower())
+    return {"ok": True, "root": asked, "path": where, "folders": folders, "items": items,
+            "capped": capped, "reason": ""}
 
 
 VIEW_TYPES = {
