@@ -607,7 +607,7 @@ function deskChrome() {
   const bar = document.querySelector(".actionbar-container");
   const cluster = bar?.closest(".mx-1") || bar?.parentElement || bar;
   if (cluster) found.push(cluster);
-  const crumb = document.querySelector(".subgraph-breadcrumb");
+  const crumb = document.querySelector('.subgraph-breadcrumb, [data-testid="subgraph-breadcrumb"]');
   if (crumb) found.push(crumb);
   const map = document.querySelector(".minimap-main-container");
   if (map) found.push(map);

@@ -45,6 +45,7 @@ function onStatus() {
 
 function wrap(before) {
   return async function getJobDetail(jobId, ...rest) {
+    if (rest[0] instanceof AbortSignal) return before.call(this, jobId, ...rest);
     const detail = await before.call(this, jobId, ...rest);
     if (!detail || !UNFINISHED.has(detail.status)) return detail;
     const id = String(jobId);
@@ -71,7 +72,7 @@ export default {
     + "are brought up to date when it finishes.",
   issues: ["Comfy-Org/ComfyUI#14995", "Comfy-Org/ComfyUI_frontend#9101"],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof api?.addEventListener !== "function") return "ComfyUI's api is not reachable";

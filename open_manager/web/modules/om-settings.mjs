@@ -136,7 +136,7 @@ function mountStyle() {
   const style = el("style");
   style.id = STYLE_ID;
   style.textContent = `
-.oms { --oms-accent: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
+.oms { --oms-accent: var(--om-host-accent, #388bfd);
   --oms-ok: #3fb950; --oms-warn: #d29922; --oms-bad: #f85149;
   display: flex; flex: 1; min-height: 0; color: var(--om-text); }
 .oms-nav { width: 210px; flex: none; overflow-y: auto; padding: 12px 8px; display: flex;

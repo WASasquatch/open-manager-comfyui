@@ -92,7 +92,7 @@ export default {
   tooltip: "Slow searches run once typing pauses.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (typeof requestAnimationFrame !== "function") return "no animation frames";
     return "";

@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { isSelected } from "./selection.mjs";
 
 function rootGraph() {
   const graph = app.canvas?.graph;
@@ -73,7 +74,7 @@ async function revealNode({ node, hosts }) {
   await nextFrame();
   frameNode(canvas, node);
   await nextFrame();
-  if (!canvas.selected_nodes?.[node.id]) frameNode(canvas, node);
+  if (!isSelected(node, canvas)) frameNode(canvas, node);
 }
 
 export { rootGraph, parseNodePath, locateNode, revealNode, nextFrame };

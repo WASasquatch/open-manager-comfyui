@@ -20,7 +20,7 @@ export default {
     + "an extension adds shows no name on hover. On, it shows the name the extension gave it.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (!i18nGlobal()) return "ComfyUI's translations changed";
     if (typeof piniaStores()?.get("command")?.$onAction !== "function") return "ComfyUI's command store changed";

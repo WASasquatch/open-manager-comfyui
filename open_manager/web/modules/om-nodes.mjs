@@ -9,6 +9,7 @@ import {
 import { refreshMenuRow, watchMenu } from "./om-nodes/menu.mjs";
 import { refreshOmGrips, startOmGrips, stopOmGrips } from "./om-nodes/grips.mjs";
 import { startScrub, stopScrub } from "./om-nodes/scrub.mjs";
+import { selectedNodes } from "./selection.mjs";
 
 export { refreshOmGrips };
 
@@ -189,7 +190,7 @@ export const omNodeCommands = [
     id: "openmanager.fitnodes",
     label: "Open Manager: fit selected nodes to content",
     function: () => {
-      const picked = Object.values(app.canvas?.selected_nodes || {});
+      const picked = selectedNodes();
       if (!showing || !picked.length) return;
       fitNodes(picked);
     },

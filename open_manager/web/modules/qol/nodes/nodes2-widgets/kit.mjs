@@ -1,5 +1,6 @@
 import { app } from "../../../../../../scripts/app.js";
 import { api } from "../../../../../../scripts/api.js";
+import { piniaStores } from "../../shared.mjs";
 
 const MARGIN = 15;
 
@@ -52,6 +53,22 @@ const MIP_MIN = 16;
 const pointed = [0, 0];
 
 let colourInput = null;
+
+const UNDO_ICON = "M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11";
+
+const REDO_ICON = "m15 14 5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13";
+
+const ICON_MAX = 16;
+
+const STORE_RETRY = 2000;
+
+let historyPaths = null;
+
+let historyFound = null;
+
+let historyKnown = false;
+
+let historyMissed = -Infinity;
 
 function theme() {
   const graph = window.LiteGraph;
@@ -278,10 +295,16 @@ function commit(node, widget, value) {
   node.setDirtyCanvas?.(true, false);
 }
 
-function gesture(pointer) {
+function gesture(pointer, done) {
   const canvas = app.canvas;
   canvas.emitBeforeChange();
-  pointer.finally = () => canvas.emitAfterChange();
+  pointer.finally = () => {
+    try {
+      done?.();
+    } finally {
+      canvas.emitAfterChange();
+    }
+  };
 }
 
 function undoable(change) {
@@ -292,6 +315,188 @@ function undoable(change) {
   } finally {
     canvas.emitAfterChange();
   }
+}
+
+function historyStore() {
+  if (historyFound) return historyFound;
+  const store = piniaStores()?.get("widgetHistory");
+  if (typeof store?.record === "function" && typeof store.undo === "function"
+    && typeof store.redo === "function" && typeof store.baselineOf === "function"
+    && typeof store.setBaseline === "function" && typeof store.canUndo === "function"
+    && typeof store.canRedo === "function") {
+    historyFound = store;
+  }
+  return historyFound;
+}
+
+function historyCapable() {
+  if (historyFound || historyKnown) return true;
+  const now = performance.now();
+  if (now - historyMissed < STORE_RETRY) return false;
+  historyMissed = now;
+  if (historyStore()) return true;
+  const props = document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties;
+  historyKnown = typeof props?.$te === "function" && props.$te("widgetHistory.undo") === true;
+  return historyKnown;
+}
+
+function plain(value) {
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(plain);
+  const out = {};
+  for (const key of Object.keys(value)) out[key] = plain(value[key]);
+  return out;
+}
+
+function equal(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (!equal(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+function sourceWidget(node, widget) {
+  const list = node?.widgets;
+  if (!list || list.includes(widget)) return widget;
+  let only = null;
+  let count = 0;
+  for (const one of list) {
+    if (one?.type !== widget.type) continue;
+    if (one.name === widget.name) return one;
+    only = one;
+    count += 1;
+  }
+  return count === 1 ? only : widget;
+}
+
+function history(widget, read, apply) {
+  const scope = { rootGraphId: "", widgetId: "" };
+  const can = { undo: false, redo: false };
+  let scopeNode = null;
+  let scopeGraph = null;
+  let scopeId;
+  let scopeRoot = "";
+  let committed;
+  let primed = false;
+
+  function scopeFor(node) {
+    const graph = node?.graph;
+    const root = app.rootGraph || app.graph;
+    if (!graph?.id || !root?.id) return null;
+    if (node !== scopeNode || graph !== scopeGraph || node.id !== scopeId || root.id !== scopeRoot) {
+      scopeNode = node;
+      scopeGraph = graph;
+      scopeId = node.id;
+      scopeRoot = root.id;
+      scope.rootGraphId = root.id;
+      scope.widgetId = `${graph.id}:${encodeURIComponent(String(node.id))}:`
+        + encodeURIComponent(sourceWidget(node, widget).name);
+    }
+    return scope;
+  }
+
+  function target(node) {
+    const store = historyStore();
+    const found = store ? scopeFor(node) : null;
+    return found ? store : null;
+  }
+
+  function adopt(node) {
+    committed = plain(read());
+    primed = true;
+    target(node)?.setBaseline(scope, committed);
+  }
+
+  function settle(node, mergeKey) {
+    const store = target(node);
+    if (!store) return;
+    const current = plain(read());
+    const shared = store.baselineOf(scope);
+    if (!shared && !primed) {
+      adopt(node);
+      return;
+    }
+    const previous = shared ? shared.value : committed;
+    if (equal(current, previous)) return;
+    store.record(scope, previous, mergeKey);
+    committed = current;
+    primed = true;
+    store.setBaseline(scope, current);
+  }
+
+  function record(node, mergeKey) {
+    queueMicrotask(() => settle(node, mergeKey));
+  }
+
+  function travel(node, forward) {
+    const store = target(node);
+    if (!store) return false;
+    const now = plain(read());
+    const step = forward ? store.redo(scope, now) : store.undo(scope, now);
+    if (!step) return false;
+    apply(node, step.value);
+    committed = plain(step.value);
+    primed = true;
+    store.setBaseline(scope, committed);
+    return true;
+  }
+
+  function forget(node) {
+    const store = target(node);
+    if (store && typeof store.forget === "function") store.forget(scope);
+    adopt(node);
+  }
+
+  function state(node) {
+    const store = target(node);
+    can.undo = !!store && store.canUndo(scope);
+    can.redo = !!store && store.canRedo(scope);
+    return can;
+  }
+
+  return {
+    live: historyCapable,
+    adopt, record, travel, forget, state,
+  };
+}
+
+function historyWidth() {
+  return rowHeight() * 2;
+}
+
+function historyIcon(ctx, path, x, y, h, colour) {
+  const size = Math.max(0, Math.min(h - 4, ICON_MAX));
+  const scale = size / 24;
+  ctx.save();
+  ctx.translate(x + (h - size) / 2, y + (h - size) / 2);
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke(path);
+  ctx.restore();
+}
+
+function drawHistory(ctx, x, y, h, can, low) {
+  if (low) return;
+  const colours = theme();
+  if (!historyPaths) historyPaths = { undo: new Path2D(UNDO_ICON), redo: new Path2D(REDO_ICON) };
+  historyIcon(ctx, historyPaths.undo, x, y, h, can.undo ? colours.text : colours.disabled);
+  historyIcon(ctx, historyPaths.redo, x + h, y, h, can.redo ? colours.text : colours.disabled);
+}
+
+function historyPointer(pointer, node, x, y, h, kept) {
+  const start = local(pointer.eDown, node);
+  if (!contains(x, y, h * 2, h, start[0], start[1])) return false;
+  const forward = start[0] >= x + h;
+  pointer.onClick = () => undoable(() => kept.travel(node, forward));
+  return true;
 }
 
 function prompt(event, title, value, apply, multiline) {
@@ -681,7 +886,7 @@ export {
   MARGIN, GAP, theme, rowHeight, font, measure, fitText, rowText, centreText, roundRect, pill,
   arrows, button, card, skeleton, clamp, contains, contain, local, hoverPoint, redraw, commit,
   gesture, undoable, prompt, menu, locator, output, link, source, sourceImage, viewUrl, image,
-  imageFailed, screenScale, sized, drawNumber,
+  imageFailed, screenScale, sized, drawNumber, history, historyWidth, drawHistory, historyPointer,
   numberPointer, drawCombo, comboPointer, drawSegments, segmentAt, drawField, pickColour,
   swatchRow,
 };

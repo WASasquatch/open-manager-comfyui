@@ -80,7 +80,7 @@ export default {
     + "or a path such as 12:5 for a node inside subgraph node 12, and opens and frames that node.",
   issues: ["Comfy-Org/ComfyUI_frontend#4089", "Comfy-Org/ComfyUI_frontend#12754"],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     const store = commandStore();
     if (!store) return "ComfyUI's command store has changed";

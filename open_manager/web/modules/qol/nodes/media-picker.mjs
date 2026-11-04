@@ -14,7 +14,7 @@ export default {
   issues: [],
   options: ["Grid", "Grid with folders", "Plain list"],
   defaultValue: "Grid with folders",
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (!canMix()) return "ComfyUI's Vue app changed";
     if (!readyTick()) return "ComfyUI's settings store is not reachable";

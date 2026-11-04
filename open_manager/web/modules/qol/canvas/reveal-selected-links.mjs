@@ -6,6 +6,7 @@ const SPLINE = 2;
 let live = false;
 let lastVisible = null;
 let selection = "";
+let lastItems = null;
 
 function canvasProto() {
   return window.LGraphCanvas?.prototype || null;
@@ -22,8 +23,9 @@ function hiddenMode(canvas) {
 
 function selectedNodes(canvas) {
   const found = [];
-  if (canvas.selectedItems?.size) {
-    for (const item of canvas.selectedItems) {
+  const items = canvas.selectedItems;
+  if (items instanceof Set) {
+    for (const item of items) {
       if (item?.id != null && (Array.isArray(item.inputs) || Array.isArray(item.outputs))) {
         found.push(item);
       }
@@ -57,10 +59,15 @@ function install() {
 
   proto.draw = function (...args) {
     if (live && this === app.canvas) {
-      const now = selectedNodes(this).map((node) => node.id).join(",");
-      if (now !== selection) {
-        selection = now;
-        this.setDirty?.(false, true);
+      const items = this.selectedItems;
+      const view = items instanceof Set && items.constructor !== Set;
+      if (!view || items !== lastItems) {
+        lastItems = items;
+        const now = selectedNodes(this).map((node) => node.id).join(",");
+        if (now !== selection) {
+          selection = now;
+          this.setDirty?.(false, true);
+        }
       }
     }
     return draw.apply(this, args);
@@ -125,7 +132,7 @@ export default {
     + "the nodes are selected.",
   issues: [],
   defaultValue: true,
-  verified: "1.55.18",
+  verified: "1.58.5",
   check() {
     const proto = canvasProto();
     if (typeof proto?.draw !== "function" || typeof proto?.drawConnections !== "function"
@@ -147,6 +154,7 @@ export default {
       linkReveal.drawing = false;
       linkReveal.links.clear();
       selection = "";
+      lastItems = null;
       undo();
       app.canvas?.setDirty?.(true, true);
     });

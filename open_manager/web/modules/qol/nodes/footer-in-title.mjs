@@ -48,7 +48,7 @@ ${TAB}:hover {
   background: color-mix(in srgb, currentColor 18%, transparent) !important;
 }
 ${ERROR_TAB} {
-  color: var(--destructive-background, #e5484d) !important;
+  color: var(--destructive, var(--destructive-background, #e5484d)) !important;
 }
 ${WARNING_TAB} {
   color: var(--warning, var(--warning-background, #fdab3e)) !important;
@@ -142,7 +142,7 @@ export default {
     + "title bar in place of tabs hanging below the node.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     return typeof MutationObserver === "function" ? "" : "this browser cannot watch the nodes";
   },

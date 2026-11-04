@@ -45,6 +45,21 @@ Standard ComfyUI palette. The keys Open Manager also reads:
 `color` values about 50 points darker than you want. Gradient `stops` are **not** lifted: state
 those at their final value.
 
+**Interface colours:** from frontend 1.58 a palette may carry a `theme` group in `colors`, which
+colours ComfyUI's own panels, dialogs, buttons and fields. Its keys are `background`,
+`foreground`, `card`, `popover`, `primary`, `secondary`, `muted`, `muted-foreground`, `accent`,
+`destructive`, `border`, `input`, `ring`, `node`, `node-foreground`, `node-header`,
+`node-border`, `warning` and `shadow-color`. Any left out are derived from the rest of the palette.
+`secondary` is derived from `NODE_DEFAULT_COLOR`; Open Manager's *Custom palettes keep readable
+buttons* replaces it with a shade of `comfy-menu-bg` unless the theme states it. Older frontends
+ignore the group.
+
+```jsonc
+"colors": {
+  "theme": { "primary": "#e35d12", "secondary": "#22182c", "border": "#45305a" }
+}
+```
+
 ---
 
 ## extras

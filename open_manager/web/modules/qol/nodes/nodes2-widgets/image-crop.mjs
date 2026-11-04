@@ -44,13 +44,15 @@ const UNLOCKED = Object.freeze({ active: false });
 
 function inputSource(node) {
   let source = node.getInputNode?.(0);
-  if (!source) return null;
-  if (source.isSubgraphNode?.()) {
-    const link = node.getInputLink(0);
-    if (!link) return null;
-    source = source.resolveSubgraphOutputLink?.(link.origin_slot)?.outputNode ?? null;
+  let link = node.getInputLink?.(0);
+  for (let depth = 0; source?.isSubgraphNode?.(); depth += 1) {
+    if (!link || depth >= 16) return null;
+    const resolved = source.resolveSubgraphOutputLink?.(link.origin_slot);
+    if (!resolved) return null;
+    source = resolved.outputNode ?? null;
+    link = resolved.link;
   }
-  return source;
+  return source ?? null;
 }
 
 function imageIcon(ctx, cx, cy, size, colour) {

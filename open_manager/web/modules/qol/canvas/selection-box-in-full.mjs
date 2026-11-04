@@ -30,7 +30,7 @@ export default {
     + "covers the whole drag and passes under the panels.",
   issues: ["Comfy-Org/ComfyUI_frontend#19102"],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     return "";
   },

@@ -1,6 +1,6 @@
 import {
-  GAP, MARGIN, comboPointer, commit, contains, drawCombo, gesture, link, local, output, rowHeight,
-  theme, undoable,
+  GAP, MARGIN, comboPointer, commit, contains, drawCombo, drawHistory, gesture, history, historyPointer,
+  historyWidth, link, local, output, rowHeight, theme, undoable,
 } from "./kit.mjs";
 
 const INTERPOLATIONS = ["monotone_cubic", "linear"];
@@ -148,10 +148,20 @@ function histogramPath(bins) {
 
 function make(widget) {
   const plot = { x: 0, y: 0, size: 0, scale: 0, originX: 0, originY: 0 };
-  const header = { x: 0, y: 0, w: 0, h: 0 };
+  const header = { x: 0, y: 0, w: 0, h: 0, comboW: 0, historyX: -1 };
   let shapes = { value: null, points: null, curve: null, dots: null };
   let bars = { bins: null, path: null };
   let upstream = null;
+  let seen;
+  let editing = false;
+  const kept = history(widget, () => widget.value, (node, value) => {
+    if (isCurve(value)) commit(node, widget, value);
+  });
+
+  function settled(node, mergeKey) {
+    kept.record(node, mergeKey);
+    seen = widget.value;
+  }
 
   function current() {
     return isCurve(widget.value) ? widget.value : null;
@@ -177,6 +187,10 @@ function make(widget) {
     header.y = y;
     header.w = width - MARGIN * 2;
     header.h = disabled ? 0 : row;
+    const room = historyWidth();
+    const shows = header.h > 0 && kept.live() && header.w - room - GAP >= room;
+    header.historyX = shows ? header.x + header.w - room : -1;
+    header.comboW = shows ? header.w - room - GAP : header.w;
     const top = disabled ? y : y + row + GAP;
     const size = Math.max(0, Math.min(width - MARGIN * 2, y + height - top));
     plot.size = size;
@@ -218,6 +232,7 @@ function make(widget) {
     const points = value.points.slice();
     points.splice(index, 1);
     undoable(() => commit(node, widget, { ...value, points }));
+    settled(node);
   }
 
   return {
@@ -228,14 +243,19 @@ function make(widget) {
     },
 
     draw(ctx, node, width, y, height, low) {
+      if (widget.value !== seen && !editing) {
+        seen = widget.value;
+        kept.adopt(node);
+      }
       const value = current();
       const disabled = !!widget.computedDisabled;
       layout(width, y, height, disabled);
       const colours = theme();
       if (!disabled && header.h) {
         const index = value ? INTERPOLATIONS.indexOf(value.interpolation) : 0;
-        drawCombo(ctx, header.x, header.y, header.w, header.h, widget.label || widget.name,
+        drawCombo(ctx, header.x, header.y, header.comboW, header.h, widget.label || widget.name,
           LABELS[Math.max(0, index)], low, null);
+        if (header.historyX >= 0) drawHistory(ctx, header.historyX, header.y, header.h, kept.state(node), low);
       }
       if (plot.size <= 0) return;
       ctx.fillStyle = colours.bg;
@@ -283,14 +303,18 @@ function make(widget) {
       const value = current();
       if (!value) return false;
       const [px, py] = local(pointer.eDown, node);
-      if (header.h && contains(header.x, header.y, header.w, header.h, px, py)) {
-        return comboPointer(pointer, node, header.x, header.y, header.w, header.h, {
+      if (header.historyX >= 0 && historyPointer(pointer, node, header.historyX, header.y, header.h, kept)) {
+        return true;
+      }
+      if (header.h && contains(header.x, header.y, header.comboW, header.h, px, py)) {
+        return comboPointer(pointer, node, header.x, header.y, header.comboW, header.h, {
           items: LABELS,
           index: Math.max(0, INTERPOLATIONS.indexOf(value.interpolation)),
           choose: (index) => {
             const now = current();
             if (now && now.interpolation !== INTERPOLATIONS[index]) {
               commit(node, widget, { ...now, interpolation: INTERPOLATIONS[index] });
+              settled(node);
             }
           },
         });
@@ -305,7 +329,11 @@ function make(widget) {
         return true;
       }
       if (hit < 0 && ctrl) return true;
-      gesture(pointer);
+      editing = true;
+      gesture(pointer, () => {
+        editing = false;
+        settled(node);
+      });
       let dragged;
       let points;
       if (hit >= 0) {
@@ -361,6 +389,8 @@ function make(widget) {
       if (!found || found === upstream) return;
       upstream = found;
       if (widget.value !== found) commit(node, widget, found);
+      kept.forget(node);
+      seen = widget.value;
     },
   };
 }

@@ -1,5 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { panelSetting } from "./settings.mjs";
+import { selectedNodes } from "./selection.mjs";
 
 const EDGE_BAND = 8;
 const EDGE_CORNER = { E: "SE", S: "SE", W: "SW" };
@@ -44,7 +45,7 @@ function sizingArm(node, dir, edge) {
 
 function sizingMirror(node, drag) {
   if (!multiResizeOn()) return;
-  const picked = Object.values(app.canvas?.selected_nodes || {});
+  const picked = selectedNodes();
   if (picked.length < 2 || !picked.includes(node)) return;
   if (!drag.others) {
     drag.others = picked.filter((one) => one !== node).map((one) => ({

@@ -138,7 +138,11 @@ function hostFor(node, widget, view, state) {
     name: `${widget.name}${SUFFIX}`,
     component: view,
     inputSpec: { name: widget.name, type: widget.type },
-    props: { nodeId: node.id, [MARK]: state.token },
+    props: {
+      nodeId: node.id,
+      [MARK]: state.token,
+      ...(widget.type === "lightinfo" ? { widget: { name: widget.name } } : {}),
+    },
     options: {
       surfaces: SURFACES,
       serialize: false,

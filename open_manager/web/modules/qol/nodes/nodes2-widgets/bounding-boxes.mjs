@@ -1,12 +1,12 @@
 import { app } from "../../../../../../scripts/app.js";
 import {
-  GAP, MARGIN, button, commit, contain, contains, drawField, drawSegments, font, hoverPoint, image, imageFailed,
-  locator, measure, menu, prompt, redraw, rowHeight, rowText, segmentAt, source, swatchRow, theme, undoable,
-  viewUrl,
+  GAP, MARGIN, button, commit, contain, contains, drawField, drawHistory, drawSegments, font, history,
+  historyPointer, historyWidth, hoverPoint, image, imageFailed, locator, measure, menu, prompt, redraw, rowHeight,
+  rowText, segmentAt, source, swatchRow, theme, undoable, viewUrl,
 } from "./kit.mjs";
 import {
   TAG_HEIGHT, dragRegion, blank, regionsUnder, candidates, unit, copy, fromBoxes, gridStep, hoverBox, isBox,
-  onColour, pickBox, placeTags, readable, same, snapRegion, tagAt, toBoxes, wrapLines,
+  onColour, pickBox, placeTags, readable, region, same, snapRegion, tagAt, toBoxes, wrapLines,
 } from "./bounding-boxes-geometry.mjs";
 
 const MAX_COLOURS = 5;
@@ -77,6 +77,8 @@ const UNSET = Symbol("unset");
 
 const NONE = Object.freeze([]);
 
+const IDLE = Object.freeze({ undo: false, redo: false });
+
 const tags = [];
 
 const tagWidths = [];
@@ -146,6 +148,11 @@ function paint(region) {
   region.tagInk = onColour(col);
 }
 
+function isRegion(one) {
+  return !!one && typeof one === "object" && typeof one.x === "number" && typeof one.y === "number"
+    && typeof one.w === "number" && typeof one.h === "number";
+}
+
 function wrapBody(region, width, ctx) {
   if (region.bodyType === region.type && region.bodyText === region.text && region.bodyDesc === region.desc
     && region.bodyWidth === width) return;
@@ -172,7 +179,7 @@ function make(widget) {
   const layout = {
     ready: false, width: -1, y: 0, height: -1, dimW: 0, dimH: 0, kind: -1, text: false, count: -1,
     x: 0, w: 0, gridW: 0, clearX: 0, clearW: 0, segY: -1, textY: -1, descY: -1, palY: -1, labelW: 0,
-    hintY: -1,
+    hintY: -1, historyX: -1,
   };
 
   let regions = [];
@@ -260,6 +267,34 @@ function make(widget) {
     version += 1;
   }
 
+  function snapshot() {
+    const out = new Array(regions.length);
+    for (let index = 0; index < regions.length; index += 1) {
+      const one = regions[index];
+      out[index] = {
+        x: one.x, y: one.y, w: one.w, h: one.h, type: one.type, text: one.text, desc: one.desc,
+        palette: one.palette.slice(),
+      };
+    }
+    return out;
+  }
+
+  function restore(node, value) {
+    if (!Array.isArray(value) || !value.every(isRegion)) return;
+    regions = value.map((one) => region(one.x, one.y, one.w, one.h, one.type === "text" ? "text" : "obj",
+      typeof one.text === "string" ? one.text : "", typeof one.desc === "string" ? one.desc : "",
+      Array.isArray(one.palette) ? one.palette.filter((colour) => typeof colour === "string") : []));
+    active = Math.min(active, regions.length - 1);
+    sync(node);
+  }
+
+  const kept = history(widget, snapshot, restore);
+
+  function keyFor(field, one) {
+    const index = regions.indexOf(one);
+    return index >= 0 ? `${field}:${index}` : undefined;
+  }
+
   function lookWidgets(node) {
     const list = node.widgets;
     const count = list?.length ?? -1;
@@ -323,6 +358,7 @@ function make(widget) {
     syncedW = width;
     syncedH = height;
     changed();
+    kept.adopt(node);
   }
 
   function removeAt(index) {
@@ -354,6 +390,7 @@ function make(widget) {
     active = regions.length ? 0 : -1;
     setLastIncoming(node, incoming);
     sync(node);
+    kept.adopt(node);
   }
 
   function incomingNow(node, own) {
@@ -525,6 +562,8 @@ function make(widget) {
     layout.gridW = Math.min(measure(ctx, GRID) + BUTTON_PAD, half);
     layout.clearW = Math.min(measure(ctx, CLEAR_ALL) + BUTTON_PAD, half);
     layout.clearX = x + w - layout.clearW;
+    const span = historyWidth();
+    layout.historyX = w - layout.gridW - layout.clearW - GAP * 2 >= span ? layout.clearX - GAP - span : -1;
     layout.labelW = Math.min(measure(ctx, COLOURS), w * 0.5);
     const swatchX = x + layout.labelW + LABEL_GAP;
     const swatchW = Math.max(0, w - layout.labelW - LABEL_GAP);
@@ -802,6 +841,7 @@ function make(widget) {
     const one = regions[active];
     if (one && (one.w < TINY || one.h < TINY)) removeAt(active);
     sync(node);
+    kept.record(node);
   }
 
   function pointAt(event, node) {
@@ -833,6 +873,7 @@ function make(widget) {
     prompt(event, DESC_LABEL, one.desc, (text) => undoable(() => {
       one.desc = String(text ?? "");
       sync(node);
+      kept.record(node, keyFor("desc", one));
     }), true);
   }
 
@@ -899,6 +940,7 @@ function make(widget) {
       pending = false;
       setLastIncoming(node, NONE);
       sync(node);
+      kept.record(node);
     });
   }
 
@@ -906,6 +948,7 @@ function make(widget) {
     undoable(() => {
       one.type = type;
       sync(node);
+      kept.record(node);
     });
   }
 
@@ -916,6 +959,7 @@ function make(widget) {
       undoable(() => {
         one[key] = next;
         sync(node);
+        kept.record(node, keyFor(key, one));
       });
     }, true);
   }
@@ -924,6 +968,7 @@ function make(widget) {
     return (next) => {
       one.palette = next;
       sync(node);
+      kept.record(node, keyFor("palette", one));
     };
   }
 
@@ -933,6 +978,7 @@ function make(widget) {
     undoable(() => {
       removeAt(index);
       sync(node);
+      kept.record(node);
     });
   }
 
@@ -972,6 +1018,9 @@ function make(widget) {
       clearState.disabled = disabled;
       button(ctx, layout.x, y, layout.gridW, row, GRID, low, gridState);
       button(ctx, layout.clearX, y, layout.clearW, row, CLEAR_ALL, low, clearState);
+      if (layout.historyX >= 0 && kept.live()) {
+        drawHistory(ctx, layout.historyX, y, row, disabled ? IDLE : kept.state(node), low);
+      }
       if (rect[2] > 0 && rect[3] > 0) drawCanvas(ctx, node, colours, low);
       drawPanel(ctx, colours, low, disabled);
     },
@@ -989,6 +1038,10 @@ function make(widget) {
       }
       if (contains(layout.clearX, layout.y, layout.clearW, row, px, py)) {
         pointer.onClick = () => clearAll(node);
+        return true;
+      }
+      if (layout.historyX >= 0 && kept.live()
+        && historyPointer(pointer, node, layout.historyX, layout.y, row, kept)) {
         return true;
       }
       if (rect[2] > 0 && rect[3] > 0 && contains(rect[0], rect[1], rect[2], rect[3], px, py)) {

@@ -138,6 +138,7 @@ async function fill(detail, id) {
 
 function wrap(before) {
   return async function getJobDetail(jobId, ...rest) {
+    if (rest[0] instanceof AbortSignal) return before.call(this, jobId, ...rest);
     const detail = await before.call(this, jobId, ...rest);
     if (!active || !detail || typeof detail !== "object") return detail;
     try {
@@ -155,7 +156,7 @@ export default {
   tooltip: "Jobs queued with only an API prompt open as a laid-out workflow.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof window.LiteGraph?.LGraph !== "function"

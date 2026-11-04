@@ -38,10 +38,10 @@ const RULES = `.om-media-crumbs { display: flex; flex-wrap: wrap; align-items: c
 .om-media-crumbs button { all: unset; box-sizing: border-box; cursor: pointer; padding: 0 4px;
   border-radius: 4px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .om-media-crumbs button:hover, .om-media-crumbs button:focus-visible {
-  color: var(--color-base-foreground, #fff); background: color-mix(in srgb, currentColor 12%, transparent); }
+  color: var(--color-foreground, var(--color-base-foreground, #fff)); background: color-mix(in srgb, currentColor 12%, transparent); }
 .om-media-crumbs .om-media-up { display: inline-flex; align-items: center; justify-content: center;
   width: 20px; padding: 0; font-size: 16px; }
-.om-media-crumbs .om-media-here { padding: 0 4px; color: var(--color-base-foreground, #fff);
+.om-media-crumbs .om-media-here { padding: 0 4px; color: var(--color-foreground, var(--color-base-foreground, #fff));
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 .om-media-crumbs .om-media-sep { opacity: 0.5; }
 .om-media-folder [data-testid="dropdown-item-media-placeholder"] { position: relative;

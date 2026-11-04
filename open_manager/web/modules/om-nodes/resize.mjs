@@ -1,5 +1,6 @@
 import { app } from "../../../../scripts/app.js";
 import { panelSetting } from "../settings.mjs";
+import { selectedNodes } from "../selection.mjs";
 
 const EDGE_BAND = 8;
 const CORNER_SPAN = 15;
@@ -154,7 +155,7 @@ function sides(dir) {
 
 function companions(node) {
   if (!multiResizeOn()) return [];
-  const picked = Object.values(app.canvas?.selected_nodes || {});
+  const picked = selectedNodes();
   if (picked.length < 2 || !picked.includes(node)) return [];
   return picked.filter((one) => one !== node && !one.flags?.collapsed && !one.flags?.pinned
     && one.resizable !== false).map((one) => {
@@ -322,7 +323,7 @@ export function fitNodes(nodes) {
 }
 
 export function fitTargets(node) {
-  const picked = Object.values(app.canvas?.selected_nodes || {});
+  const picked = selectedNodes();
   return picked.length > 1 && picked.includes(node) ? picked : [node];
 }
 

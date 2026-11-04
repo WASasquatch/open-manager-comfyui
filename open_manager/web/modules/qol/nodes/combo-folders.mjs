@@ -1,4 +1,5 @@
 import { app } from "../../../../../scripts/app.js";
+import { selectedNodes } from "../../selection.mjs";
 
 const OVERLAY = '[data-testid="widget-select-default-overlay"]';
 
@@ -78,7 +79,7 @@ function widgetFor(viewport) {
   const graph = app.canvas?.graph ?? app.graph;
   const id = trigger.closest(".lg-node[data-node-id]")?.getAttribute("data-node-id");
   const holder = id == null ? null : graph?.getNodeById?.(Number(id)) ?? graph?.getNodeById?.(id);
-  const nodes = holder ? [holder] : [...Object.values(app.canvas?.selected_nodes || {}), ...(graph?._nodes || [])];
+  const nodes = holder ? [holder] : [...selectedNodes(), ...(graph?._nodes || [])];
   for (const node of nodes) {
     for (const widget of node?.widgets || []) {
       if (widget.name !== name && widget.label !== name) continue;
@@ -114,7 +115,7 @@ function checkMark(options) {
   const box = document.createElement("span");
   box.className = "flex shrink-0 items-center justify-center";
   const icon = document.createElement("i");
-  icon.className = "icon-[lucide--check] size-3.5 text-base-foreground";
+  icon.className = "icon-[lucide--check] size-3.5 text-base-foreground text-foreground";
   icon.setAttribute("aria-hidden", "true");
   box.append(icon);
   return box;
@@ -426,7 +427,7 @@ export default {
     + "opens as a submenu, and typing still searches every file.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     return document.body && typeof MutationObserver === "function" ? "" : "the page is not ready";
   },

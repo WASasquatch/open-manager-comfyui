@@ -16,7 +16,7 @@ ${TAB}:not([data-om-tint]):hover {
 ${TAB}${ON}:not([data-om-tint]) {
   background: color-mix(in srgb, var(--fg-color, #fff) 9%, transparent) !important; }
 ${TAB}${ON}::after { content: ""; position: absolute; left: 0; right: 0; top: 0;
-  height: 2px; background: var(--p-button-text-primary-color, var(--p-primary-color, #388bfd));
+  height: 2px; background: var(--om-host-accent, #388bfd);
   pointer-events: none; }
 ${TAB} > ${FACE} { height: 100%; border-radius: 0 !important;
   background: transparent !important; box-shadow: none !important; }
@@ -36,7 +36,7 @@ export default {
     + "in place of rounded buttons.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     const tab = document.querySelector(TAB);
     if (tab && flat(tab) && flat(tab.querySelector(`:scope > ${FACE}`))

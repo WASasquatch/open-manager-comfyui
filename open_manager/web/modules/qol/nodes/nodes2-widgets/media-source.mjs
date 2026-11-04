@@ -29,7 +29,7 @@ function stillImages(node, outputs) {
 }
 
 function outputUrl(node, outputs) {
-  const image = outputs.images[0];
+  const image = outputs.images?.find((one) => one != null);
   if (!image) return undefined;
   const filename = image.filename ?? "";
   const place = annotated(filename, image.type === undefined ? "input" : image.type);

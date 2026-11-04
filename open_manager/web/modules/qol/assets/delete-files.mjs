@@ -37,6 +37,42 @@ function claimFlag(track) {
   });
 }
 
+const BAR = "MediaAssetSelectionBar";
+
+const IMPORTED = "tabpanel-input";
+
+function keepInputsUndeletable(track) {
+  const vue = document.querySelector("#vue-app")?.__vue_app__;
+  if (typeof vue?.mixin !== "function" || !Array.isArray(vue._context?.mixins)) return;
+  let live = true;
+  const mixin = {
+    created() {
+      if (this.$?.type?.__name !== BAR) return;
+      const raw = this.$.props?.__v_raw;
+      const was = raw && Object.getOwnPropertyDescriptor(raw, "showDelete");
+      if (!was || was.get || was.set || !was.configurable) return;
+      let given = raw.showDelete;
+      Object.defineProperty(raw, "showDelete", {
+        configurable: true,
+        enumerable: was.enumerable,
+        get: () => given && !(live && document.getElementById(IMPORTED)),
+        set: (value) => {
+          given = value;
+        },
+      });
+    },
+  };
+  vue.mixin(mixin);
+  vue._context.optionsCache = new WeakMap();
+  track(() => {
+    live = false;
+    const mixins = vue._context?.mixins;
+    const at = Array.isArray(mixins) ? mixins.indexOf(mixin) : -1;
+    if (at >= 0) mixins.splice(at, 1);
+    vue._context.optionsCache = new WeakMap();
+  });
+}
+
 let run = 0;
 
 async function start(track, standDown, mine) {
@@ -52,7 +88,10 @@ async function start(track, standDown, mine) {
     }
     if (now?.reason) return;
     if (now?.delete_files !== true) now = await switchServer(true);
-    if (mine === run && now?.available && now.delete_files) claimFlag(track);
+    if (mine === run && now?.available && now.delete_files) {
+      claimFlag(track);
+      keepInputsUndeletable(track);
+    }
   } catch (error) {
     console.warn("[Open Manager] Media Assets delete files: server not reached", error);
   }
@@ -64,7 +103,7 @@ export default {
   tooltip: "Deleting an output also deletes its file. Needs OPEN_MANAGER_FILE_WRITES=1.",
   issues: [],
   defaultValue: false,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (typeof api?.getServerFeature !== "function") return "ComfyUI's feature flags are not reachable";
     return "";

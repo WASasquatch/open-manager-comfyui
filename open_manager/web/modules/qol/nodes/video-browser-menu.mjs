@@ -31,7 +31,7 @@ export default {
     + "classic canvas.",
   issues: ["Comfy-Org/ComfyUI_frontend#3842"],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     return window.electronAPI ? "ComfyUI Desktop has no browser menu" : "";
   },

@@ -24,6 +24,7 @@ const NAMED = ':is([data-testid="advanced-inputs-button"], [data-testid="subgrap
 const STEP = ':is([data-testid="decrement"], [data-testid="increment"])';
 const TRIGGER = '[data-testid="widget-select-default-trigger"]';
 const SELECTED = ":is(.outline-node-component-outline, .outline-foreground)";
+const RUNNING = ":is(.outline-node-stroke-executing, .outline-primary)";
 const PROGRESS = ":is(.bg-primary-500, .bg-primary)";
 const BADGE = ":is(.bg-node-component-surface, .bg-node)";
 const SLOT_ERROR = ":is(.text-error, .text-destructive)";
@@ -144,7 +145,7 @@ ${NODE} > ${RING}[class*="rounded-tl-["] {
 ${NODE} > ${RING}:is(.border-node-component-outline, .border-foreground) {
   border-color: var(--omn-selection);
 }
-${NODE} > ${RING}:is(.border-node-stroke-executing, .border-primary) {
+${NODE}${RUNNING} > ${RING} {
   border-color: var(--omn-running);
 }
 ${NODE} .lg-node-header {
@@ -157,7 +158,8 @@ ${NODE} .lg-node-header {
   font-weight: var(--omn-title-weight);
   line-height: 1.2;
 }
-${NODE}${SELECTED} .lg-node-header {
+${NODE}${SELECTED} .lg-node-header,
+${NODE}${RUNNING} > ${RING}:is(.border-node-component-outline, .border-foreground) ~ ${WRAP} .lg-node-header {
   color: var(--omn-title-ink-selected);
 }
 ${NODE} .lg-node-header > div {
@@ -543,7 +545,7 @@ ${cell("label.size-8 i")} {
   width: 12px;
   height: 12px;
 }
-${cell(".text-base.leading-none")} {
+${cell(":is(.text-base, .text-xs).leading-none")} {
   height: 100%;
   font-size: var(--omn-text-size);
 }

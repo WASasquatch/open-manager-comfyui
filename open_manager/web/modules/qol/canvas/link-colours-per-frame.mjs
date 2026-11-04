@@ -12,7 +12,7 @@ export default {
     + "each link it draws on every frame. On, the copy is made once per frame.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     return typeof adapterProto()?.convertColorMap === "function" ? "" : "ComfyUI's link renderer changed";
   },

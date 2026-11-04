@@ -2,7 +2,13 @@ import { app } from "../../../../../scripts/app.js";
 
 const HIDDEN = "om-qol-name-box-hidden";
 
-const NAME_BOX_CSS = `.subgraph-breadcrumb.${HIDDEN} { display: none !important; }`;
+const BOX = ':is(.subgraph-breadcrumb, [data-testid="subgraph-breadcrumb"])';
+
+const ITEM = ":is(.p-breadcrumb-item, [data-breadcrumb-item])";
+
+const LIST = ":is(.p-breadcrumb, nav)";
+
+const NAME_BOX_CSS = `${BOX}.${HIDDEN} { display: none !important; }`;
 
 function atRoot() {
   const graph = app.canvas?.graph;
@@ -19,11 +25,11 @@ function displayed(item, box) {
 }
 
 function readBox(box) {
-  const items = [...box.querySelectorAll(".p-breadcrumb-item")];
+  const items = [...box.querySelectorAll(ITEM)];
   if (!items.length) return "empty";
   const shown = items.filter((item) => displayed(item, box));
   if (!shown.length) return "hostHides";
-  const list = box.querySelector(".p-breadcrumb");
+  const list = box.querySelector(LIST);
   const others = [...box.children].filter((child) => child !== list && displayed(child, box));
   return shown.length === 1 && !others.length ? "nameOnly" : "more";
 }
@@ -35,7 +41,7 @@ export default {
     + "own tab. On, the box shows only inside a subgraph, where it carries the path back out.",
   issues: ["Comfy-Org/ComfyUI_frontend#7019", "Comfy-Org/ComfyUI_frontend#6104"],
   defaultValue: false,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (!window.LiteGraph || !app.canvas) return "the canvas is not ready";
     return "";
@@ -51,7 +57,7 @@ export default {
       due = 0;
       try {
         const root = atRoot();
-        for (const box of document.querySelectorAll(".subgraph-breadcrumb")) {
+        for (const box of document.querySelectorAll(BOX)) {
           const state = readBox(box);
           if (root && state === "hostHides") {
             standDown("ComfyUI already hides the workflow name at the top level");

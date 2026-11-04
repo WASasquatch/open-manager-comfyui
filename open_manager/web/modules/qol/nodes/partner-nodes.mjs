@@ -63,7 +63,7 @@ export default {
     + "still load and run.",
   issues: ["Comfy-Org/ComfyUI_frontend#6168", "Comfy-Org/ComfyUI_frontend#4785"],
   defaultValue: false,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     const defs = piniaStores()?.get("nodeDef");
     if (typeof defs?.registerNodeDefFilter !== "function"

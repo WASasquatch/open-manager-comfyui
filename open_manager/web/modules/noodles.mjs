@@ -224,7 +224,8 @@ function wrapAdapter(proto) {
       }
     }
     const segment = extras?.reroute ?? link ?? null;
-    const lit = !!link && !!context.highlightedLinks?.has?.(String(link.id));
+    const lit = !!link && (!!context.highlightedLinks?.has?.(String(link.id))
+      || !!context.highlightedLinks?.has?.(link.id));
     const shown = colourOf(colour, link, context, lit);
     const move = motionOn();
     const target = layer ?? ctx;

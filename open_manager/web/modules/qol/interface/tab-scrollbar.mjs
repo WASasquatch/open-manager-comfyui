@@ -36,7 +36,7 @@ export default {
     + "wheel scrolls to them.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     const strip = document.querySelector(STRIP);
     if (strip && getComputedStyle(strip).scrollbarWidth === "none") {

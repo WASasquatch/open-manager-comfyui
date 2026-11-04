@@ -3,6 +3,7 @@ import { api } from "../../../scripts/api.js";
 import { el, toast, notify, askText, confirmAction, openRowMenu } from "./ui.mjs";
 import { panelSetting } from "./settings.mjs";
 import { createFloatingPanel, floatingPanel } from "./windows.mjs";
+import { selectedNodes as pickedNodes } from "./selection.mjs";
 
 const PRESET_COMMAND = "openmanager.nodePresets";
 
@@ -248,7 +249,7 @@ function presetTitle(node, type) {
 }
 
 function selectedNodes() {
-  return Object.values(app.canvas?.selected_nodes || {});
+  return pickedNodes();
 }
 
 function presetSelection() {

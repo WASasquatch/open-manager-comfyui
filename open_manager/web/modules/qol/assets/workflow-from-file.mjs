@@ -55,6 +55,7 @@ async function fromFiles(jobId) {
 
 function wrap(before) {
   return async function getJobDetail(jobId, ...rest) {
+    if (rest[0] instanceof AbortSignal) return before.call(this, jobId, ...rest);
     const detail = await before.call(this, jobId, ...rest);
     if (detail || !active || !jobId) return detail;
     const id = String(jobId);
@@ -75,7 +76,7 @@ export default {
   tooltip: "A job no longer in history opens the workflow saved in its file.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.58.5",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof reader() !== "function") return "ComfyUI's file reader is not reachable";

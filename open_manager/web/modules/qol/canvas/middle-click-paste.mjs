@@ -62,7 +62,7 @@ export default {
     "Comfy-Org/ComfyUI#9863",
   ],
   defaultValue: true,
-  verified: "1.54.8",
+  verified: "1.58.5",
   check() {
     return "";
   },
