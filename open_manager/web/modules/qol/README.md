@@ -15,7 +15,7 @@ switch under Settings > Open Manager > Quality of Life Patches.
 | `nodes/` | Node bodies, widgets, badges and node lists |
 | `packs/` | Other node packs' front ends, where one slows or breaks ComfyUI's |
 | `search/` | The node search box |
-| `subgraphs/` | Subgraph nodes |
+| `subgraphs/` | Subgraph nodes and the inputs and outputs inside a subgraph |
 | `templates/` | Workflow templates and what opening one fetches |
 
 Every `.mjs` file in a category folder is one patch. The server lists them
