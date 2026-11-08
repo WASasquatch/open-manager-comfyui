@@ -23,6 +23,7 @@
   },
   "capabilities": [
     "Reads the registered node types",
-    "Adds a node to the open graph"
+    "Adds a node to the open graph",
+    "Reads and changes node favourites, folders and tags"
   ]
 }

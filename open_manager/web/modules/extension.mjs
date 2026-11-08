@@ -64,6 +64,13 @@ app.registerExtension({
       defaultValue: 0,
     },
     {
+      id: "openManager.organizer",
+      name: "Folders and tags",
+      category: ["Open Manager", "Internal", "organizer"],
+      type: "hidden",
+      defaultValue: {},
+    },
+    {
       id: "openManager.windowManager",
       name: "Pack manager as a window",
       category: ["Open Manager", "Windows", "windowManager"],

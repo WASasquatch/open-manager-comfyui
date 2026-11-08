@@ -134,6 +134,8 @@ Without one, a pack page shows its star count only.
 | Workflow gaps | Missing nodes, and which pack won a duplicate name |
 | Import failures | Each failed pack's error from ComfyUI's log, its traceback a click away |
 | Workflow packs | Each pack the open workflow uses, with node ids to copy |
+| Folders and tags | Installed packs grouped in folders of your own and tagged, from a pack's menu; `#tag` in the search lists a tag's packs |
+| Every `custom_nodes` folder | Packs in each `custom_nodes` path `extra_model_paths.yaml` adds are listed and managed where they are; new installs go to ComfyUI's first |
 | Themes | Gradients, icons, backdrops |
 | Fast sync | Whole registry in seconds |
 
@@ -275,6 +277,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Image, video and audio pickers | Grid with folders | On Nodes 2.0, the picker on Load Image, Load Video, Load Audio and other upload combos. *Grid* is ComfyUI's. *Grid with folders* opens the folders in input and output, with small previews of pictures, and a Generated file in a subfolder loads from it. Typing in its search box searches as ComfyUI does. *Plain list* is a combo list, folders as submenus, with the upload button below it |
 | Right-clicking a video opens the browser's menu | On | On Nodes 2.0 and OM Nodes, right-clicking a video on a node opens the browser's menu for it, with Save video as and Open video in new tab, in place of the node's menu |
 | Hide Partner nodes | Off | Paid Partner (API) nodes, their templates and the Login button are hidden |
+| Node folders and tags | On | Folder and tags in a node's right-click menu, in the Node Library and on the graph. Folders are ComfyUI's own favourites folders. Tags show beside node names in the Node Library, and `#tag` in node search lists a tag's nodes. The classic Node Library gets the search only |
 | Looping animations hold still while a job runs | On | Running spinners and pulses stop redrawing until the queue is empty |
 | Links share one colour table per frame | On | Drawing a link no longer copies the colour of every link type from every pack, which costs most on large graphs with many packs installed |
 | Go to Node by ID | On | Opens and frames a node by ID, or by a path such as `12:5` for node 5 inside subgraph node 12. In the canvas menu, and bindable under ComfyUI's keybindings |

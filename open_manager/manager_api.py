@@ -109,9 +109,8 @@ def _identity(pack: dict, index: dict[str, dict]) -> tuple[str, str]:
     entry = index.get(_fold(pack.get("id", ""))) or index.get(_fold(bare))
     if entry:
         return entry.get("id", ""), ""
-    try:
-        directory = installer.custom_nodes_dir() / pack.get("dir", "")
-    except RuntimeError:
+    directory = installer.pack_dir(pack.get("dir", ""))
+    if directory is None:
         return "", ""
     repo = _git_repo(directory)
     if repo:
@@ -156,14 +155,16 @@ def _find(pack_id: str) -> Path | None:
     Returns:
         The switched-on copy where both exist, otherwise whichever exists, or ``None``.
     """
-    try:
-        base = installer.custom_nodes_dir()
-    except RuntimeError:
-        return None
     want = _fold(pack_id)
     repo_want = _fold(pack_id.split("/", 1)[1]) if "/" in pack_id else ""
     off = None
-    for child in sorted(base.iterdir()):
+    children: list[Path] = []
+    for base in installer.custom_nodes_roots():
+        try:
+            children.extend(sorted(base.iterdir()))
+        except OSError:
+            continue
+    for child in children:
         if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
             continue
         bare = _fold(_bare(child.name))
@@ -262,9 +263,8 @@ async def _task_uninstall(params: dict) -> tuple[str, list[str], str]:
         return "success", [f"{pack_id} was not installed."], "skip"
     if pack_health._ours(directory):
         return "error", ["Open Manager cannot remove itself from here."], "refused"
-    root = installer.custom_nodes_dir().resolve()
     target = directory.resolve()
-    if target.parent != root:
+    if not installer.in_custom_nodes(target):
         return "error", ["Refusing to remove outside custom_nodes."], "refused"
     try:
         await asyncio.to_thread(installer._remove_tree, target)

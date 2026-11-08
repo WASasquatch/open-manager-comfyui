@@ -214,20 +214,18 @@ def _checked(name: str) -> tuple[Path | None, str]:
     """
     if not name or "/" in name or "\\" in name or name in (".", ".."):
         return None, "that is not a pack directory"
-    try:
-        base = installer.custom_nodes_dir().resolve()
-    except RuntimeError:
+    if not installer.custom_nodes_roots():
         return None, "the custom_nodes directory could not be found"
 
-    target = (base / name)
+    target = installer.pack_dir(name)
+    if target is None:
+        return None, "that is not a directory"
     try:
         resolved = target.resolve()
     except OSError:
         return None, "that path could not be read"
-    if resolved.parent != base:
+    if not installer.in_custom_nodes(resolved):
         return None, "that is not directly inside custom_nodes"
-    if not resolved.is_dir():
-        return None, "that is not a directory"
     if _ours(resolved):
         return None, "Open Manager cannot switch itself off from here"
     return resolved, ""
@@ -311,23 +309,29 @@ def _resolved(where: object) -> Path:
     return known
 
 
-def _pack_of(module: object, root: Path) -> str:
+def _pack_of(module: object, roots: list[Path]) -> str:
     """Which pack directory a module was loaded from, or empty for anything else."""
     where = _attr(module, "__file__", "") or ""
     if not where:
         return ""
     try:
-        parts = _resolved(where).relative_to(root).parts
-    except (ValueError, OSError):
+        resolved = _resolved(where)
+    except OSError:
         return ""
-    return parts[0] if parts else ""
+    for root in roots:
+        try:
+            parts = resolved.relative_to(root).parts
+        except ValueError:
+            continue
+        return parts[0] if parts else ""
+    return ""
 
 
-def _defined_in(node_class: object, root: Path, seen: dict) -> str:
+def _defined_in(node_class: object, roots: list[Path], seen: dict) -> str:
     """Which pack a node class was written in, or empty for anything outside custom_nodes."""
     module = _attr(node_class, "__module__", "") or ""
     if module not in seen:
-        seen[module] = _pack_of(sys.modules.get(module), root)
+        seen[module] = _pack_of(sys.modules.get(module), roots)
     return seen[module]
 
 
@@ -341,10 +345,13 @@ def collisions() -> dict:
         error; its claims are missing from the answer.
     """
     try:
-        root = installer.custom_nodes_dir().resolve()
-    except (OSError, RuntimeError) as error:
+        roots = [one.resolve() for one in installer.custom_nodes_roots()]
+    except OSError as error:
         return {"ok": False, "groups": [], "packs": 0, "names": 0, "skipped": [],
                 "reason": str(error)}
+    if not roots:
+        return {"ok": False, "groups": [], "packs": 0, "names": 0, "skipped": [],
+                "reason": "custom_nodes path could not be resolved"}
 
     claims: dict = {}
     packs = set()
@@ -355,11 +362,11 @@ def collisions() -> dict:
             mapping = _attr(module, MAPPING, None)
             if not isinstance(mapping, dict) or not mapping:
                 continue
-            pack = _pack_of(module, root)
+            pack = _pack_of(module, roots)
             if not pack:
                 continue
             for name, node_class in list(mapping.items()):
-                if isinstance(name, str) and _defined_in(node_class, root, seen) == pack:
+                if isinstance(name, str) and _defined_in(node_class, roots, seen) == pack:
                     claims.setdefault(name, set()).add(pack)
                     packs.add(pack)
         except Exception as error:  # noqa: BLE001
@@ -381,7 +388,7 @@ def collisions() -> dict:
         groups.append({
             "node": name,
             "packs": sorted(claimed),
-            "loaded": _defined_in(node_class, root, seen) if node_class is not None else "",
+            "loaded": _defined_in(node_class, roots, seen) if node_class is not None else "",
         })
     groups.sort(key=lambda group: (-len(group["packs"]), group["node"]))
     return {"ok": True, "groups": groups, "packs": len(packs), "names": len(claims),

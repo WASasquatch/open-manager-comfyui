@@ -14,6 +14,32 @@ import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.m
 import { runSnapshot } from "./snapshot-store.mjs";
 import { sessionReady } from "./session.mjs";
 import { piniaStores } from "./qol/shared.mjs";
+import { favourites, favouriteFolder, fileNode, nodeTagMap, organizeNode, renameNodeFolder, deleteNodeFolder, folderHolds, watchOrganizer } from "./organizer.mjs";
+
+function nodeMarksNow() {
+  const filed = favourites();
+  return {
+    favourites: Object.fromEntries(filed.byType),
+    folders: [...filed.folders],
+    tags: Object.fromEntries([...nodeTagMap()].map(([type, tags]) => [type, [...tags]])),
+  };
+}
+
+function programNodeMarks() {
+  return {
+    read: () => nodeMarksNow(),
+    organize: (type, title) => organizeNode(String(type || ""), String(title || "").slice(0, 120)),
+    favourite: (type, on) => {
+      const name = String(type || "");
+      if (!name) return Promise.resolve();
+      return fileNode(name, on ? (favouriteFolder(name) ?? "") : null);
+    },
+    holds: (path) => folderHolds(String(path || "")),
+    renameFolder: (path, name) => renameNodeFolder(String(path || ""), String(name || "")),
+    deleteFolder: (path) => deleteNodeFolder(String(path || "")),
+    watch: (fn) => watchOrganizer(() => fn()),
+  };
+}
 
 const PROGRAM_BASE = new URL("./programs/", new URL("../", import.meta.url)).href;
 
@@ -811,6 +837,7 @@ function programApi(entry, view = "main") {
     },
     timing: programTiming(),
     logs: programLogs(),
+    nodeMarks: programNodeMarks(),
   };
 }
 

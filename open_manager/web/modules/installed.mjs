@@ -11,6 +11,29 @@ import { viewGeneration, viewIsCurrent, refreshInstalledIfActive } from "./disco
 import { dropdown } from "./registry.mjs";
 import { dlPost } from "./net.mjs";
 import { hostConflicts, hostPipLit, acknowledgeHostPip, conflictText, misreadAccelerator, pipMark } from "./host-pips.mjs";
+import { packMarks, organizePack, watchOrganizer, parseQuery, hasTags, tagPill } from "./organizer.mjs";
+
+const FOLDERS_SHUT = "openManager.installedFoldersShut";
+
+function shutFolders() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FOLDERS_SHUT) || "[]");
+    return new Set(Array.isArray(saved) ? saved.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function folderHead(name, count, shut, onToggle) {
+  const head = el("button", `om-fold-head${shut ? " om-fold-shut" : ""}`);
+  head.type = "button";
+  head.setAttribute("aria-expanded", shut ? "false" : "true");
+  head.appendChild(el("span", "om-fold-mark", shut ? "▸" : "▾"));
+  head.appendChild(el("span", "om-fold-name", name));
+  head.appendChild(el("span", "om-fold-count", String(count)));
+  head.onclick = onToggle;
+  return head;
+}
 
 function conflictIndex(reported) {
   const found = new Map();
@@ -134,9 +157,11 @@ async function renderInstalled(container) {
     (pack.disabled ? null : startupCost.get(foldId(pack.dir)))?.seconds ?? -1;
   const age = (pack) => Number(pack.installed_at) || 0;
 
+  const shut = shutFolders();
   const apply = () => {
     const mode = filterSel.value;
-    const wanted = search.value.trim().toLowerCase();
+    const query = parseQuery(search.value);
+    const wanted = query.text;
     const rows = packs.filter((pack) => {
       if (mode === "updates" && !isInstalledUpdatable(pack)) return false;
       if (mode === "flagged" && !reviewOf(pack.status)) return false;
@@ -145,7 +170,10 @@ async function renderInstalled(container) {
       if (mode === "off-registry" && pack.registry_id) return false;
       if (["registry", "github", "disk"].includes(mode) && pack.source !== mode) return false;
       if (trustedBox.checked && !byTrustedAuthor(pack)) return false;
-      if (wanted && !`${pack.id} ${pack.dir} ${pack.repository || ""}`.toLowerCase().includes(wanted)) {
+      const marks = packMarks(pack);
+      if (query.tags.length && !hasTags(marks.tags, query.tags)) return false;
+      if (wanted && !`${pack.id} ${pack.dir} ${pack.repository || ""} ${marks.folder} ${marks.tags.join(" ")}`
+        .toLowerCase().includes(wanted)) {
         return false;
       }
       return true;
@@ -163,7 +191,34 @@ async function renderInstalled(container) {
     };
     rows.sort(sorters[sortSel.value] || sorters.name);
     list.replaceChildren();
-    for (const pack of rows) list.appendChild(buildInstalledRow(pack, conflictFor(pack, conflicts), fresh));
+    const onTag = (tag) => {
+      search.value = `#${tag}`;
+      apply();
+    };
+    const row = (pack) => buildInstalledRow(pack, conflictFor(pack, conflicts), fresh, onTag);
+    const filed = new Map();
+    const loose = [];
+    for (const pack of rows) {
+      const folder = packMarks(pack).folder;
+      if (!folder) loose.push(pack);
+      else if (filed.has(folder)) filed.get(folder).push(pack);
+      else filed.set(folder, [pack]);
+    }
+    const grouped = packs.some((pack) => packMarks(pack).folder);
+    const names = [...filed.keys()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const section = (key, label, members) => {
+      const closed = shut.has(key);
+      list.appendChild(folderHead(label, members.length, closed, () => {
+        if (shut.has(key)) shut.delete(key);
+        else shut.add(key);
+        try { localStorage.setItem(FOLDERS_SHUT, JSON.stringify([...shut])); } catch {}
+        apply();
+      }));
+      if (!closed) for (const pack of members) list.appendChild(row(pack));
+    };
+    for (const name of names) section(name, name, filed.get(name));
+    if (grouped && loose.length) section("", "No folder", loose);
+    else for (const pack of loose) list.appendChild(row(pack));
     count.textContent = rows.length === packs.length
       ? `${rows.length} shown`
       : `${rows.length} of ${packs.length} shown`;
@@ -177,6 +232,13 @@ async function renderInstalled(container) {
   let searchTimer = 0;
   search.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(apply, 150); });
   apply();
+  const unwatch = watchOrganizer(() => {
+    if (!viewIsCurrent(generation) || !list.isConnected) {
+      unwatch();
+      return;
+    }
+    apply();
+  });
 
   const alerts = packs.filter((p) => !p.disabled && ["flagged", "banned"].includes((p.status || "").toLowerCase()));
   if (alerts.length) {
@@ -345,7 +407,7 @@ function showImportFailure(name, error, trace) {
   closeOn(backdrop);
 }
 
-function buildInstalledRow(pack, conflict = null, fresh = false) {
+function buildInstalledRow(pack, conflict = null, fresh = false, onTag = null) {
   const updatable = isInstalledUpdatable(pack);
   const row = el("div", "om-side-row");
   row._installedVersion = pack.version;
@@ -400,6 +462,7 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
   else if (selfUpdateTarget(pack)) {
     meta.appendChild(el("span", "om-upd", `update → ${selfUpdateTarget(pack)}`));
   }
+  for (const tag of packMarks(pack).tags) meta.appendChild(tagPill(tag, onTag));
   text.appendChild(meta);
   const listed = conflict?.conflicts || [];
   for (const item of listed) {
@@ -425,6 +488,8 @@ function buildInstalledRow(pack, conflict = null, fresh = false) {
                     name: pack.registry_id || pack.id };
   const items = installedMenu(pack, null, () => control, row,
     () => refreshInstalledIfActive());
+  items.splice(Math.max(0, items.length - 1), 0,
+    { label: "Folder and tags...", fn: () => { void organizePack(pack); } });
 
   const control = makeInstallControl({
     packId: pack.registry_id || pack.id,

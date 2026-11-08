@@ -27,10 +27,13 @@ logger = log.get_logger("installer")
 __all__ = [
     "InstallResult",
     "custom_nodes_dir",
+    "custom_nodes_roots",
+    "in_custom_nodes",
     "install",
     "install_repo",
     "installed_version",
     "list_installed",
+    "pack_dir",
     "uninstall",
 ]
 
@@ -130,6 +133,65 @@ def custom_nodes_dir() -> Path:
         raise RuntimeError(f"custom_nodes path could not be resolved: {error}") from error
 
 
+def custom_nodes_roots() -> list[Path]:
+    """Every ``custom_nodes`` directory ComfyUI loads packs from.
+
+    Returns:
+        The existing directories in ComfyUI's order, each once. Empty where none can be
+        resolved.
+    """
+    try:
+        import folder_paths
+
+        listed = list(folder_paths.get_folder_paths("custom_nodes"))
+    except Exception:
+        return []
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for one in listed:
+        root = Path(one)
+        key = os.path.normcase(os.path.abspath(one))
+        if key in seen or not root.is_dir():
+            continue
+        seen.add(key)
+        roots.append(root)
+    return roots
+
+
+def pack_dir(name: str) -> Path | None:
+    """The pack directory of that exact name, from the first root holding one.
+
+    Args:
+        name: A directory name as :func:`list_installed` reports it.
+
+    Returns:
+        The directory, or ``None`` where no root holds one of that name.
+    """
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return None
+    for root in custom_nodes_roots():
+        candidate = root / name
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def in_custom_nodes(directory: Path) -> bool:
+    """Whether a directory sits directly inside one of the ``custom_nodes`` roots.
+
+    Args:
+        directory: A resolved directory.
+
+    Returns:
+        False for a root itself and for anything deeper or elsewhere.
+    """
+    try:
+        roots = {root.resolve() for root in custom_nodes_roots()}
+    except OSError:
+        return False
+    return directory not in roots and directory.parent in roots
+
+
 def _safe_dir_name(node_id: str) -> str:
     """A single directory name from a pack id.
 
@@ -204,21 +266,24 @@ def resolve_install_dir(node_id: str) -> Path | None:
     Returns:
         The directory, or ``None`` where the pack is not installed.
     """
-    try:
-        base = custom_nodes_dir()
-    except RuntimeError:
-        return None
-
-    exact = base / _safe_dir_name(node_id)
-    if exact.is_dir():
-        return exact
+    roots = custom_nodes_roots()
+    name = _safe_dir_name(node_id)
+    for base in roots:
+        exact = base / name
+        if exact.is_dir():
+            return exact
 
     want = _norm(node_id)
-    for child in sorted(base.iterdir()):
-        if not child.is_dir() or child.name.startswith("."):
+    for base in roots:
+        try:
+            children = sorted(base.iterdir())
+        except OSError:
             continue
-        if _norm(child.name) == want or _norm(_pyproject_name(child)) == want:
-            return child
+        for child in children:
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            if _norm(child.name) == want or _norm(_pyproject_name(child)) == want:
+                return child
     return None
 
 
@@ -630,6 +695,7 @@ def _install_repo(
         removed = uninstall(existing.name)
         if not removed.ok:
             return removed
+        base = existing.parent
 
     tmp = Path(tempfile.mkdtemp(prefix="open_manager_"))
     archive = tmp / "repo.zip"
@@ -1022,9 +1088,14 @@ def _users(python: str, skip: Path | None) -> dict | None:
         return None
     try:
         own = skip.resolve() if skip is not None else None
-        packs = sorted(custom_nodes_dir().iterdir())
-    except (OSError, RuntimeError):
-        packs = []
+    except OSError:
+        own = None
+    packs: list[Path] = []
+    for root in custom_nodes_roots():
+        try:
+            packs.extend(sorted(root.iterdir()))
+        except OSError:
+            continue
     for child in packs:
         if not child.is_dir() or child.name.startswith("."):
             continue
@@ -1277,16 +1348,14 @@ def uninstall(node_id: str) -> InstallResult:
         An :class:`InstallResult`. ``ok`` is true where the pack was removed or was already
         absent.
     """
-    try:
-        root = custom_nodes_dir().resolve()
-    except RuntimeError as error:
-        return InstallResult(ok=False, reason=str(error))
+    if not custom_nodes_roots():
+        return InstallResult(ok=False, reason="custom_nodes path could not be resolved")
 
     directory = resolve_install_dir(node_id)
     if directory is None:
         return InstallResult(ok=True, reason="was not installed")
     target = directory.resolve()
-    if target == root or target.parent != root:
+    if not in_custom_nodes(target):
         logger.warning("[Open Manager] %s not removed: it is outside custom_nodes", node_id)
         return InstallResult(ok=False, reason="refusing to remove outside custom_nodes")
     try:
@@ -1299,33 +1368,45 @@ def uninstall(node_id: str) -> InstallResult:
 
 
 def list_installed() -> list[dict]:
-    """Every pack directory currently in custom_nodes.
+    """Every pack directory currently in each custom_nodes root.
 
     Returns:
         One entry per pack, each ``{id, version, dir, disabled, from_git, installed_at}``.
         ``id`` is the pack's pyproject name where it declares one, otherwise the directory
         name. ``from_git`` marks a working copy: a clone, or one this installed from a
         repository. ``installed_at`` is a POSIX timestamp, 0 where none could be worked out.
+        Where two roots hold a directory of the same name, the earlier root's is listed.
     """
-    try:
-        base = custom_nodes_dir()
-    except RuntimeError:
-        return []
     packs: list[dict] = []
-    for child in sorted(base.iterdir()):
-        if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
+    names: set[str] = set()
+    for base in custom_nodes_roots():
+        try:
+            children = sorted(base.iterdir())
+        except OSError:
             continue
-        pack_id = _pyproject_name(child) or child.name
-        version = _version_in(child)
-        packs.append({
-            "id": pack_id,
-            "version": version,
-            "dir": child.name,
-            "disabled": child.name.endswith(".disabled"),
-            "from_git": (child / ".git").exists() or version.startswith("git:"),
-            "installed_at": _installed_at(child),
-        })
+        for child in children:
+            if child.name in names:
+                continue
+            entry = _installed_entry(child)
+            if entry is not None:
+                names.add(child.name)
+                packs.append(entry)
     return packs
+
+
+def _installed_entry(child: Path) -> dict | None:
+    """One :func:`list_installed` entry, or ``None`` for anything that is not a pack."""
+    if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
+        return None
+    version = _version_in(child)
+    return {
+        "id": _pyproject_name(child) or child.name,
+        "version": version,
+        "dir": child.name,
+        "disabled": child.name.endswith(".disabled"),
+        "from_git": (child / ".git").exists() or version.startswith("git:"),
+        "installed_at": _installed_at(child),
+    }
 
 
 def _installed_at(directory: Path) -> float:
@@ -1438,6 +1519,7 @@ def _install(
         removed = uninstall(node_id)
         if not removed.ok:
             return removed
+        base = existing.parent
 
     target = base / _safe_dir_name(node_id)
 

@@ -1,5 +1,13 @@
 const ALL = "\u0000all";
 
+const FAV = "\u0000fav";
+
+const FAV_IN = "\u0000fav/";
+
+const TAG = "\u0000tag:";
+
+const TAGS_SHOWN = 3;
+
 const SOURCES = [["all", "All"], ["core", "Core"], ["partner", "Partner"], ["custom", "Custom"]];
 
 const SLOW_SEARCH = 24;
@@ -58,15 +66,33 @@ function prepare(one) {
     top: topOf(one.category),
     hay: `${name} ${one.category} ${one.description} ${one.module} ${one.pack || ""}`.toLowerCase(),
     off: one.deprecated || one.experimental,
+    tags: [],
+    shownTags: [],
+    tagHay: "",
   };
 }
 
-function rank(items, words, phrase) {
-  if (!words.length) return { matched: items, shown: items };
+function splitQuery(term) {
+  const words = [];
+  const tags = [];
+  for (const word of term.trim().toLowerCase().split(/\s+/)) {
+    if (!word) continue;
+    if (word.startsWith("#")) {
+      if (word.length > 1) tags.push(word.slice(1));
+    } else {
+      words.push(word);
+    }
+  }
+  return { words, tags, phrase: words.join(" ") };
+}
+
+function rank(items, { words, tags, phrase }) {
+  if (!words.length && !tags.length) return { matched: items, shown: items };
   const matched = [];
   const tiers = [[], [], [], [], []];
   for (const item of items) {
-    if (!words.every((word) => item.hay.includes(word))) continue;
+    if (tags.length && !tags.every((want) => item.tags.some((tag) => tag.startsWith(want)))) continue;
+    if (!words.every((word) => item.hay.includes(word) || item.tagHay.includes(word))) continue;
     matched.push(item);
     if (item.shown === phrase || item.type === phrase) tiers[0].push(item);
     else if (item.shown.startsWith(phrase)) tiers[1].push(item);
@@ -86,7 +112,29 @@ export const program = {
     const state = {
       all: [], pool: null, matched: [], shown: [], last: "",
       chosen: ALL, source: "all", term: "", hidden: false,
-      at: -1, open: false, cost: 0,
+      at: -1, open: false, one: null, cost: 0,
+    };
+    const marks = { fav: new Map(), folders: [], tags: new Map() };
+    const readMarks = () => {
+      const now = api.nodeMarks?.read?.() || { favourites: {}, folders: [], tags: {} };
+      marks.fav = new Map(Object.entries(now.favourites || {}));
+      marks.folders = Array.isArray(now.folders) ? now.folders : [];
+      marks.tags = new Map(Object.entries(now.tags || {}));
+      for (const item of state.all) {
+        const tags = marks.tags.get(item.one.name) || [];
+        item.shownTags = tags;
+        item.tags = tags.map((tag) => tag.toLowerCase());
+        item.tagHay = item.tags.join(" ");
+      }
+    };
+    const inFolder = (folder, path) => folder === path || (folder != null && folder.startsWith(`${path}/`));
+    const inPlace = (item) => {
+      const chosen = state.chosen;
+      if (chosen === ALL) return true;
+      if (chosen === FAV) return marks.fav.has(item.one.name);
+      if (chosen.startsWith(FAV_IN)) return inFolder(marks.fav.get(item.one.name), chosen.slice(FAV_IN.length));
+      if (chosen.startsWith(TAG)) return item.tags.includes(chosen.slice(TAG.length));
+      return item.top === chosen;
     };
 
     const top = api.el("div", "nod-top");
@@ -142,10 +190,20 @@ export const program = {
     const drawerHead = api.el("div", "nod-drawer-head");
     const add = api.el("button", "om-btn nod-add", "Add to graph");
     add.type = "button";
+    const fave = api.el("button", "om-btn nod-fave", "☆");
+    fave.type = "button";
+    const sort = api.el("button", "om-btn nod-sort", "Folder and tags...");
+    sort.type = "button";
     const shut = api.el("button", "nod-shut", "×");
     shut.type = "button";
     shut.setAttribute("aria-label", "Close");
-    drawerHead.append(add, shut);
+    const drawerActs = api.el("div", "nod-drawer-acts");
+    drawerActs.append(add, fave, sort);
+    drawerHead.append(drawerActs, shut);
+    if (!api.nodeMarks) {
+      fave.hidden = true;
+      sort.hidden = true;
+    }
     const drawerBody = api.el("div", "nod-drawer-body");
     drawer.append(drawerHead, drawerBody);
 
@@ -160,13 +218,20 @@ export const program = {
     let searchDue = 0;
     let searchTimer = 0;
 
-    const rowShell = (one) => {
+    const rowShell = (one, tags = []) => {
       const item = api.el("div", "nod-row");
       const head = api.el("div", "nod-head");
+      if (marks.fav.has(one.name)) {
+        const star = api.el("span", "nod-star", "★");
+        star.title = marks.fav.get(one.name) ? `Favourites / ${marks.fav.get(one.name)}` : "Favourites";
+        head.appendChild(star);
+      }
       head.appendChild(api.el("span", "nod-name", one.display_name));
       if (one.display_name !== one.name) head.appendChild(api.el("span", "nod-type", one.name));
       if (one.deprecated) head.appendChild(api.el("span", "nod-flag", "deprecated"));
       if (one.experimental) head.appendChild(api.el("span", "nod-flag", "experimental"));
+      for (const tag of tags.slice(0, TAGS_SHOWN)) head.appendChild(api.el("span", "nod-tag", tag));
+      if (tags.length > TAGS_SHOWN) head.appendChild(api.el("span", "nod-tag nod-tag-more", `+${tags.length - TAGS_SHOWN}`));
       item.appendChild(head);
       const under = api.el("div", "nod-under");
       under.appendChild(api.el("span", "nod-cat", one.category || ""));
@@ -216,7 +281,7 @@ export const program = {
       for (let index = first; index < last; index += 1) {
         if (built.has(index)) continue;
         const one = state.shown[index].one;
-        const node = rowShell(one);
+        const node = rowShell(one, state.shown[index].shownTags);
         node.dataset.at = String(index);
         node.setAttribute("role", "option");
         node.style.top = `${index * gap}px`;
@@ -255,8 +320,10 @@ export const program = {
       drawer.inert = true;
     };
 
-    const showDrawer = (one) => {
+    const showDrawer = (one, { keepScroll = false } = {}) => {
       state.open = true;
+      state.one = one;
+      const scrolled = drawerBody.scrollTop;
       const card = api.graph.card(one);
       api.graph.drag(card, one, { add: () => place(one) });
       const parts = [card];
@@ -269,10 +336,19 @@ export const program = {
       fact("Type", one.name);
       fact("Category", one.category);
       fact("Pack", one.pack);
+      const folder = marks.fav.get(one.name);
+      if (folder !== undefined) fact("Favourites", folder ? folder.split("/").join(" / ") : "Top level");
+      fact("Tags", (marks.tags.get(one.name) || []).join(", "));
       parts.push(facts);
       drawerBody.replaceChildren(...parts);
-      drawerBody.scrollTop = 0;
+      drawerBody.scrollTop = keepScroll ? scrolled : 0;
       add.onclick = () => place(one);
+      const on = marks.fav.has(one.name);
+      fave.textContent = on ? "★" : "☆";
+      fave.title = on ? "Remove from favourites" : "Add to favourites";
+      fave.setAttribute("aria-pressed", on ? "true" : "false");
+      fave.onclick = () => { void api.nodeMarks?.favourite(one.name, !marks.fav.has(one.name)); };
+      sort.onclick = () => { void api.nodeMarks?.organize(one.name, one.display_name); };
       wrap.classList.add("nod-drawer-open");
       drawer.inert = false;
     };
@@ -300,9 +376,21 @@ export const program = {
       if (state.pool) return state.pool;
       state.pool = state.all.filter((item) => (state.hidden || !item.off)
         && (state.source === "all" || item.one.source === state.source)
-        && (state.chosen === ALL || item.top === state.chosen));
+        && inPlace(item));
       state.last = "";
       return state.pool;
+    };
+
+    const match = () => {
+      const query = splitQuery(state.term);
+      const said = state.term.trim().toLowerCase().replace(/\s+/g, " ");
+      const pool = poolNow();
+      const from = state.last && said.startsWith(state.last) ? state.matched : pool;
+      const found = rank(from, query);
+      state.matched = found.matched;
+      state.shown = found.shown;
+      state.last = said;
+      return query;
     };
 
     const runSearch = () => {
@@ -311,20 +399,30 @@ export const program = {
       searchDue = 0;
       searchTimer = 0;
       const began = performance.now();
-      const phrase = state.term.trim().toLowerCase().replace(/\s+/g, " ");
-      const words = phrase ? phrase.split(" ") : [];
-      const pool = poolNow();
-      const from = state.last && phrase.startsWith(state.last) ? state.matched : pool;
-      const found = rank(from, words, phrase);
-      state.matched = found.matched;
-      state.shown = found.shown;
-      state.last = phrase;
-      state.at = words.length && state.shown.length ? 0 : -1;
+      const query = match();
+      state.at = (query.words.length || query.tags.length) && state.shown.length ? 0 : -1;
       closeDrawer();
       repaint();
       room.classList.toggle("nod-room-none", !state.shown.length && !!state.all.length);
       sayCount();
       state.cost = state.cost * 0.6 + (performance.now() - began) * 0.4;
+    };
+
+    const rematch = () => {
+      const keep = list.scrollTop;
+      const was = state.at >= 0 ? state.shown[state.at]?.one.name : "";
+      state.pool = null;
+      state.last = "";
+      match();
+      state.at = was ? state.shown.findIndex((item) => item.one.name === was) : -1;
+      for (const node of built.values()) node.remove();
+      built.clear();
+      paint();
+      list.scrollTop = keep;
+      paint();
+      room.classList.toggle("nod-room-none", !state.shown.length && !!state.all.length);
+      sayCount();
+      if (state.open && state.one) showDrawer(state.one, { keepScroll: true });
     };
 
     const searchSoon = () => {
@@ -340,23 +438,59 @@ export const program = {
 
     const drawSide = () => {
       const counts = new Map();
+      const tagCounts = new Map();
+      const tagLabels = new Map();
+      const folderCounts = new Map();
+      let favCount = 0;
       for (const item of state.all) {
         if (!state.hidden && item.off) continue;
         if (state.source !== "all" && item.one.source !== state.source) continue;
         counts.set(item.top, (counts.get(item.top) || 0) + 1);
+        item.tags.forEach((tag, at) => {
+          tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+          if (!tagLabels.has(tag)) tagLabels.set(tag, item.shownTags[at] || tag);
+        });
+        const folder = marks.fav.get(item.one.name);
+        if (folder === undefined) continue;
+        favCount += 1;
+        for (const path of marks.folders) {
+          if (inFolder(folder, path)) folderCounts.set(path, (folderCounts.get(path) || 0) + 1);
+        }
       }
-      if (state.chosen !== ALL && !counts.has(state.chosen)) state.chosen = ALL;
+      const known = new Set([ALL, FAV, ...counts.keys(),
+        ...marks.folders.map((path) => FAV_IN + path), ...[...tagCounts.keys()].map((tag) => TAG + tag)]);
+      if (!known.has(state.chosen)) state.chosen = ALL;
+      const placeOf = (key, label, count, cls = "") => {
+        const place = api.el("button", `nod-place${cls ? ` ${cls}` : ""}`, label);
+        place.dataset.top = key;
+        if (count !== null) place.appendChild(api.el("span", "nod-count", String(count)));
+        return place;
+      };
+      const places = [placeOf(ALL, "Everything", null)];
+      const marked = favCount || marks.folders.length || tagCounts.size;
+      if (favCount || marks.folders.length) {
+        places.push(placeOf(FAV, "Favourites", favCount, "nod-place-fav"));
+        for (const path of marks.folders) {
+          const parts = path.split("/");
+          const one = placeOf(FAV_IN + path, parts[parts.length - 1], folderCounts.get(path) || 0,
+            "nod-place-folder");
+          one.style.setProperty("--nod-depth", String(parts.length));
+          one.dataset.folder = path;
+          places.push(one);
+        }
+      }
+      if (tagCounts.size) {
+        places.push(api.el("div", "nod-side-head", "Tags"));
+        const tags = [...tagCounts.keys()].sort((a, b) => a.localeCompare(b));
+        for (const tag of tags) {
+          places.push(placeOf(TAG + tag, tagLabels.get(tag), tagCounts.get(tag), "nod-place-tag"));
+        }
+      }
+      if (marked) places.push(api.el("div", "nod-side-head", "Categories"));
       const names = [...counts.keys()].sort((a, b) => a.localeCompare(b));
-      const all = api.el("button", "nod-place", "Everything");
-      all.dataset.top = ALL;
-      const places = [all];
-      for (const name of names) {
-        const place = api.el("button", "nod-place", name);
-        place.dataset.top = name;
-        place.appendChild(api.el("span", "nod-count", String(counts.get(name))));
-        places.push(place);
-      }
+      for (const name of names) places.push(placeOf(name, name, counts.get(name)));
       for (const place of places) {
+        if (!place.classList.contains("nod-place")) continue;
         place.type = "button";
         place.classList.toggle("nod-place-on", place.dataset.top === state.chosen);
       }
@@ -373,8 +507,32 @@ export const program = {
         .filter((one) => !String(one.category || "").startsWith("__hidden__"))
         .map(preparedOf)
         .sort((a, b) => (a.shown < b.shown ? -1 : a.shown > b.shown ? 1 : 0));
+      readMarks();
       drawSide();
       refilter();
+    };
+
+    const remark = () => {
+      readMarks();
+      drawSide();
+      rematch();
+    };
+
+    const renameFolder = async (path) => {
+      const parts = path.split("/");
+      const name = await api.ask("Rename folder", parts[parts.length - 1], "Rename");
+      if (!name) return;
+      const done = await api.nodeMarks.renameFolder(path, name);
+      if (!done) api.notify("Not renamed", `A folder called ${name} is already there.`);
+    };
+
+    const deleteFolder = async (path) => {
+      const parts = path.split("/");
+      const holds = api.nodeMarks.holds(path);
+      const go = await api.confirm(`Delete ${parts[parts.length - 1]}?`,
+        holds === 1 ? "The favourite in it leaves Favourites."
+          : holds ? `The ${holds} favourites in it leave Favourites.` : "", "Delete");
+      if (go) await api.nodeMarks.deleteFolder(path);
     };
 
     find.addEventListener("input", () => {
@@ -440,10 +598,34 @@ export const program = {
       }
       refilter();
     });
+    side.addEventListener("contextmenu", (event) => {
+      const place = event.target instanceof Element ? event.target.closest(".nod-place-folder") : null;
+      if (!place || !api.nodeMarks) return;
+      event.preventDefault();
+      const path = place.dataset.folder;
+      api.menu(place, [
+        { label: "Rename...", fn: () => { void renameFolder(path); } },
+        { label: "Delete folder", danger: true, fn: () => { void deleteFolder(path); } },
+      ]);
+    });
     room.addEventListener("click", (event) => {
       const node = event.target instanceof Element ? event.target.closest(".nod-row") : null;
       if (node) pick(Number(node.dataset.at), { toggle: true });
     });
+    room.addEventListener("contextmenu", (event) => {
+      const node = event.target instanceof Element ? event.target.closest(".nod-row") : null;
+      const item = node ? state.shown[Number(node.dataset.at)] : null;
+      if (!item || !api.nodeMarks) return;
+      event.preventDefault();
+      const one = item.one;
+      const on = marks.fav.has(one.name);
+      api.menu(node, [
+        { label: on ? "Remove from favourites" : "Add to favourites",
+          fn: () => { void api.nodeMarks.favourite(one.name, !on); } },
+        { label: "Folder and tags...", fn: () => { void api.nodeMarks.organize(one.name, one.display_name); } },
+      ]);
+    });
+    const unmark = api.nodeMarks?.watch?.(remark);
     shut.onclick = () => closeDrawer();
     drawer.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
@@ -457,6 +639,7 @@ export const program = {
     const sized = new ResizeObserver(paintSoon);
     sized.observe(list);
     win.onClose(() => {
+      unmark?.();
       sized.disconnect();
       cancelAnimationFrame(paintDue);
       cancelAnimationFrame(searchDue);
@@ -508,6 +691,22 @@ export const program = {
       .nod-place-on { background: color-mix(in srgb, var(--om-text) 12%, transparent);
         font-weight: 600; }
       .nod-count { margin-left: auto; font-size: 10px; opacity: .5; }
+      .nod-place-folder { padding-left: calc(8px + var(--nod-depth, 1) * 12px); }
+      .nod-place-folder::before { content: ""; flex: none; width: 11px; height: 9px;
+        border: 1.5px solid currentColor; border-radius: 2px; opacity: .55; }
+      .nod-place-fav::before { content: "★"; flex: none; font-size: 11px; opacity: .8; }
+      .nod-place-tag::before { content: "#"; flex: none; opacity: .5; }
+      .nod-side-head { margin: 8px 8px 2px; font-size: 10px; letter-spacing: .04em;
+        text-transform: uppercase; opacity: .5; }
+      .nod-star { flex: none; font-size: 11px; color: var(--om-host-accent, #388bfd); }
+      .nod-tag { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+        padding: 0 6px; border-radius: 999px; font-size: 10px; line-height: 15px;
+        background: color-mix(in srgb, var(--om-host-accent, #388bfd) 16%, transparent);
+        border: 1px solid color-mix(in srgb, var(--om-host-accent, #388bfd) 40%, transparent); }
+      .nod-tag-more { opacity: .7; }
+      .nod-drawer-acts { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .nod-fave { min-width: 32px; padding-left: 8px; padding-right: 8px; }
+      .nod-fave[aria-pressed="true"] { color: var(--om-host-accent, #388bfd); }
       .nod-main { flex: 1; min-width: 0; display: flex; flex-direction: column;
         transition: margin-right .2s cubic-bezier(.2, .8, .2, 1); }
       .nod-list { flex: 1; min-height: 0; overflow-y: auto; }

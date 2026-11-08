@@ -96,11 +96,15 @@ Partner and Custom narrow by source. Arrow keys or a click select a node and sli
 preview: the node as the graph draws it, with its sockets named and coloured by type, its widgets
 at their defaults, and its description. Double-click, Enter or **Add to graph** puts the node at
 the centre of the graph view, selects it and minimises Nodes; dragging drops it where it lands.
-Escape closes the preview, then clears the search.
+Escape closes the preview, then clears the search. The star in the preview, or a right-click on a
+node, makes it a favourite; **Folder and tags** files it in a favourites folder and tags it.
+Favourites, each folder and each tag are listed beside the categories, and `#tag` in the search
+narrows to a tag. Right-click a folder to rename or delete it. The folders are ComfyUI's own
+favourites, shared with its Node Library.
 
 **Registry Report** opens from the flagged or banned label on a pack's versions, its install
 dialog and the Installed list, or from the Start menu. There, **Installed** lists every pack in
-`custom_nodes` and reports on the version installed, and the box takes a registry id, a
+each `custom_nodes` folder and reports on the version installed, and the box takes a registry id, a
 pyproject name, a folder name or a GitHub repository as `owner/repo` or a URL. It reads the registry's own
 record for the version: a one-line verdict, each reviewer and registry note from first to last
 with its category in plain words, and the automated scan grouped by what each match means, with

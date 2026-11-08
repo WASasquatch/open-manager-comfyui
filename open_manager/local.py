@@ -140,7 +140,7 @@ def _node_classes(directory: Path) -> list[str]:
     found = []
     for name, cls in list(getattr(nodes, "NODE_CLASS_MAPPINGS", {}).items()):
         try:
-            if health._defined_in(cls, directory, seen):
+            if health._defined_in(cls, [directory], seen):
                 found.append(str(name))
         except Exception:
             continue

@@ -277,10 +277,13 @@ def _slug(text: str) -> str:
 
 def _installed_remote(directory: str) -> str:
     """The repository an installed pack was cloned from, empty where it was not."""
+    folder = installer.pack_dir(directory)
+    if folder is None:
+        return ""
     try:
-        config = installer.custom_nodes_dir() / directory / ".git" / "config"
-        found = _REMOTE.search(config.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, RuntimeError):
+        found = _REMOTE.search((folder / ".git" / "config").read_text(
+            encoding="utf-8", errors="replace"))
+    except OSError:
         return ""
     return found.group(1) if found else ""
 
@@ -395,15 +398,13 @@ def _declared_themes() -> list[dict]:
     Returns:
         One ``{repo, path, theme}`` per readable declared theme.
     """
-    try:
-        base = installer.custom_nodes_dir()
-    except Exception:
-        return []
     found: list[dict] = []
     for record in installer.list_installed():
         if record.get("disabled"):
             continue
-        directory = base / str(record.get("dir") or "")
+        directory = installer.pack_dir(str(record.get("dir") or ""))
+        if directory is None:
+            continue
         try:
             text = (directory / "pyproject.toml").read_text(encoding="utf-8", errors="replace")
         except OSError:
