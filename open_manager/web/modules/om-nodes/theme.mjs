@@ -19,6 +19,7 @@ const OM_TOKENS = {
   "title-weight": { kind: "weight" },
   "font": { kind: "font" },
   "dot-size": px(4, 16),
+  "thumb-size": px(16, 96),
   "outline-width": px(0, 6),
   "outline-gap": px(0, 8),
   "shadow-x": px(-20, 20),
@@ -112,6 +113,9 @@ const INNER_PARTS = {
     + "button:is(.bg-destructive-background, .bg-destructive, .bg-warning-background, .bg-warning))",
   outline: '[data-testid="node-state-outline-overlay"]',
   resize: "[data-corner]",
+  thumbs: ".image-preview > [data-om-thumbs]",
+  thumb: "[data-om-thumb]",
+  "image-nav": ".om-image-nav",
 };
 
 const PART = /%([a-z][a-z-]*)/g;

@@ -45,6 +45,13 @@ const svg = (body) => `url("data:image/svg+xml,${encodeURIComponent(
 const BYPASS_ICON = svg('<path d="M2.5 10a5.5 5.5 0 0 1 10.3-2.7"/><path d="M13.3 3.6v3.8H9.5"/>'
   + '<circle cx="8" cy="12.6" r="1.3" fill="#000" stroke="none"/>');
 const MUTE_ICON = svg('<circle cx="8" cy="8" r="5.6"/><path d="M4.1 4.1l7.8 7.8"/>');
+const PREV_ICON = svg('<path d="M10 3.5 5.5 8l4.5 4.5"/>');
+const NEXT_ICON = svg('<path d="M6 3.5 10.5 8 6 12.5"/>');
+const PREVIEW = ".lg-node .image-preview";
+const THUMBS = `${ROOT} :where(${PREVIEW}) > [data-om-thumbs]`;
+const THUMB = `${ROOT} :where(${PREVIEW} > [data-om-thumbs]) > [data-om-thumb]`;
+const PANEL = `${PREVIEW} > [role="region"]`;
+const NAV = `${ROOT} :where(${PANEL}) > .om-image-nav`;
 const RADIUS = "var(--omn-widget-radius, calc(var(--omn-widget-height) / 2))";
 const HOVER = "var(--omn-widget-bg-hover, color-mix(in srgb, var(--omn-widget-bg) 88%, #fff))";
 const SHADOW = "var(--omn-shadow-x) var(--omn-shadow-y) var(--omn-shadow-blur) var(--omn-shadow-color)";
@@ -66,6 +73,7 @@ ${ROOT} {
   --omn-text-size: 12px;
   --omn-font: Inter, Arial, sans-serif;
   --omn-dot-size: 8px;
+  --omn-thumb-size: 32px;
   --omn-outline-width: 2px;
   --omn-outline-gap: 2px;
   --omn-shadow-x: 2px;
@@ -319,6 +327,73 @@ ${NODE} ${BODY}:has(> [data-testid="node-widgets"]) {
 }
 ${NODE} ${BODY}:has(> .flex-col > .lg-node-content > .image-preview) > :is(img.min-h-55, .mt-1.text-center, .size-full.text-center) {
   display: none;
+}
+${THUMBS} {
+  position: relative;
+  flex-wrap: nowrap;
+  justify-content: safe center;
+  gap: 3px;
+  padding-top: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+${THUMB} {
+  flex: 0 1 var(--omn-thumb-size);
+  min-width: calc(var(--omn-thumb-size) / 2);
+  width: var(--omn-thumb-size);
+  height: var(--omn-thumb-size);
+  border-radius: 3px;
+  background: var(--omn-thumb) center / cover no-repeat, var(--omn-widget-bg);
+  opacity: 0.55;
+  transition: opacity 0.12s;
+}
+${THUMB}:hover {
+  opacity: 0.85;
+}
+${THUMB}[aria-current="true"] {
+  flex-shrink: 0;
+  opacity: 1;
+  box-shadow: inset 0 0 0 2px var(--omn-accent);
+}
+${NAV} {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  visibility: hidden;
+}
+${NAV}::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  mask: ${PREV_ICON} center / contain no-repeat;
+}
+${NAV}[data-om-nav="prev"] {
+  left: 6px;
+}
+${NAV}[data-om-nav="next"] {
+  right: 6px;
+}
+${NAV}[data-om-nav="next"]::before {
+  mask-image: ${NEXT_ICON};
+}
+${ROOT} :where(${PANEL}:is(:hover, :focus-within)) > .om-image-nav {
+  visibility: visible;
+}
+${NAV}:hover {
+  background: rgba(0, 0, 0, 0.75);
 }
 ${NODE} ${BODY} > .mt-auto {
   position: absolute;

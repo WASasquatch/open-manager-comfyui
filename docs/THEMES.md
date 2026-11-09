@@ -272,6 +272,7 @@ pixels.
 | `title-weight` | 100 to 900, `normal`, `bold` | 400 |
 | `font` | a font family list | `NODE_FONT` |
 | `dot-size` | 4 to 16 | 8 |
+| `thumb-size` | 16 to 96 | 32, the thumbnails under a shown image |
 | `outline-width` | 0 to 6 | 2, the selection outline |
 | `outline-gap` | 0 to 8 | 2 |
 | `shadow-x`, `shadow-y` | -20 to 20 | 2 |
@@ -328,6 +329,8 @@ digits and hyphens, starting with a letter.
 | `%tabs` | the advanced inputs, Enter subgraph and error icons |
 | `%outline` | the selection and running outline |
 | `%resize` | the corner handles |
+| `%thumbs`, `%thumb` | the thumbnail strip under a shown image, one thumbnail. The shown image's carries `aria-current='true'` |
+| `%image-nav` | the previous and next arrows on a shown image, `data-om-nav='prev'` and `'next'` |
 
 Every node carries `data-om-type`, its class, and `data-om-category`, its category path, so
 `%node[data-om-type='KSampler']` and `%node[data-om-category^='loaders']` select by node.

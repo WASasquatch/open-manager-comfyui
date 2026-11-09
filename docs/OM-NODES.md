@@ -58,6 +58,23 @@ command does the same.
 A node added while OM Nodes is on fits its rows at once, so hidden advanced inputs leave no
 empty space. Nodes loaded from a workflow or pasted keep their saved size.
 
+## Images
+
+A node with several images shows them as a grid, as Nodes 2.0 does. Clicking one shows it
+large, with a strip of thumbnails under it in place of Nodes 2.0's dots.
+
+| | |
+|---|---|
+| A thumbnail | Shows that image |
+| The arrows on the image's left and right edges | The previous and next image. They show while the pointer is over the image |
+| Left and Right | The previous and next image in the gallery you last clicked, otherwise on every selected node |
+| The grid button | Back to the grid |
+
+A click anywhere in a gallery gives it the keyboard. While it has it, the arrow keys belong to
+the gallery alone: Up and Down do nothing, and arrow shortcuts from other packs, such as
+Easy-Use's jump to the nearest node, wait. The last image leads to the first. Thumbnails narrow to half their width before the strip
+scrolls, and the strip keeps the shown image's thumbnail in view.
+
 ## Themes
 
 Themes style OM Nodes through `extras.om`: tokens, named parts and scoped CSS. See
