@@ -334,6 +334,7 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     node.appendChild(dot);
     if (hint) node.title = hint;
     chips.appendChild(node);
+    return node;
   };
   statusChip("publisher", pack.publisher_name || pack.publisher, pack.publisher_status,
     pack.publisher_name && pack.publisher_name !== pack.publisher
@@ -343,7 +344,9 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
   const installedReview = reviewOf(
     versions.find((one) => one.version === pack.installed_version)?.status);
   if (installedReview) {
-    statusChip("installed", `${pack.installed_version} ${reviewWord(installedReview)}`, installedReview);
+    linkReport(
+      statusChip("installed", `${pack.installed_version} ${reviewWord(installedReview)}`, installedReview),
+      installedReview, pack.id, pack.installed_version);
   }
   if (pack.license) {
     const node = el("span", "om-chip");
@@ -417,7 +420,10 @@ function buildPackBody(dialog, { pack, resolution, versions }) {
     row.appendChild(el("div", "om-why", (entry.created_at || "").slice(0, 10)));
 
     const worst = entry.assessment?.findings?.[0];
-    row.appendChild(el("div", "om-why", worst ? worst.title : "no findings"));
+    const why = el("div", "om-why");
+    why.appendChild(linkReport(el("span", null, worst ? worst.title : "no findings"),
+      entry.status, pack.id, entry.version));
+    row.appendChild(why);
 
     if (entry.installable === false) {
       const blocked = el("span", "om-blocked", "Blocked");

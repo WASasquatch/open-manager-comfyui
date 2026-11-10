@@ -74,7 +74,7 @@ Open Manager → Windows → Taskbar along the bottom** on.
 | ComfyUI Settings | Every ComfyUI setting, in a window you can leave open | Start menu, ComfyUI |
 | Console | ComfyUI's console output, live, in colour | Start menu, ComfyUI |
 | Scratch | A pad for short notes | Start menu |
-| Registry Report | What the Comfy Registry says about a flagged or banned pack version, in plain words | Start menu, or a click on a flagged or banned label |
+| Registry Report | What the Comfy Registry says about a pack version, in plain words | Start menu, or a click on a version's status label or summary |
 | Attack of the Nodes | A game | Start menu, Games |
 | Image Viewer | Zoom, fit, rotate, crop, save | opened by what needs it |
 | Video Player | Video and audio | opened by what needs it |
@@ -102,8 +102,9 @@ Favourites, each folder and each tag are listed beside the categories, and `#tag
 narrows to a tag. Right-click a folder to rename or delete it. The folders are ComfyUI's own
 favourites, shared with its Node Library.
 
-**Registry Report** opens from the flagged or banned label on a pack's versions, its install
-dialog and the Installed list, or from the Start menu. There, **Installed** lists every pack in
+**Registry Report** opens from the status label or summary of any version on a pack's page, the
+installed chip in its header, the status label in its install dialog, the flagged, banned or
+pending label in the Installed list, or from the Start menu. There, **Installed** lists every pack in
 each `custom_nodes` folder and reports on the version installed, and the box takes a registry id, a
 pyproject name, a folder name or a GitHub repository as `owner/repo` or a URL. It reads the registry's own
 record for the version: a one-line verdict, each reviewer and registry note from first to last

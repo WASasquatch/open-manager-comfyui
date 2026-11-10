@@ -2,7 +2,7 @@ import { floatingPanel } from "./windows.mjs";
 
 const PROGRAM = "registry-report";
 
-const REPORTED = new Set(["flagged", "banned"]);
+const REPORTED = new Set(["active", "pending", "flagged", "banned", "deleted"]);
 
 function reportable(status) {
   return REPORTED.has(String(status || "").toLowerCase());

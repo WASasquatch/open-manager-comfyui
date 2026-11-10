@@ -20,6 +20,7 @@ from aiohttp import web
 
 from . import (
     assets as asset_files,
+    assetscan,
     catalog,
     compat,
     deps,
@@ -2546,6 +2547,22 @@ def register_routes() -> None:
     async def generation_switch(_request: web.Request, body: dict) -> web.Response:
         """Turn writing generation time onto assets on or off."""
         return web.json_response({"ok": True, **generation.configure(_flag(body.get("on")))})
+
+    assetscan.install()
+
+    @PromptServer.instance.routes.get(f"{PREFIX}/asset-scans")
+    async def asset_scans_state(_request: web.Request) -> web.Response:
+        """Where ComfyUI's asset scans run."""
+        return web.json_response({"ok": True, **assetscan.state()})
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/asset-scans")
+    @_json_body
+    async def asset_scans_switch(_request: web.Request, body: dict) -> web.Response:
+        """Choose where ComfyUI's asset scans run."""
+        try:
+            return web.json_response({"ok": True, **assetscan.configure(body.get("mode"))})
+        except ValueError as error:
+            return web.json_response({"ok": False, "reason": str(error)}, status=400)
 
     media.install()
 

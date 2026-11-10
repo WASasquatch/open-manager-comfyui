@@ -258,6 +258,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Media Assets keep generation time | On | Runs write their generation time, node and subfolder onto their assets |
 | Media Assets open workflows from files | On | A job no longer in history opens the workflow saved in its file |
 | Media Assets show files found by scans | On | Files an asset scan adds appear in Media Assets |
+| Asset scans | In their own process | Where ComfyUI catalogues models, input and output. *Alongside the server* is ComfyUI's own: a long scan, such as the first one on a large library, slows the server until it ends, the first page load most. *Before the server starts* holds ComfyUI's startup until the startup scan ends. *In their own process* runs every scan in a hidden process at below-normal priority, which quits after five idle minutes. Scans stay in ComfyUI's process where that process would not see the same folders and database, such as when a node pack changes how model files are listed |
 | Media Assets delete files | Off | Deleting an output also deletes its file. Needs `OPEN_MANAGER_FILE_WRITES=1` |
 | Ask before downloading template media | On | Opening a template offers the media files it is missing, with Download and Ignore, in place of ComfyUI downloading them into input. Files already in input or temp are used, not fetched |
 | Template media downloads | Ask | Always leaves ComfyUI to download a template's media as it opens. Ask turns on the patch above. Never fetches nothing; the Download Manager lists what is missing |

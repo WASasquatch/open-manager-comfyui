@@ -930,7 +930,7 @@ body.om-aero .om-float:not(.om-float-active) .om-float-tools {
 body.om-aero .om-float-tools::after {
   background: rgba(0, 0, 0, calc(var(--om-aero-dark, .18) + .10)); }
 .om-float.om-float-over { z-index: ${MODAL_Z + 2} !important; }
-.om-report-link { cursor: pointer; }
+.om-report-link { cursor: pointer; user-select: none; }
 .om-report-link:hover, .om-report-link:focus-visible { filter: brightness(1.25);
   text-decoration: underline; outline: none; }
 .om-float { position: fixed; display: flex; flex-direction: column;
