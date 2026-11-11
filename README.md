@@ -27,15 +27,17 @@ The whole workspace at once: [one screenshot](https://raw.githubusercontent.com/
 
 ## Install
 
-Two ways. Only the first gives you ComfyUI's **Extensions** button: ComfyUI draws it when it
-finds a manager package in its own Python at startup, before any custom node loads.
+Two ways on your own machine, and a
+[template for renting a GPU on Vast.ai](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager)
+with Open Manager already in place. All but the custom node give you ComfyUI's **Extensions** button: ComfyUI draws it when it finds a manager package in
+its own Python at startup, before any custom node loads.
 
-| | As the manager | As a custom node |
-| --- | --- | --- |
-| Installed with | pip, into the Python ComfyUI runs on | `git clone` into `custom_nodes`, or from ComfyUI-Manager or the Comfy Registry |
-| Opens from | **Extensions**, and the **Discovery** sidebar tab | The **Discovery** sidebar tab |
-| ComfyUI-Manager | Replaced. A `ComfyUI-Manager` folder in `custom_nodes` is skipped | Left as it is |
-| Launch flag | `--enable-manager` | None |
+| | As the manager | As a custom node | [On Vast.ai](#on-vastai) |
+| --- | --- | --- | --- |
+| Installed with | pip, into the Python ComfyUI runs on | `git clone` into `custom_nodes`, or from ComfyUI-Manager or the Comfy Registry | Nothing: it is in the template's image |
+| Opens from | **Extensions**, and the **Discovery** sidebar tab | The **Discovery** sidebar tab | **Extensions**, and the **Discovery** sidebar tab |
+| ComfyUI-Manager | Replaced. A `ComfyUI-Manager` folder in `custom_nodes` is skipped | Left as it is | Removed, and kept out |
+| Launch flag | `--enable-manager` | None | Set by the image |
 
 ### As the manager
 
@@ -91,8 +93,17 @@ Restart ComfyUI and open the **Discovery** tab in the sidebar. The console shows
 
 ### On Vast.ai
 
-An image of Vast's own ComfyUI with Open Manager as its manager, ComfyUI-Manager kept out, and
-Desktop Mode and file writes on. The template and how to use it: [VASTAI.md](VASTAI.md).
+For ComfyUI on a rented GPU. The template runs Vast's own ComfyUI image with Open Manager as its
+manager, and Desktop Mode, the file browser and the resource monitor switched on. No install and
+no command line:
+
+1. Open the [ComfyUI with Open Manager](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager)
+   template on Vast.ai.
+2. Pick a GPU and a disk size, and rent it.
+3. Click **Open** on the instance, then **ComfyUI**.
+
+Open Manager updates itself to its newest release each time ComfyUI starts. Keys, switches,
+volumes and the rest: [VASTAI.md](VASTAI.md).
 
 ### Updating and logs
 

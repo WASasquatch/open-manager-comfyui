@@ -31,13 +31,24 @@ they have been built.
 
 ## Making the template
 
-A template is what you pick on Vast when you rent a machine. If someone has shared this one
-with you, open their link and go to [Starting an instance](#starting-an-instance).
+A template is what you pick on Vast when you rent a machine. This one is published as
+[ComfyUI with Open Manager](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager):
+open it and go to [Starting an instance](#starting-an-instance). Make your own only to change
+it.
 
 **Quick way.** On [cloud.vast.ai/templates](https://cloud.vast.ai/templates), find Vast's own
-**ComfyUI** template and click its pencil icon. Change **Image Path:Tag** to
-`ghcr.io/wasasquatch/open-manager-vastai:latest`, rename it, and save it with **Create**, which
-puts it in **My Templates**. Every other field already matches.
+**ComfyUI** template and click its pencil icon. Then:
+
+1. Rename it, and set **Image Path:Tag** to `ghcr.io/wasasquatch/open-manager-vastai:latest`.
+2. In **Extra Filters**, remove `arm64`: this image is for x86 machines only. Vast's template
+   asks for a CUDA 13.2 driver; with `latest`, change `13.2` to `12.9` there to allow more
+   machines.
+3. Raise **Container disk size** from Vast's 32 GB to 100 GB: disk cannot be changed after an
+   instance is created, and video models are large.
+4. Save it with **Create**, which puts it in **My Templates**.
+
+Everything else stays as Vast set it. [`vastai/README.md`](vastai/README.md) is written for the
+template's **ReadMe** tab.
 
 **From a blank template.** **+ New** on the same page, then:
 
@@ -46,8 +57,9 @@ puts it in **My Templates**. Every other field already matches.
 | Image Path:Tag | `ghcr.io/wasasquatch/open-manager-vastai:latest` |
 | Launch mode | **Jupyter-python notebook + SSH** |
 | On-start Script | `entrypoint.sh` |
+| Extra Filters | `cpu_arch=amd64 compute_cap>=750` |
 | Ports | `1111`, `8080`, `8188`, `8288`, `8384` |
-| Disk Space | 40 GB at least. Models need more |
+| Disk Space | 100 GB. It cannot be changed after an instance is created, and a video model with its text encoder takes 30 GB or more |
 
 Environment variables, one row each:
 
