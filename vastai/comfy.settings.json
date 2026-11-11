@@ -1,0 +1,6 @@
+{
+    "openManager.desktop": true,
+    "openManager.taskbar": true,
+    "openManager.fileBrowser": true,
+    "openManager.monitor": true
+}

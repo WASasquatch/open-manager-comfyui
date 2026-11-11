@@ -9,7 +9,8 @@ notes and programs. Off by default: launch ComfyUI with `OPEN_MANAGER_ENABLE_DES
 ![The desktop](desktop.png)
 
 Built for a ComfyUI you reach over the network: Vast.ai, RunPod, a LAN box. Files, notes and
-outputs without a second tool, a second port or a second login.
+outputs without a second tool, a second port or a second login. On Vast.ai,
+[VASTAI.md](../VASTAI.md) has an image with all of it switched on.
 
 ---
 

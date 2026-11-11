@@ -1,0 +1,114 @@
+name: Vast.ai image
+
+on:
+  workflow_dispatch:
+    inputs:
+      comfyui:
+        description: "ComfyUI release in vastai/comfy, such as v0.44.0. Empty for the newest"
+        required: false
+        default: ""
+      rebuild:
+        description: "Build even when this ComfyUI and Open Manager pair is already published"
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: ["Publish to PyPI"]
+    types: [completed]
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: vastai-image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/wasasquatch/open-manager-vastai
+
+jobs:
+  image:
+    name: Image for CUDA ${{ matrix.cuda }}
+    runs-on: ubuntu-latest
+    if: >-
+      github.repository_owner == 'WASasquatch'
+      && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda: ["12.9", "13.2"]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Which ComfyUI and Open Manager
+        id: versions
+        env:
+          CUDA: ${{ matrix.cuda }}
+          COMFYUI: ${{ inputs.comfyui }}
+        run: |
+          set -euo pipefail
+          suffix="-cuda-${CUDA}-py312"
+          if [[ -n "${COMFYUI}" ]]; then
+            [[ "${COMFYUI}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::not a ComfyUI release: ${COMFYUI}"; exit 1; }
+            base="${COMFYUI}${suffix}"
+          else
+            base="$(curl -fsSL "https://hub.docker.com/v2/repositories/vastai/comfy/tags?page_size=100&ordering=last_updated" \
+              | jq -r '.results[].name' | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+${suffix}$" | sort -V | tail -n 1)"
+          fi
+          curl -fsS -o /dev/null "https://hub.docker.com/v2/repositories/vastai/comfy/tags/${base}"
+          manager="$(curl -fsSL https://pypi.org/pypi/comfyui-open-manager/json | jq -r .info.version)"
+          [[ "${manager}" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo "::error::unexpected version from PyPI: ${manager}"; exit 1; }
+          {
+            echo "base=vastai/comfy:${base}"
+            echo "comfyui=${base}"
+            echo "pinned=${base}-om${manager}"
+          } >> "$GITHUB_OUTPUT"
+          echo "vastai/comfy:${base} with Open Manager ${manager}"
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Already published?
+        id: published
+        env:
+          PINNED: ${{ steps.versions.outputs.pinned }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          if [[ "${REBUILD}" != "true" ]] && docker manifest inspect "${IMAGE}:${PINNED}" > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${IMAGE}:${PINNED} is already published"
+          fi
+
+      - name: Free disk space
+        if: steps.published.outputs.skip != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/share/swift /usr/local/.ghcup "${AGENT_TOOLSDIRECTORY}"
+          docker system prune -af
+          df -h /
+
+      - name: Set up Docker Buildx
+        if: steps.published.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        if: steps.published.outputs.skip != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: vastai
+          platforms: linux/amd64
+          build-args: BASE_IMAGE=${{ steps.versions.outputs.base }}
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.versions.outputs.pinned }}
+            ${{ env.IMAGE }}:${{ steps.versions.outputs.comfyui }}
+            ${{ env.IMAGE }}:latest-cuda-${{ matrix.cuda }}
+            ${{ matrix.cuda == '12.9' && format('{0}:latest', env.IMAGE) || '' }}

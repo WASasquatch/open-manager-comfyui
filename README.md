@@ -89,6 +89,11 @@ git clone https://github.com/WASasquatch/open-manager-comfyui.git
 Restart ComfyUI and open the **Discovery** tab in the sidebar. The console shows
 `routes registered below /open_manager/v1/api`.
 
+### On Vast.ai
+
+An image of Vast's own ComfyUI with Open Manager as its manager, ComfyUI-Manager kept out, and
+Desktop Mode and file writes on. The template and how to use it: [VASTAI.md](VASTAI.md).
+
 ### Updating and logs
 
 | | |
@@ -159,7 +164,8 @@ Every panel opens as a movable window, or centred on the page. One setting each.
 
 ### Remote installs
 
-Desktop Mode is served by ComfyUI's own server: no second port, no second login.
+Desktop Mode is served by ComfyUI's own server: no second port, no second login. On Vast.ai,
+[VASTAI.md](VASTAI.md) has an image with it switched on.
 
 ### Server switches
 
