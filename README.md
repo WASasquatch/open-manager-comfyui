@@ -319,6 +319,7 @@ changed, or already fixed, stands down and says so in the browser console.
 | Node search draws only the rows in view | On | Results build as they scroll into view |
 | Node search waits for a pause in typing | On | Slow searches run once typing pauses |
 | Use Everywhere finds nodes quickly | On | With Use Everywhere 8 on Nodes 2.0 or OM Nodes, its search of the page for every node on every frame is answered from the nodes already found, which takes back most of the frame rate it costs on large workflows. Stands down when Use Everywhere stops searching. Open Manager also says once, per Use Everywhere version, that it slows Nodes 2.0 |
+| Undo steps back through every change | On | Undo and redo step through every change with Use Everywhere installed. Use Everywhere, and any pack that wraps ComfyUI's graph loader without passing on what it returns, makes ComfyUI take each undo as failed, so Ctrl+Z stopped after one step |
 
 ### Link styles
 
