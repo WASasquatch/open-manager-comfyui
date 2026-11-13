@@ -98,7 +98,9 @@ manager, and Desktop Mode, the file browser and the resource monitor switched on
 no command line:
 
 1. Open the [ComfyUI with Open Manager](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager)
-   template on Vast.ai.
+   template on Vast.ai, or
+   [ComfyUI with Open Manager CUDA 13](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager%20CUDA%2013)
+   for machines with a CUDA 13.2 driver.
 2. Pick a GPU and a disk size, and rent it.
 3. Click **Open** on the instance, then **ComfyUI**.
 

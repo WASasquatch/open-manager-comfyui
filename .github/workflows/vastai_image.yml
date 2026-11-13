@@ -29,12 +29,48 @@ env:
   IMAGE: ghcr.io/wasasquatch/open-manager-vastai
 
 jobs:
-  image:
-    name: Image for CUDA ${{ matrix.cuda }}
+  manager:
+    name: Open Manager release
     runs-on: ubuntu-latest
     if: >-
       github.repository_owner == 'WASasquatch'
       && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Check out the published commit
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Which Open Manager
+        id: release
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT}" == "workflow_run" ]]; then
+            manager="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+            for try in $(seq 1 30); do
+              curl -fsS -o /dev/null "https://pypi.org/pypi/comfyui-open-manager/${manager}/json" \
+                && curl -fsSL -H "Accept: application/vnd.pypi.simple.v1+json" "https://pypi.org/simple/comfyui-open-manager/" \
+                  | jq -e --arg v "${manager}" '.versions | index($v)' > /dev/null \
+                && break
+              [[ "${try}" -lt 30 ]] || { echo "::error::PyPI does not list Open Manager ${manager}"; exit 1; }
+              sleep 20
+            done
+          else
+            manager="$(curl -fsSL https://pypi.org/pypi/comfyui-open-manager/json | jq -r .info.version)"
+          fi
+          [[ "${manager}" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo "::error::unexpected Open Manager version: ${manager}"; exit 1; }
+          echo "version=${manager}" >> "$GITHUB_OUTPUT"
+          echo "Open Manager ${manager}"
+
+  image:
+    name: Image for CUDA ${{ matrix.cuda }}
+    needs: manager
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -43,11 +79,12 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Which ComfyUI and Open Manager
+      - name: Which ComfyUI
         id: versions
         env:
           CUDA: ${{ matrix.cuda }}
           COMFYUI: ${{ inputs.comfyui }}
+          MANAGER: ${{ needs.manager.outputs.version }}
         run: |
           set -euo pipefail
           suffix="-cuda-${CUDA}-py312"
@@ -59,14 +96,12 @@ jobs:
               | jq -r '.results[].name' | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+${suffix}$" | sort -V | tail -n 1)"
           fi
           curl -fsS -o /dev/null "https://hub.docker.com/v2/repositories/vastai/comfy/tags/${base}"
-          manager="$(curl -fsSL https://pypi.org/pypi/comfyui-open-manager/json | jq -r .info.version)"
-          [[ "${manager}" =~ ^[0-9A-Za-z.+-]+$ ]] || { echo "::error::unexpected version from PyPI: ${manager}"; exit 1; }
           {
             echo "base=vastai/comfy:${base}"
             echo "comfyui=${base}"
-            echo "pinned=${base}-om${manager}"
+            echo "pinned=${base}-om${MANAGER}"
           } >> "$GITHUB_OUTPUT"
-          echo "vastai/comfy:${base} with Open Manager ${manager}"
+          echo "vastai/comfy:${base} with Open Manager ${MANAGER}"
 
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
@@ -104,7 +139,9 @@ jobs:
         with:
           context: vastai
           platforms: linux/amd64
-          build-args: BASE_IMAGE=${{ steps.versions.outputs.base }}
+          build-args: |
+            BASE_IMAGE=${{ steps.versions.outputs.base }}
+            OPEN_MANAGER_VERSION=${{ needs.manager.outputs.version }}
           push: true
           provenance: false
           tags: |

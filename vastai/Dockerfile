@@ -2,6 +2,8 @@ ARG BASE_IMAGE=vastai/comfy:v0.44.0-cuda-12.9-py312
 
 FROM ${BASE_IMAGE}
 
+ARG OPEN_MANAGER_VERSION=
+
 LABEL org.opencontainers.image.source="https://github.com/WASasquatch/open-manager-comfyui"
 LABEL org.opencontainers.image.description="Vast.ai's ComfyUI image with Open Manager in place of ComfyUI-Manager"
 LABEL org.opencontainers.image.documentation="https://github.com/WASasquatch/open-manager-comfyui/blob/main/VASTAI.md"
@@ -18,8 +20,16 @@ COPY comfy.settings.json /opt/workspace-internal/ComfyUI/user/default/comfy.sett
 
 RUN set -euo pipefail && \
     . /venv/main/bin/activate && \
+    if [[ -n "${OPEN_MANAGER_VERSION}" ]]; then \
+        echo "comfyui-open-manager==${OPEN_MANAGER_VERSION}" > /tmp/om-pin.txt && \
+        export UV_CONSTRAINT="${UV_CONSTRAINT} /tmp/om-pin.txt"; \
+    fi && \
     uv pip install comfyui-open-manager psutil nvidia-ml-py && \
     python /opt/open-manager/keep.py && \
+    if [[ -n "${OPEN_MANAGER_VERSION}" ]]; then \
+        [[ "$(python -c 'import importlib.metadata as m; print(m.version("comfyui-open-manager"))')" == "${OPEN_MANAGER_VERSION}" ]] && \
+        rm /tmp/om-pin.txt; \
+    fi && \
     rm -rf /opt/workspace-internal/ComfyUI/custom_nodes/ComfyUI-Manager && \
     sed -i '/^COMFYUI_ARGS=\${COMFYUI_ARGS:-/a . /opt/open-manager/launch.sh' /opt/supervisor-scripts/comfyui.sh && \
     grep -qx '\. /opt/open-manager/launch\.sh' /opt/supervisor-scripts/comfyui.sh && \

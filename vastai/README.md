@@ -1,6 +1,6 @@
 # ComfyUI with Open Manager
 
-> **[Create an Instance](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager)**
+> **Create an Instance:** [CUDA 12.9](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager) or [CUDA 13](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager%20CUDA%2013)
 
 **ComfyUI for AI image and video generation, with [Open Manager](https://github.com/WASasquatch/open-manager-comfyui) in place of ComfyUI-Manager.** Install custom nodes from the Comfy Registry or GitHub, download models from Hugging Face, browse and manage your files on a desktop in the browser, and watch your GPU's VRAM, all from inside ComfyUI.
 
@@ -132,7 +132,16 @@ On a running instance, put a variable in `/workspace/.env` and run `supervisorct
 | FLUX.1 Dev | 16 GB | 24 GB |
 | Video generation | 24 GB | 48 GB or more |
 
-Images are tagged with the CUDA version they were built for. `latest` is CUDA 12.9 and runs on any CUDA 12 or 13 driver. `latest-cuda-13.2` needs a CUDA 13 driver. Both are for x86 (amd64) machines.
+### CUDA 12 or 13
+
+Two templates, the same apart from CUDA:
+
+| Template | CUDA | Rents machines with |
+|---|---|---|
+| **ComfyUI with Open Manager** | 12.9 | A driver for CUDA 12.9 or later |
+| **ComfyUI with Open Manager CUDA 13** | 13.2, with PyTorch built for CUDA 13 | A driver for CUDA 13.2 or later |
+
+Both are for x86 (amd64) machines.
 
 ---
 

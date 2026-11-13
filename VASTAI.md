@@ -31,18 +31,25 @@ they have been built.
 
 ## Making the template
 
-A template is what you pick on Vast when you rent a machine. This one is published as
-[ComfyUI with Open Manager](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager):
-open it and go to [Starting an instance](#starting-an-instance). Make your own only to change
+A template is what you pick on Vast when you rent a machine. Two are published, the same apart
+from CUDA:
+
+| Template | Image | Rents machines with |
+|---|---|---|
+| [ComfyUI with Open Manager](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager) | `latest` | A driver for CUDA 12.9 or later |
+| [ComfyUI with Open Manager CUDA 13](https://cloud.vast.ai/?ref_id=285284&creator_id=285284&name=ComfyUI%20with%20Open%20Manager%20CUDA%2013) | `latest-cuda-13.2` | A driver for CUDA 13.2 or later |
+
+Open one and go to [Starting an instance](#starting-an-instance). Make your own only to change
 it.
 
 **Quick way.** On [cloud.vast.ai/templates](https://cloud.vast.ai/templates), find Vast's own
 **ComfyUI** template and click its pencil icon. Then:
 
-1. Rename it, and set **Image Path:Tag** to `ghcr.io/wasasquatch/open-manager-vastai:latest`.
+1. Rename it, and set **Image Path:Tag** to `ghcr.io/wasasquatch/open-manager-vastai:latest`,
+   or `ghcr.io/wasasquatch/open-manager-vastai:latest-cuda-13.2`.
 2. In **Extra Filters**, remove `arm64`: this image is for x86 machines only. Vast's template
-   asks for a CUDA 13.2 driver; with `latest`, change `13.2` to `12.9` there to allow more
-   machines.
+   asks for a CUDA 13.2 driver: keep it for `latest-cuda-13.2`, and with `latest` change
+   `13.2` to `12.9` to allow more machines.
 3. Raise **Container disk size** from Vast's 32 GB to 100 GB: disk cannot be changed after an
    instance is created, and video models are large.
 4. Save it with **Create**, which puts it in **My Templates**.
@@ -54,10 +61,10 @@ template's **ReadMe** tab.
 
 | Field | Value |
 |---|---|
-| Image Path:Tag | `ghcr.io/wasasquatch/open-manager-vastai:latest` |
+| Image Path:Tag | `ghcr.io/wasasquatch/open-manager-vastai:latest`, or `:latest-cuda-13.2` |
 | Launch mode | **Jupyter-python notebook + SSH** |
 | On-start Script | `entrypoint.sh` |
-| Extra Filters | `cpu_arch=amd64 compute_cap>=750` |
+| Extra Filters | `cpu_arch=amd64 compute_cap>=750 cuda_max_good>=12.9`, with `cuda_max_good>=13.2` for `latest-cuda-13.2` |
 | Ports | `1111`, `8080`, `8188`, `8288`, `8384` |
 | Disk Space | 100 GB. It cannot be changed after an instance is created, and a video model with its text encoder takes 30 GB or more |
 
@@ -87,8 +94,7 @@ can still be used by anyone you send its link to. Keep keys out of a template yo
 ## Starting an instance
 
 1. Pick the template, then a machine. Any NVIDIA card with 8 GB or more runs ComfyUI; what you
-   load decides how much you need. For `latest-cuda-13.2`, filter the offers to a CUDA 13
-   driver.
+   load decides how much you need.
 2. Set the disk size, and **Rent**.
 3. When the instance shows **Open**, click it. That is the Instance Portal. Its **ComfyUI**
    button opens ComfyUI.
@@ -205,7 +211,9 @@ For maintainers. The files are in [`vastai/`](vastai/):
 variants for amd64 and pushes them to the GitHub Container Registry. It runs every day, after
 each PyPI publish, and from **Actions → Vast.ai image → Run workflow**, where a ComfyUI release
 such as `v0.44.0` can be named. A ComfyUI and Open Manager pair already published is skipped
-unless **rebuild** is ticked.
+unless **rebuild** is ticked. Both variants get the same Open Manager release: after a PyPI
+publish, the one just published, once PyPI lists it, and the build fails if the image ends up
+with any other.
 
 The first push creates the package as private. Make it public once, in the package's
 **Package settings → Change visibility**, or Vast cannot pull it.
