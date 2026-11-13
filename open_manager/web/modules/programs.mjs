@@ -9,7 +9,11 @@ import { dlPost, bytesText } from "./net.mjs";
 import { addNodeAt, canvasCentre, graphNodes, nodeDragFrom, nodeCard } from "./node-drag.mjs";
 import { TASK_GROUP_NAMES } from "./taskbar.mjs";
 import { deskProgramsOff, hideDesk } from "./desktop.mjs";
-import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow } from "./workflows.mjs";
+import { loadWorkflow, openWorkflow, activePath, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, openWorkflowDocuments } from "./workflows.mjs";
+import { typeOwner } from "./in-use.mjs";
+import { remindRestart, loadInstalledIndex } from "./installs.mjs";
+import { openPack } from "./packs.mjs";
+import { refreshInstalledIfActive } from "./discovery.mjs";
 import { parseNodePath, locateNode, revealNode, nextFrame } from "./node-focus.mjs";
 import { runSnapshot } from "./snapshot-store.mjs";
 import { sessionReady } from "./session.mjs";
@@ -784,6 +788,49 @@ function programLogs() {
   };
 }
 
+async function packsGet(path) {
+  const answer = await api.fetchApi(`${API}${path}`);
+  let data = null;
+  try {
+    data = await answer.json();
+  } catch {
+    data = null;
+  }
+  if (!answer.ok || !data) throw new Error(data?.reason || `the server answered ${answer.status}`);
+  return data;
+}
+
+async function packsPost(path, body) {
+  try {
+    return (await dlPost(path, body)) || { ok: false, reason: "the server did not answer" };
+  } catch (error) {
+    return { ok: false, reason: error?.message || "the server did not answer" };
+  }
+}
+
+function programPacks() {
+  return {
+    installed: async () => (await packsGet("/installed")).packs || [],
+    audit: () => packsPost("/node-audit", { open: openWorkflowDocuments() }),
+    startup: () => packsGet("/startup").catch(() => ({ ok: false, packs: [], failed: [] })),
+    types: () => Object.keys(window.LiteGraph?.registered_node_types || {}),
+    owner: (type) => typeOwner(String(type || "")),
+    resolve: (classes, hints = {}) => packsPost("/resolve-nodes", {
+      classes: [...(classes || [])].map(String).slice(0, 4000),
+      hints: hints && typeof hints === "object" ? hints : {},
+    }),
+    gates: async () => ({ ...(await loadGates()) }),
+    uninstall: (dir) => packsPost("/uninstall", { id: String(dir || "") }),
+    switchOff: (dir) => packsPost("/pack/toggle", { name: String(dir || ""), off: true }),
+    restart: () => remindRestart(),
+    refresh: async () => {
+      await loadInstalledIndex();
+      refreshInstalledIfActive();
+    },
+    open: (packId) => (packId ? openPack(String(packId)) : null),
+  };
+}
+
 async function runProgramById(id, carried) {
   const row = programRows.find((one) => one.key === id);
   if (!row) {
@@ -807,9 +854,10 @@ function programApi(entry, view = "main") {
     toast: (text, options) => toast(String(text || "").slice(0, 300), options),
     notify: (title, text) => notify(String(title || entry.name).slice(0, 80),
                                     String(text || "").slice(0, 600)),
-    confirm: (title, text, label) => confirmAction(String(title || "").slice(0, 80),
-                                                   String(text || "").slice(0, 600),
-                                                   String(label || "Yes").slice(0, 24), false),
+    confirm: (title, text, label, danger = false) => confirmAction(String(title || "").slice(0, 80),
+                                                                   String(text || "").slice(0, 600),
+                                                                   String(label || "Yes").slice(0, 24),
+                                                                   danger === true),
     ask: (title, value, label) => askText(String(title || "").slice(0, 80), value, label),
     menu: (anchor, items) => openRowMenu(anchor, { items, align: "left" }),
     tip: (host, say) => liveTip(host, say),
@@ -838,6 +886,7 @@ function programApi(entry, view = "main") {
     timing: programTiming(),
     logs: programLogs(),
     nodeMarks: programNodeMarks(),
+    packs: programPacks(),
   };
 }
 

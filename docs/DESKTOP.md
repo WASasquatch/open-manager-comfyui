@@ -76,6 +76,7 @@ Open Manager → Windows → Taskbar along the bottom** on.
 | Console | ComfyUI's console output, live, in colour | Start menu, ComfyUI |
 | Scratch | A pad for short notes | Start menu |
 | Registry Report | What the Comfy Registry says about a pack version, in plain words | Start menu, or a click on a version's status label or summary |
+| Node Audit | Which packs and nodes your workflows use and how often, what is missing, and the packs none use, to switch off or uninstall | Start menu |
 | Attack of the Nodes | A game | Start menu, Games |
 | Image Viewer | Zoom, fit, rotate, crop, save | opened by what needs it |
 | Video Player | Video and audio | opened by what needs it |
@@ -112,6 +113,26 @@ record for the version: a one-line verdict, each reviewer and registry note from
 with its category in plain words, and the automated scan grouped by what each match means, with
 the file, line and surrounding code of every match. **Raw** shows the record as the registry
 sent it.
+
+**Node Audit** reads every saved workflow, for every ComfyUI user, and the workflows open in
+tabs, unsaved changes included. Nodes inside subgraphs and group nodes count; a workflow saved in
+API format counts too. Tiles at the top lead to their tabs.
+
+| Tab | Shows |
+|---|---|
+| Packs | Each installed pack: how many of its nodes the workflows use, in how many workflows, how many are placed, and when the latest of those workflows was saved. A row opens to its nodes, each with the workflows it is in, and the nodes no workflow uses |
+| Nodes | Every node type the workflows hold, by the pack it comes from, core and missing ones under their own filters |
+| Missing | Node types not installed, grouped by the pack the workflows or the community node list name for them: not installed, switched off, failed to load, or newer than this ComfyUI. **Open to install** opens the pack's page |
+| Workflows | Each workflow with its node, pack and missing counts. A row opens to its packs and missing nodes, and **Open** loads one of your own; one in API format opens as a new tab |
+| Remove | Installed packs no workflow uses, in three lists: packs whose nodes appear in none, packs switched off or failing to load that no workflow was matched to, and packs that register no nodes |
+
+Each list on **Remove** has its own **Select all**. **Switch off** renames the picked packs to
+end in `.disabled`; **Uninstall** deletes them, saying first which are git clones. Both act only
+on packs still listed, so one that matching ties to a workflow drops out of the selection. Both
+run one pack at a time, report any that fail, and offer the restart. Open Manager is never listed.
+A pack's own row on **Packs** has the same two buttons, and says first how many workflows use
+it. A pack that changes only the interface registers no nodes, so its use cannot show in a
+workflow.
 
 **Video Player** plays what it opens and stops at the end. **Loop** or **Play next** carries
 on instead, one at a time, and is remembered. Left and right arrows change file, except on the

@@ -150,6 +150,7 @@ Without one, a pack page shows its star count only.
 | Workflow gaps | Missing nodes, and which pack won a duplicate name |
 | Import failures | Each failed pack's error from ComfyUI's log, its traceback a click away |
 | Workflow packs | Each pack the open workflow uses, with node ids to copy |
+| Node Audit | Every saved workflow read for the packs and nodes it uses and how often, the packs missing nodes come from, and the packs none use, to select and switch off or uninstall. A [program](docs/DESKTOP.md#programs) on the Start menu |
 | Folders and tags | Installed packs grouped in folders of your own and tagged, from a pack's menu; `#tag` in the search lists a tag's packs |
 | Every `custom_nodes` folder | Packs in each `custom_nodes` path `extra_model_paths.yaml` adds are listed and managed where they are; new installs go to ComfyUI's first |
 | Themes | Gradients, icons, backdrops |

@@ -104,6 +104,25 @@ function ownerOf(node) {
   return { key: UNKNOWN, label: "Unknown pack" };
 }
 
+function typeOwner(type) {
+  const name = String(type || "");
+  const held = window.LiteGraph?.registered_node_types?.[name];
+  if (!held) return { kind: ABSENT, folder: "", module: "" };
+  const def = held.nodeData;
+  if (def && typeof def === "object") {
+    if (def.api_node === true) return { kind: PARTNER, folder: "", module: "" };
+    const module = String(def.python_module || "");
+    const folder = folderOf(module);
+    if (folder) return { kind: "pack", folder, module: module.slice("custom_nodes.".length) };
+    if (def.nodeSource?.type === "custom_nodes") return { kind: UNKNOWN, folder: "", module: "" };
+    return { kind: CORE, folder: "", module: "" };
+  }
+  const origin = origins.get(name);
+  if (origin) return { kind: "pack", folder: origin, module: origin };
+  if (origin === "") return { kind: CORE, folder: "", module: "" };
+  return { kind: "frontend", folder: "", module: "" };
+}
+
 function order(group) {
   if (group.key === ABSENT) return 0;
   if (group.key === UNKNOWN) return 2;
@@ -238,4 +257,4 @@ async function renderInUse(container) {
   await draw();
 }
 
-export { renderInUse, groupNodes, copyText, watchNodeOrigins };
+export { renderInUse, groupNodes, copyText, watchNodeOrigins, typeOwner };

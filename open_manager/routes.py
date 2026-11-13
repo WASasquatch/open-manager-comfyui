@@ -42,6 +42,7 @@ from . import (
     modellist,
     localnodes,
     monitor,
+    nodeaudit,
     nodemap,
     optional as optional_groups,
     pause as run_pause,
@@ -2699,6 +2700,19 @@ def register_routes() -> None:
         opened = body.get("open")
         found = await asyncio.to_thread(
             library.references, opened if isinstance(opened, list) else None)
+        return web.json_response(found)
+
+    @PromptServer.instance.routes.post(f"{PREFIX}/node-audit")
+    @_json_body
+    async def node_audit(request: web.Request, body: dict) -> web.Response:
+        """The node types every saved workflow and every open one uses."""
+        opened = body.get("open")
+        try:
+            user = str(PromptServer.instance.user_manager.get_request_user_id(request) or "default")
+        except Exception:  # noqa: BLE001
+            user = "default"
+        found = await asyncio.to_thread(
+            nodeaudit.audit, opened if isinstance(opened, list) else None, user)
         return web.json_response(found)
 
     @PromptServer.instance.routes.post(f"{PREFIX}/library/hash")

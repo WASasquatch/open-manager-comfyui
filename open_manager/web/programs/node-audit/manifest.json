@@ -1,0 +1,32 @@
+{
+  "id": "node-audit",
+  "name": "Node Audit",
+  "hint": "Which packs your workflows use, how often, and which they never do",
+  "tags": [
+    "audit",
+    "nodes",
+    "packs",
+    "workflows",
+    "usage",
+    "unused",
+    "missing",
+    "uninstall",
+    "cleanup"
+  ],
+  "version": "1.0.0",
+  "author": "Open Manager",
+  "icon": "node-audit.svg",
+  "surfaces": {
+    "desktop": false,
+    "start": true
+  },
+  "look": {
+    "tint": "teal"
+  },
+  "capabilities": [
+    "Reads saved and open workflows",
+    "Reads installed packs and their nodes",
+    "Names the packs missing nodes come from",
+    "Switches off or uninstalls packs"
+  ]
+}

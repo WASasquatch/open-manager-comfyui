@@ -128,6 +128,20 @@ function workflowGraph(workflow, active = !!workflow && workflow === activeWorkf
   return null;
 }
 
+function openWorkflowDocuments() {
+  const found = [];
+  for (const choice of workflowChoices()) {
+    const flow = choice.workflow;
+    const document = workflowGraph(flow, choice.active);
+    const label = flow?.path || choice.label;
+    if (document && label) {
+      found.push({ workflow: label, document,
+                   saved: !flow?.isTemporary, modified: !!flow?.isModified });
+    }
+  }
+  return found;
+}
+
 async function workflowDocument(workflow, active) {
   const held = workflowGraph(workflow, active);
   if (held) return held;
@@ -238,6 +252,11 @@ function watchActiveWorkflow(fn) {
   };
 }
 
+function apiPrompt(document) {
+  return !!document && typeof document === "object" && !Array.isArray(document.nodes)
+    && Object.values(document).some((one) => one && typeof one === "object" && typeof one.class_type === "string");
+}
+
 function storedWorkflow(held) {
   return !!held && typeof held === "object" && typeof held.path === "string"
     && (typeof held.load === "function" || "activeState" in held);
@@ -254,6 +273,11 @@ async function loadWorkflow(source, { title = null, replace = false } = {}) {
     if (!flow) return "missing";
     if (activePath() === flow.path) return "active";
     if (!flow.isLoaded) await flow.load();
+    if (apiPrompt(flow.activeState)) {
+      await app.handleFile(new File([JSON.stringify(flow.activeState)], flow.path.split("/").pop(),
+                                    { type: "application/json" }));
+      return "opened";
+    }
     await app.loadGraphData(flow.activeState, true, true, flow,
                             { checkForRerouteMigration: false });
     return "opened";
@@ -330,4 +354,4 @@ function watchTabStrip(paint) {
   return true;
 }
 
-export { watchTabStrip, workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, workflowDocument, workflowGraphById, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, loadWorkflow, openWorkflow };
+export { watchTabStrip, workflowStore, activeWorkflow, activePath, openWorkflows, savedWorkflows, workflowChoices, workflowMissing, workflowByPath, workflowGraph, openWorkflowDocuments, workflowDocument, workflowGraphById, activeWorkflowId, openWorkflowById, openWorkflowByPath, activeWorkflowPlace, workflowOfJob, watchActiveWorkflow, loadWorkflow, openWorkflow };

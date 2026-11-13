@@ -5,7 +5,7 @@ import { asWindow, windowSize, createFloatingPanel, floatingPanel, closeFloating
 import { panelSetting } from "./settings.mjs";
 import { sinceText, dropdown } from "./registry.mjs";
 import { bytesText, formatsOf, confirmDownloadTrust, confirmDiskRoom, queueModel, dlRemember, dlRecall, openDownloadManager, dirOf, modelRoots, preferredRoot } from "./downloads.mjs";
-import { workflowChoices, workflowGraph, openWorkflow } from "./workflows.mjs";
+import { openWorkflowDocuments, openWorkflow } from "./workflows.mjs";
 
 const LIB_MAX_ROWS = 300;
 
@@ -20,20 +20,6 @@ const libDiscoverPicked = new Set();
 
 async function libGet(path) {
   return (await api.fetchApi(`${API}${path}`)).json();
-}
-
-function openWorkflowDocuments() {
-  const found = [];
-  for (const choice of workflowChoices()) {
-    const flow = choice.workflow;
-    const document = workflowGraph(flow, choice.active);
-    const label = flow?.path || choice.label;
-    if (document && label) {
-      found.push({ workflow: label, document,
-                   saved: !flow?.isTemporary, modified: !!flow?.isModified });
-    }
-  }
-  return found;
 }
 
 async function libPost(path, body) {
