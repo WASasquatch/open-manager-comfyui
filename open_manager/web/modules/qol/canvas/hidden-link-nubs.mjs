@@ -9,10 +9,14 @@ const PILL_STEP = 22;
 const PILL_PAD = 6;
 const PILL_FONT = "11px sans-serif";
 const OUTLINE = "rgba(0, 0, 0, 0.55)";
+const SPLINE = 2;
+const STAND_IN = Object.freeze({ hidden: true });
 
 let live = false;
 let fault = null;
 let drawing = null;
+let everything = false;
+let visibleMode = null;
 let hidden = new Set();
 let native = new Set();
 let ends = new Map();
@@ -30,6 +34,10 @@ function presentationStore() {
 
 function canvasProto() {
   return window.LGraphCanvas?.prototype || null;
+}
+
+function allHidden(canvas) {
+  return canvas.links_render_mode === window.LiteGraph?.HIDDEN_LINK;
 }
 
 function scopeOf(graph) {
@@ -74,7 +82,12 @@ function filterHidden(original) {
   return function (scope) {
     const ids = original.call(this, scope);
     const canvas = drawing;
-    if (!canvas || !ids?.length || !canvas.graph) return ids;
+    if (!canvas || !canvas.graph) return ids;
+    if (everything) {
+      called = true;
+      return [...native];
+    }
+    if (!ids?.length) return ids;
     called = true;
     const graph = canvas.graph;
     const keep = [];
@@ -93,6 +106,49 @@ function filterHidden(original) {
   };
 }
 
+function standIn(original) {
+  return function (scope, id) {
+    const found = original.call(this, scope, id);
+    return found || !everything || !native.has(id) ? found : STAND_IN;
+  };
+}
+
+function everyLink(canvas) {
+  const graph = canvas.graph;
+  hidden = new Set();
+  native = new Set();
+  ends = new Map();
+  for (const node of graph.nodes ?? graph._nodes ?? []) {
+    const count = node.inputs?.length ?? 0;
+    for (let slot = 0; slot < count; slot += 1) {
+      const link = node.getInputLink?.(slot);
+      if (!link || linkReveal.links.has(link.id)) continue;
+      const where = endsOf(graph, link);
+      if (!where) continue;
+      hidden.add(link.id);
+      ends.set(link.id, where);
+      if (shown.has(link.id)) native.add(link.id);
+    }
+  }
+}
+
+function drawShown(canvas, ctx, inner, rest) {
+  if (!native.size || canvas.linkConnector?.isConnecting) return;
+  const mode = canvas.links_render_mode;
+  everything = true;
+  called = false;
+  canvas.links_render_mode = visibleMode ?? window.LiteGraph?.SPLINE_LINK ?? SPLINE;
+  ctx.save();
+  try {
+    inner.call(canvas, ctx, ...rest);
+  } finally {
+    ctx.restore();
+    canvas.links_render_mode = mode;
+    everything = false;
+  }
+  if (!called) fault?.("ComfyUI changed how hidden links are drawn");
+}
+
 function inView(point, area) {
   if (!area) return true;
   return point[0] > area[0] - 20 && point[0] < area[0] + area[2] + 20
@@ -102,7 +158,7 @@ function inView(point, area) {
 function paintNubs(canvas, ctx) {
   if (linkReveal.drawing) return;
   nubs = [];
-  if (!hidden.size || canvas.links_render_mode === window.LiteGraph?.HIDDEN_LINK) return;
+  if (!hidden.size) return;
   const graph = canvas.graph;
   const radius = window.LiteGraph?.vueNodesMode ? NUB_VUE : NUB;
   const drawn = new Set();
@@ -181,8 +237,19 @@ function install(store) {
   const drawConnections = proto.drawConnections;
   const renderSegments = proto._renderAllLinkSegments;
   const hiddenIds = store.graphHiddenLinkIds;
+  const presentation = store.getPresentation;
   proto.drawConnections = function (ctx, ...rest) {
     if (!live || this !== app.canvas) return drawConnections.call(this, ctx, ...rest);
+    if (linkReveal.drawing) {
+      drawing = this;
+      try {
+        return drawConnections.call(this, ctx, ...rest);
+      } finally {
+        drawing = null;
+      }
+    }
+    const all = allHidden(this);
+    if (!all) visibleMode = this.links_render_mode;
     drawing = this;
     hidden = new Set();
     native = new Set();
@@ -191,9 +258,17 @@ function install(store) {
     try {
       return drawConnections.call(this, ctx, ...rest);
     } finally {
+      if (all && this.graph) {
+        try {
+          everyLink(this);
+          drawShown(this, ctx, drawConnections, rest);
+        } catch {
+          fault?.("ComfyUI changed how hidden links are drawn");
+        }
+      }
       drawing = null;
       try { paintNubs(this, ctx); } catch {}
-      if (!called && this.graph && this.links_render_mode !== window.LiteGraph?.HIDDEN_LINK) {
+      if (!all && !called && this.graph) {
         let pending = [];
         try { pending = hiddenIds.call(store, scopeOf(this.graph)) || []; } catch {}
         if (pending.length) fault?.("ComfyUI changed how hidden links are drawn");
@@ -201,15 +276,17 @@ function install(store) {
     }
   };
   proto._renderAllLinkSegments = function (ctx, link, ...rest) {
-    if (drawing && link && hidden.has(link.id) && !native.has(link.id)) return undefined;
+    if (drawing && link && !native.has(link.id) && (everything || hidden.has(link.id))) return undefined;
     return renderSegments.call(this, ctx, link, ...rest);
   };
   store.graphHiddenLinkIds = filterHidden(hiddenIds);
+  store.getPresentation = standIn(presentation);
   document.addEventListener("pointermove", onMove, { capture: true, passive: true });
   return () => {
     proto.drawConnections = drawConnections;
     proto._renderAllLinkSegments = renderSegments;
     store.graphHiddenLinkIds = hiddenIds;
+    store.getPresentation = presentation;
     document.removeEventListener("pointermove", onMove, { capture: true });
   };
 }
