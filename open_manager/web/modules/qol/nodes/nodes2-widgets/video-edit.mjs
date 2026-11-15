@@ -1,6 +1,7 @@
 import {
-  GAP, MARGIN, button, comboPointer, commit, contain, contains, drawCombo, drawNumber, fitText, font, gesture,
-  local, numberPointer, redraw, rowHeight, screenScale, sized, skeleton, theme,
+  GAP, MARGIN, button, comboPointer, commit, contain, contains, drawCombo, drawHistory, drawNumber, fitText, font,
+  gesture, history, historyPointer, local, numberPointer, ownHistory, redraw, rowHeight, screenScale, sized,
+  skeleton, theme,
 } from "./kit.mjs";
 import { CUSTOM, RATIO_LABELS, RATIO_VALUES, TURN, bound, lockIcon, ratioIndex, shade } from "./crop-box.mjs";
 import {
@@ -272,7 +273,7 @@ function make(widget) {
   const rects = {
     preview: rect(), shown: rect(), box: rect(), retry: rect(), play: rect(), fullscreen: rect(),
     mute: rect(), slider: rect(), film: rect(), start: rect(), end: rect(), combo: rect(), lock: rect(),
-    crop: [rect(), rect(), rect(), rect()],
+    history: rect(), crop: [rect(), rect(), rect(), rect()],
   };
   const texts = {
     version: -1, trim: null, intrinsicWidth: -1, intrinsicHeight: -1, wide: -1, face: "",
@@ -290,6 +291,27 @@ function make(widget) {
   const wanted = { minHeight: 0, minWidth: MIN_WIDTH, maxHeight: undefined };
   const owner = { node: null, drop };
   const media = createMedia({ ready, reset, ended, entered, left, attached: () => enlist(owner) });
+  let seen;
+  let editing = false;
+  const kept = history(widget, () => widget.value, (node, value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    commit(node, widget, value);
+    seen = widget.value;
+  });
+
+  function settled(mergeKey) {
+    if (!ownHistory() || !view.node) return;
+    seen = widget.value;
+    kept.record(view.node, mergeKey);
+  }
+
+  function grip(pointer) {
+    editing = true;
+    gesture(pointer, () => {
+      editing = false;
+      settled();
+    });
+  }
 
   function trimOn() {
     const list = widget.options?.features;
@@ -521,6 +543,7 @@ function make(widget) {
     },
     set(next) {
       save(withStart(current(), media.meta, next));
+      settled("trim:start");
     },
   };
 
@@ -539,6 +562,7 @@ function make(widget) {
     },
     set(next) {
       save(withEnd(current(), media.meta, next));
+      settled("trim:end");
     },
   };
 
@@ -556,6 +580,7 @@ function make(widget) {
       const bounds = { x: crop.x, y: crop.y, width: crop.width, height: crop.height };
       bounds[key] = next;
       save(withCrop(current(), media.meta, bounds));
+      settled(`crop:${key}`);
     },
   }));
 
@@ -576,6 +601,7 @@ function make(widget) {
       if (!canLock(crop, meta.width, meta.height)) return;
       view.locked = RATIO_VALUES[index];
       save(withCrop(current(), meta, reshape(crop, view.locked, meta.width, meta.height)));
+      settled();
     },
   };
 
@@ -758,7 +784,10 @@ function make(widget) {
   function drawControls(ctx, x, y, w, state, colours, face, low) {
     const middle = y + CONTROLS / 2;
     const playX = x + CONTROL_PAD;
-    const muteX = x + w - CONTROL_PAD - BUTTON;
+    const right = x + w - CONTROL_PAD;
+    const shows = ownHistory();
+    const historyX = shows ? right - BUTTON * 2 : right;
+    const muteX = (shows ? historyX - CONTROL_GAP : right) - BUTTON;
     const fullX = muteX - CONTROL_GAP - BUTTON;
     const timeX = playX + BUTTON + CONTROL_GAP;
     const sliderX = timeX + texts.timeWidth + CONTROL_GAP;
@@ -766,7 +795,9 @@ function make(widget) {
     place(rects.play, playX, middle - BUTTON / 2, BUTTON, BUTTON);
     place(rects.fullscreen, fullX, middle - BUTTON / 2, BUTTON, BUTTON);
     place(rects.mute, muteX, middle - BUTTON / 2, BUTTON, BUTTON);
+    place(rects.history, historyX, middle - BUTTON / 2, shows ? BUTTON * 2 : 0, BUTTON);
     place(rects.slider, sliderX, y, sliderW, CONTROLS);
+    if (shows) drawHistory(ctx, historyX, middle - BUTTON / 2, BUTTON, kept.state(view.node), low);
     const alpha = ctx.globalAlpha;
     const base = view.loading || state.frameMax <= 0 ? alpha * DIMMED : alpha;
     const fraction = bound(view.playhead / Math.max(state.frameMax, 1), 0, 1);
@@ -942,6 +973,10 @@ function make(widget) {
 
   function draw(ctx, node, width, y, height, low) {
     attach(node);
+    if (widget.value !== seen && !editing && ownHistory()) {
+      seen = widget.value;
+      kept.adopt(node);
+    }
     const colours = theme();
     const trim = trimOn();
     const crop = cropOn();
@@ -1051,7 +1086,7 @@ function make(widget) {
       if (sameCrop(next.crop, current().crop)) return;
       if (!grouped) {
         grouped = true;
-        gesture(pointer);
+        grip(pointer);
       }
       save(next);
     };
@@ -1112,7 +1147,7 @@ function make(widget) {
       if (!next) return;
       if (!grouped) {
         grouped = true;
-        gesture(pointer);
+        grip(pointer);
       }
       save(next);
     };
@@ -1176,6 +1211,8 @@ function make(widget) {
       pointer.onClick = () => media.setMuted(!media.muted);
       return true;
     }
+    const buttons = rects.history;
+    if (buttons[2] > 0 && historyPointer(pointer, node, buttons[0], buttons[1], buttons[3], kept)) return true;
     if (inside(rects.slider, px, py)) return sliderDown(pointer, node, px);
     if (trimOn()) {
       if (inside(rects.film, px, py)) return filmDown(pointer, node, px, py);

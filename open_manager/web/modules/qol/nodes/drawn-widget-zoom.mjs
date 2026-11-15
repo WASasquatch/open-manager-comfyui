@@ -75,7 +75,7 @@ export default {
     + "draws at its node's own width.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.59.1",
   check() {
     if (!window.LiteGraph) return "the canvas is not ready";
     if (!canWatchMounts()) return "ComfyUI's Vue app changed";

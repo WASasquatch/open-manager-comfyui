@@ -297,7 +297,7 @@ export default {
   tooltip: "A hidden link shows a small nub on each node's edge. Its type label appears on hover.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const proto = canvasProto();
     if (typeof proto?.drawConnections !== "function"

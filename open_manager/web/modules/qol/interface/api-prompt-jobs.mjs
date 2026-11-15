@@ -156,7 +156,7 @@ export default {
   tooltip: "Jobs queued with only an API prompt open as a laid-out workflow.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof window.LiteGraph?.LGraph !== "function"

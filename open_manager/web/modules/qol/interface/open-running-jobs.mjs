@@ -72,7 +72,7 @@ export default {
     + "are brought up to date when it finishes.",
   issues: ["Comfy-Org/ComfyUI#14995", "Comfy-Org/ComfyUI_frontend#9101"],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (typeof api?.getJobDetail !== "function") return "ComfyUI's job details are not reachable";
     if (typeof api?.addEventListener !== "function") return "ComfyUI's api is not reachable";

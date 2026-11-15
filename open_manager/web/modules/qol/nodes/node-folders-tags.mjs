@@ -293,7 +293,7 @@ export default {
     + "node names, and #tag in node search.",
   issues: ["WASasquatch/open-manager-comfyui#34"],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const app = vueApp();
     if (typeof app?.mixin !== "function" || !Array.isArray(app._context?.mixins)) {

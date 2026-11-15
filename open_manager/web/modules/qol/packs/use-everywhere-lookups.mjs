@@ -12,7 +12,7 @@ export default {
     + "the nodes already found.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     return typeof Document.prototype.querySelector === "function" ? "" : "this browser cannot be patched";
   },

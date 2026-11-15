@@ -27,7 +27,7 @@ export default {
     + "shade of the palette's panel colour.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (!palettes()) return "ComfyUI's colour palettes are not reachable";
     return typeof MutationObserver === "function" ? "" : "the page is not ready";

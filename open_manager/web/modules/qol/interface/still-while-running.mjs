@@ -76,7 +76,7 @@ export default {
     + "hold still until the queue is empty.",
   issues: ["Comfy-Org/ComfyUI_frontend#14599"],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (typeof document.getAnimations !== "function") return "this browser cannot list animations";
     if (typeof api?.addEventListener !== "function") return "ComfyUI's api is not reachable";

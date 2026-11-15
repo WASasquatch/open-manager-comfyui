@@ -125,7 +125,7 @@ export default {
     "Comfy-Org/ComfyUI_frontend#19548",
   ],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const proto = window.LiteGraph?.LGraphNode?.prototype;
     if (!proto) return "the canvas is not ready";

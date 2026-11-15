@@ -220,7 +220,7 @@ export default {
   tooltip: "Results build as they scroll into view.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const app = vueApp();
     if (typeof app?.mixin !== "function" || !Array.isArray(app._context?.mixins)) {

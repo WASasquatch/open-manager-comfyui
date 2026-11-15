@@ -44,7 +44,7 @@ export default {
     + "while the node shows any image but its first. On, they act on the image shown.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const store = outputStore();
     if (store) return typeof store[ACTION] === "function" ? "" : CHANGED;

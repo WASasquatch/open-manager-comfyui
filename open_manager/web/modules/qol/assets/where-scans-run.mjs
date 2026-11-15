@@ -52,7 +52,7 @@ export default {
   issues: [],
   options: ["Alongside the server", "Before the server starts", "In their own process"],
   defaultValue: "In their own process",
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (typeof api?.fetchApi !== "function") return "ComfyUI's api is not reachable";
     return "";

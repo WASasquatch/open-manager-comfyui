@@ -21,7 +21,7 @@ export default {
     + "filters. On, the frame is sized to its contents.",
   issues: ["Comfy-Org/ComfyUI_frontend#14590"],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.59.1",
   check() {
     return "";
   },

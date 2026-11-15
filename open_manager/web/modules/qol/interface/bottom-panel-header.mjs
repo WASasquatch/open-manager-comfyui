@@ -26,7 +26,7 @@ export default {
     + "panel Logs opens in. On, only the line under the header shows.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     return "";
   },

@@ -39,7 +39,7 @@ export default {
     + "corners, in place of floating over the canvas.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const split = document.querySelector(SPLIT);
     if (split && !GUTTERS.some((name) => split.classList.contains(name))) {

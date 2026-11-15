@@ -10,7 +10,7 @@ export default {
   name: "Ask before downloading template media",
   tooltip: "Opening a template offers the media files it is missing in place of downloading them.",
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check: ready,
   on(track, standDown) {
     track(claim("ask", standDown));

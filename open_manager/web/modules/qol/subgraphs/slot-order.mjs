@@ -213,7 +213,7 @@ export default {
     + "using the subgraph takes the new order and keeps its links.",
   issues: ["Comfy-Org/ComfyUI_frontend#4195"],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (!app.canvas?.canvas?.addEventListener) return "the canvas is not ready";
     return "";

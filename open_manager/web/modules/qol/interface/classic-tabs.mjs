@@ -36,7 +36,7 @@ export default {
     + "in place of rounded buttons.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const tab = document.querySelector(TAB);
     if (tab && flat(tab) && flat(tab.querySelector(`:scope > ${FACE}`))

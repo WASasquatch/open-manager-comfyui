@@ -62,6 +62,10 @@ const ICON_MAX = 16;
 
 const STORE_RETRY = 2000;
 
+const OWN_HISTORY_SINCE = [1, 59];
+
+let ownHistoryKnown;
+
 let historyPaths = null;
 
 let historyFound = null;
@@ -338,6 +342,20 @@ function historyCapable() {
   const props = document.querySelector("#vue-app")?.__vue_app__?.config?.globalProperties;
   historyKnown = typeof props?.$te === "function" && props.$te("widgetHistory.undo") === true;
   return historyKnown;
+}
+
+function frontendAtLeast(since) {
+  const parts = String(window.__COMFYUI_FRONTEND_VERSION__ || "").split(".").map(Number);
+  for (let i = 0; i < since.length; i += 1) {
+    const have = parts[i] || 0;
+    if (have !== since[i]) return have > since[i];
+  }
+  return true;
+}
+
+function ownHistory() {
+  if (ownHistoryKnown === undefined) ownHistoryKnown = frontendAtLeast(OWN_HISTORY_SINCE);
+  return ownHistoryKnown && historyCapable();
 }
 
 function plain(value) {
@@ -886,7 +904,7 @@ export {
   MARGIN, GAP, theme, rowHeight, font, measure, fitText, rowText, centreText, roundRect, pill,
   arrows, button, card, skeleton, clamp, contains, contain, local, hoverPoint, redraw, commit,
   gesture, undoable, prompt, menu, locator, output, link, source, sourceImage, viewUrl, image,
-  imageFailed, screenScale, sized, drawNumber, history, historyWidth, drawHistory, historyPointer,
+  imageFailed, screenScale, sized, drawNumber, history, historyWidth, drawHistory, historyPointer, ownHistory,
   numberPointer, drawCombo, comboPointer, drawSegments, segmentAt, drawField, pickColour,
   swatchRow,
 };

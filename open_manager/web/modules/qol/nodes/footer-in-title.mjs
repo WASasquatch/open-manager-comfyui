@@ -142,7 +142,7 @@ export default {
     + "title bar in place of tabs hanging below the node.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     return typeof MutationObserver === "function" ? "" : "this browser cannot watch the nodes";
   },

@@ -1,6 +1,6 @@
 import {
-  GAP, MARGIN, button, centreText, comboPointer, commit, contain, contains, drawCombo, gesture, image,
-  imageFailed, local, redraw, rowHeight, theme,
+  GAP, MARGIN, button, centreText, comboPointer, commit, contain, contains, drawCombo, drawHistory, gesture,
+  history, historyPointer, historyWidth, image, imageFailed, local, ownHistory, redraw, rowHeight, theme,
 } from "./kit.mjs";
 import { CUSTOM, RATIO_LABELS, RATIO_VALUES, TURN, lockIcon, ratioIndex, shade } from "./crop-box.mjs";
 import { fitToRatio, heightOf, widthOf, ratioOf, shiftCrop, stretchCrop } from "./image-crop-math.mjs";
@@ -41,6 +41,26 @@ const DEFAULT_BOUNDS = Object.freeze({ x: 0, y: 0, width: 512, height: 512 });
 const LOCKED = Object.freeze({ active: true });
 
 const UNLOCKED = Object.freeze({ active: false });
+
+const FIELDS = ["x", "y", "width", "height"];
+
+function snapshot(value) {
+  return { x: value.x, y: value.y, width: value.width, height: value.height };
+}
+
+function changedField(before, after) {
+  let found = null;
+  for (const key of FIELDS) {
+    if (before[key] === after[key]) continue;
+    if (found) return undefined;
+    found = key;
+  }
+  return found ?? undefined;
+}
+
+function sameBounds(a, b) {
+  return FIELDS.every((key) => a[key] === b[key]);
+}
 
 function inputSource(node) {
   let source = node.getInputNode?.(0);
@@ -114,12 +134,40 @@ function make(widget) {
     box: [0, 0, 0, 0],
     combo: [0, 0, 0, 0],
     lock: [0, 0, 0, 0],
+    historyX: -1,
   };
   const wanted = { minHeight: 0, minWidth: MIN_WIDTH, maxHeight: undefined };
+  let seen = null;
+  let editing = false;
+  const kept = history(widget, () => widget.value, (node, value) => {
+    if (!value || typeof value !== "object") return;
+    commit(node, widget, { ...value });
+    seen = snapshot(bounds());
+  });
 
   function bounds() {
     const value = widget.value;
     return value && typeof value === "object" ? value : DEFAULT_BOUNDS;
+  }
+
+  function settled(node) {
+    if (!ownHistory() || !node) return;
+    seen = snapshot(bounds());
+    kept.record(node);
+  }
+
+  function track(node) {
+    if (editing || !ownHistory()) return;
+    const value = bounds();
+    if (!seen) {
+      seen = snapshot(value);
+      kept.adopt(node);
+      return;
+    }
+    if (sameBounds(seen, value)) return;
+    const key = changedField(seen, value);
+    seen = snapshot(value);
+    kept.record(node, key);
   }
 
   function write(fields) {
@@ -141,6 +189,7 @@ function make(widget) {
     }
     state.locked = RATIO_VALUES[index];
     write(fitToRatio(bounds(), state.locked, state.imageHeight));
+    settled(state.node);
     redraw();
   }
 
@@ -221,11 +270,15 @@ function make(widget) {
   function drawRatio(ctx, x, y, w, row, colours, low) {
     const combo = state.combo;
     const lock = state.lock;
+    const room = historyWidth();
+    const shows = ownHistory() && w - room - row - ROW_GAP * 2 >= row;
+    state.historyX = shows ? x + w - room : -1;
+    const right = shows ? state.historyX - ROW_GAP : x + w;
     combo[0] = x;
     combo[1] = y;
-    combo[2] = Math.max(0, w - row - ROW_GAP);
+    combo[2] = Math.max(0, right - x - row - ROW_GAP);
     combo[3] = row;
-    lock[0] = x + w - row;
+    lock[0] = right - row;
     lock[1] = y;
     lock[2] = row;
     lock[3] = row;
@@ -233,10 +286,12 @@ function make(widget) {
     drawCombo(ctx, combo[0], y, combo[2], row, "Ratio", RATIO_LABELS[ratioIndex(state.locked)], low);
     button(ctx, lock[0], y, row, row, "", low, locked ? LOCKED : UNLOCKED);
     if (!low) lockIcon(ctx, lock[0] + row / 2, y + row / 2, row * 0.6, !locked, colours.text);
+    if (shows) drawHistory(ctx, state.historyX, y, row, kept.state(state.node), low);
   }
 
   function draw(ctx, node, width, y, height, low) {
     state.node = node;
+    track(node);
     const colours = theme();
     const disabled = !!widget.computedDisabled;
     const row = rowHeight();
@@ -261,6 +316,7 @@ function make(widget) {
     else if (!low) drawEmpty(ctx, colours);
     state.controls = !disabled;
     if (!disabled) drawRatio(ctx, x, y + areaHeight + ROW_GAP, w, row, colours, low);
+    else state.historyX = -1;
   }
 
   function pointerDown(pointer, node) {
@@ -275,6 +331,9 @@ function make(widget) {
       }
       if (contains(lock[0], lock[1], lock[2], lock[3], px, py)) {
         pointer.onClick = toggleLock;
+        return true;
+      }
+      if (state.historyX >= 0 && historyPointer(pointer, node, state.historyX, combo[1], combo[3], kept)) {
         return true;
       }
     }
@@ -299,7 +358,11 @@ function make(widget) {
         : stretchCrop(mode, start, dx, dy, state.imageWidth, state.imageHeight, state.locked);
       if (!grouped) {
         grouped = true;
-        gesture(pointer);
+        editing = true;
+        gesture(pointer, () => {
+          editing = false;
+          settled(node);
+        });
       }
       write(fields);
     };

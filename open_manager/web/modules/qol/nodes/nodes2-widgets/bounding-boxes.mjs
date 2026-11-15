@@ -284,7 +284,7 @@ function make(widget) {
     regions = value.map((one) => region(one.x, one.y, one.w, one.h, one.type === "text" ? "text" : "obj",
       typeof one.text === "string" ? one.text : "", typeof one.desc === "string" ? one.desc : "",
       Array.isArray(one.palette) ? one.palette.filter((colour) => typeof colour === "string") : []));
-    active = Math.min(active, regions.length - 1);
+    active = Math.min(Math.max(active, regions.length ? 0 : -1), regions.length - 1);
     sync(node);
   }
 

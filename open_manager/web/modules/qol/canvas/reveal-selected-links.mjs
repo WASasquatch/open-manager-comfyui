@@ -132,7 +132,7 @@ export default {
     + "the nodes are selected.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const proto = canvasProto();
     if (typeof proto?.draw !== "function" || typeof proto?.drawConnections !== "function"

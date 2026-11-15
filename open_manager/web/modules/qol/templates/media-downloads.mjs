@@ -11,7 +11,7 @@ export default {
     + "template is open. Never: left to the Download Manager.",
   options: ["Always", "Ask", "Never"],
   defaultValue: "Ask",
-  verified: "1.58.5",
+  verified: "1.59.1",
   check: ready,
   on(track, standDown, choice) {
     if (choice === "Never") track(claim("never", standDown));

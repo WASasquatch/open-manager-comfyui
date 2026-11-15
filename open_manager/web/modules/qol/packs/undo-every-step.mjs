@@ -12,7 +12,7 @@ export default {
     + "On, ComfyUI gets that result back.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     const proto = Object.getPrototypeOf(app);
     return typeof proto?.[LOADER] === "function" && typeof app.loadGraphData === "function"

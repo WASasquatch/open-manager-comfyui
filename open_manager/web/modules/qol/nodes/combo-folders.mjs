@@ -427,7 +427,7 @@ export default {
     + "opens as a submenu, and typing still searches every file.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     return document.body && typeof MutationObserver === "function" ? "" : "the page is not ready";
   },

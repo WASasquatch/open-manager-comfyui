@@ -41,7 +41,7 @@ export default {
     + "own tab. On, the box shows only inside a subgraph, where it carries the path back out.",
   issues: ["Comfy-Org/ComfyUI_frontend#7019", "Comfy-Org/ComfyUI_frontend#6104"],
   defaultValue: false,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (!window.LiteGraph || !app.canvas) return "the canvas is not ready";
     return "";

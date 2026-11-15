@@ -27,7 +27,7 @@ export default {
     + "flickers between two layouts while the preview meets the canvas edge. On, it holds still.",
   issues: [],
   defaultValue: true,
-  verified: "1.58.5",
+  verified: "1.59.1",
   check() {
     if (!canWatchMounts()) return "ComfyUI's Vue app changed";
     if (!globalThis.CSS?.supports?.("content-visibility", "auto")) {

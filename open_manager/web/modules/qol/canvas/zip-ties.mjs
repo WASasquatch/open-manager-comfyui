@@ -19,7 +19,7 @@ export default {
     + "that link's output to another input, through the tie.",
   issues: [],
   defaultValue: true,
-  verified: "1.57.4",
+  verified: "1.59.1",
   check() {
     const proto = canvasProto();
     if (typeof proto?.drawConnections !== "function" || typeof proto?.renderLink !== "function") {
